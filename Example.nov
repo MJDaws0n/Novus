@@ -5,81 +5,61 @@
 // - you can still write raw-ish instructions
 // - Win32 calls are made via extern declarations (FFI) OR raw push/call
 //
-// NOTE: This is a *spec/example* of what your language could look like.
-// Your compiler would lower it to x86 assembly and then assemble/link into a real .exe.
+// NOTE: This is a *spec/example* of what the language could look like.
+// THe compiler would lower it to x86 assembly and then assemble/link into a real .exe.
 
-module hello_win32
+module hello_win32;
 
 // --- "Fake" import/module to represent Win32 API bindings ---
 // In the real project, you'd ship a small `win32` module (or header file)
 // that declares extern functions and constants.
-import win32
+import win32;
 
-fn Print(msg: str) -> void {
-    // Win32: HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE)
-    let h: u32 = win32.GetStdHandle(win32.STD_OUTPUT_HANDLE)
+fn print(msg: str) -> void {
+    // Add new line
+    str = str + '\r\n';
 
-    // DWORD written = 0
-    let written: u32 = 0
+    // Win32: HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    let h: u32 = win32.GetStdHandle(win32.STD_OUTPUT_HANDLE);
+
+    // DWORD written = 0;
+    let written: u32 = 0;
 
     // BOOL ok = WriteFile(h, msg.ptr, msg.len, &written, 0)
     //
     // Raw-ish stdcall sequence:
     // push lpOverlapped (NULL)
-    push 0
+    push(0);
 
     // push lpNumberOfBytesWritten (&written)
-    lea eax, written
-    push eax
+    lea(eax, written);
+    push(eax);
 
     // push nNumberOfBytesToWrite (msg.len)
-    push len(msg)
+    push(len(msg));
 
     // push lpBuffer (msg.ptr)
-    lea eax, msg
-    push eax
+    lea(eax, msg);
+    push(eax);
 
     // push hFile (h)
-    push h
+    push(h);
 
     // call WriteFile
-    call win32.WriteFile
+    call(win32.WriteFile);
 
-    ret
+    ret();
 }
 
 fn main() -> i32 {
     // A string literal: compiler places it in .rdata and gives it a label.
-    let msg: str = "Hello, World!\r\n"
+    let msg: str = "Hello, World!";
 
-    Print(msg)
+    print(msg);
 
     // ExitProcess(0)
-    push 0
-    call win32.ExitProcess
+    push(0);
+    call(win32.ExitProcess);
 
     return 0
 }
-
-// --- win32 module sketch ---
-// Your compiler/runtime doesn't need to implement Win32.
-// It just needs to:
-// - emit extern symbols, and
-// - link against import libraries / generate an import table.
-//
-// A minimal `win32` module could look like this:
-//
-// module win32
-//
-// const STD_OUTPUT_HANDLE: i32 = -11
-//
-// extern "stdcall" fn GetStdHandle(nStdHandle: i32) -> u32
-// extern "stdcall" fn WriteFile(
-//     hFile: u32,
-//     lpBuffer: *u8,
-//     nNumberOfBytesToWrite: u32,
-//     lpNumberOfBytesWritten: *u32,
-//     lpOverlapped: u32
-// ) -> i32
-//
-// extern "stdcall" fn ExitProcess(exitCode: u32) -> void
