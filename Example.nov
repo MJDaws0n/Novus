@@ -61,5 +61,5 @@ fn main() -> i32 {
     push(0);
     call(win32.ExitProcess);
 
-    return 0
+    return 0;
 }
