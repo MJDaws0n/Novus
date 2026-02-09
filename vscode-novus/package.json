@@ -1,0 +1,30 @@
+{
+  "name": "novus-language-support",
+  "displayName": "Novus Language Support",
+  "description": "Basic syntax highlighting for the Novus language (.nov)",
+  "version": "0.0.1",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "novus",
+        "aliases": ["Novus", "novus"],
+        "extensions": [".nov"],
+        "configuration": "./language-configuration/novus.language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "novus",
+        "scopeName": "source.novus",
+        "path": "./syntaxes/novus.tmLanguage.json"
+      }
+    ]
+  }
+}

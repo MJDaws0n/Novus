@@ -1,0 +1,205 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Novus",
+  "scopeName": "source.novus",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#builtins" },
+    { "include": "#memberAccess" },
+    { "include": "#functionCall" },
+    { "include": "#functionDecl" },
+    { "include": "#moduleDecl" },
+    { "include": "#importDecl" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.novus",
+          "begin": "//",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.comment.novus" }
+          },
+          "end": "$\\n?",
+          "patterns": []
+        },
+        {
+          "name": "comment.block.novus",
+          "begin": "/\\*",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.comment.begin.novus" }
+          },
+          "end": "\\*/",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.comment.end.novus" }
+          }
+        }
+      ]
+    },
+
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.novus",
+          "begin": "\"",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.novus" }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.novus" }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.novus",
+              "match": "\\\\(\\\\|\"|'|n|r|t|0|x[0-9A-Fa-f]{2}|u\u007b[0-9A-Fa-f]+\u007d)"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.novus",
+          "begin": "'",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.novus" }
+          },
+          "end": "'",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.novus" }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.novus",
+              "match": "\\\\(\\\\|\"|'|n|r|t|0|x[0-9A-Fa-f]{2}|u\u007b[0-9A-Fa-f]+\u007d)"
+            }
+          ]
+        }
+      ]
+    },
+
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.hex.novus", "match": "\\b0[xX][0-9A-Fa-f]+\\b" },
+        { "name": "constant.numeric.binary.novus", "match": "\\b0[bB][01]+\\b" },
+        { "name": "constant.numeric.decimal.novus", "match": "\\b\\d+(?:\\.\\d+)?\\b" }
+      ]
+    },
+
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.novus",
+          "match": "\\b(if|else|for|while|break|continue|return)\\b"
+        },
+        {
+          "name": "keyword.declaration.novus",
+          "match": "\\b(module|import|fn|let|const|struct|enum|type|extern)\\b"
+        },
+        {
+          "name": "constant.language.novus",
+          "match": "\\b(true|false|null)\\b"
+        }
+      ]
+    },
+
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.novus",
+          "match": "\\b(void|bool|str|i8|i16|i32|i64|u8|u16|u32|u64)\\b"
+        }
+      ]
+    },
+
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.novus",
+          "match": "\\b(push|pop|call|ret|lea|mov|add|sub|mul|imul|div|idiv|and|or|xor|not|cmp|test|jmp|je|jne|jg|jge|jl|jle|ja|jae|jb|jbe)\\b(?=\\s*\\()"
+        },
+        {
+          "name": "variable.language.register.novus",
+          "match": "\\b(eax|ebx|ecx|edx|esi|edi|esp|ebp)\\b"
+        }
+      ]
+    },
+
+    "memberAccess": {
+      "patterns": [
+        {
+          "name": "meta.member.access.call.novus",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(\\.)\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+          "captures": {
+            "1": { "name": "entity.name.namespace.novus" },
+            "2": { "name": "punctuation.accessor.dot.novus" },
+            "3": { "name": "entity.name.function.member.novus" }
+          }
+        },
+        {
+          "name": "meta.member.access.novus",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(\\.)\\s*([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "entity.name.namespace.novus" },
+            "2": { "name": "punctuation.accessor.dot.novus" },
+            "3": { "name": "variable.other.member.novus" }
+          }
+        }
+      ]
+    },
+
+    "functionCall": {
+      "patterns": [
+        {
+          "name": "meta.function-call.novus",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+          "captures": {
+            "1": { "name": "entity.name.function.call.novus" }
+          }
+        }
+      ]
+    },
+
+    "functionDecl": {
+      "patterns": [
+        {
+          "name": "meta.function.novus",
+          "begin": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "beginCaptures": {
+            "1": { "name": "keyword.declaration.function.novus" },
+            "2": { "name": "entity.name.function.novus" }
+          },
+          "end": "(?=\\{|;)"
+        }
+      ]
+    },
+
+    "moduleDecl": {
+      "patterns": [
+        {
+          "name": "meta.module.novus",
+          "match": "\\b(module)\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)\\s*;",
+          "captures": {
+            "1": { "name": "keyword.declaration.module.novus" },
+            "2": { "name": "entity.name.namespace.novus" }
+          }
+        }
+      ]
+    },
+
+    "importDecl": {
+      "patterns": [
+        {
+          "name": "meta.import.novus",
+          "match": "\\b(import)\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)\\s*;",
+          "captures": {
+            "1": { "name": "keyword.declaration.import.novus" },
+            "2": { "name": "entity.name.namespace.novus" }
+          }
+        }
+      ]
+    }
+  }
+}

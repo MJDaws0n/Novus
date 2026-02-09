@@ -18,6 +18,11 @@ func main() {
 	fmt.Println("Made by MJDawson. https://mjdawson.net & https://github.com/MJDaws0n")
 	printDebug("Using debug mode.")
 
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: novus <file>")
+		os.Exit(1)
+	}
+
 	// Get file to compile
 	var filePath string = os.Args[1]
 	printDebug("Building using: " + filePath)
@@ -42,7 +47,14 @@ func main() {
 	}
 
 	printDebug("Starting lexing process...")
-	var tokens = lexer.Lex(fileContent)
+	tokens, lexErrors := lexer.Lex(fileContent)
+	if len(lexErrors) > 0 {
+		fmt.Println("Lexing errors:")
+		for _, e := range lexErrors {
+			fmt.Printf("  %s\n", e.Error())
+		}
+		os.Exit(1)
+	}
 	printTokens(tokens)
 }
 
