@@ -65,8 +65,10 @@ type ModuleDecl struct {
 func (n *ModuleDecl) GetPos() Position { return n.Pos }
 
 type ImportDecl struct {
-	Name string
-	Pos  Position
+	Path      string   // e.g. "standard_lib" or "test/cool/standard_lib" (no .nov extension)
+	Alias     string   // optional alias: import standard_lib std → Alias="std", empty string = direct access
+	SelectFns []string // optional selective imports: import foo[bar, baz] → SelectFns=["bar","baz"]
+	Pos       Position
 }
 
 func (n *ImportDecl) GetPos() Position { return n.Pos }
@@ -79,10 +81,12 @@ type Param struct {
 	Pos     Position
 }
 
-// TypeExpr represents a type annotation such as "i32", "str", "void".
+// TypeExpr represents a type annotation such as "i32", "str", "void", "[]i32".
 type TypeExpr struct {
-	Name string
-	Pos  Position
+	Name     string // e.g. "i32", "[]i32"
+	IsArray  bool   // true for array types like []i32
+	ElemName string // element type name for arrays (e.g. "i32" for []i32)
+	Pos      Position
 }
 
 type FnDecl struct {
@@ -316,6 +320,15 @@ type AddressOfExpr struct {
 func (n *AddressOfExpr) GetPos() Position { return n.Pos }
 func (n *AddressOfExpr) exprNode()        {}
 
+// ArrayLitExpr: [expr, expr, ...] or [] (empty array literal)
+type ArrayLitExpr struct {
+	Elems []Expr
+	Pos   Position
+}
+
+func (n *ArrayLitExpr) GetPos() Position { return n.Pos }
+func (n *ArrayLitExpr) exprNode()        {}
+
 // ---------------------------------------------------------------------------
 // Debug printer – produces a human-readable tree representation
 // ---------------------------------------------------------------------------
@@ -343,7 +356,14 @@ func debugProgram(b *strings.Builder, prog *Program, level int) {
 	}
 	for _, imp := range prog.Imports {
 		writeIndent(b, level+1)
-		fmt.Fprintf(b, "Import: %s\n", imp.Name)
+		info := imp.Path
+		if len(imp.SelectFns) > 0 {
+			info += "[" + strings.Join(imp.SelectFns, ", ") + "]"
+		}
+		if imp.Alias != "" {
+			info += " as " + imp.Alias
+		}
+		fmt.Fprintf(b, "Import: %s\n", info)
 	}
 	for _, fn := range prog.Functions {
 		debugFnDecl(b, fn, level+1)
@@ -489,6 +509,12 @@ func ExprString(e Expr) string {
 		return fmt.Sprintf("(%s)", ExprString(e.Expression))
 	case *AddressOfExpr:
 		return fmt.Sprintf("(&%s)", ExprString(e.Operand))
+	case *ArrayLitExpr:
+		elems := make([]string, len(e.Elems))
+		for i, el := range e.Elems {
+			elems[i] = ExprString(el)
+		}
+		return fmt.Sprintf("[%s]", strings.Join(elems, ", "))
 	default:
 		return "<unknown expr>"
 	}

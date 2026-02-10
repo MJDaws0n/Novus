@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"novus/internal/ast"
 	"novus/internal/codegen"
+	"novus/internal/imports"
 	"novus/internal/lexer"
 	"novus/internal/parser"
 	"novus/internal/semantic"
@@ -12,6 +13,8 @@ import (
 )
 
 const VERSION = "0.1.0"
+
+var debugMode = false
 
 func main() {
 	start := time.Now()
@@ -23,6 +26,14 @@ func main() {
 }
 
 func run() int {
+	// Check for --debug flag early.
+	for _, arg := range os.Args[1:] {
+		if arg == "--debug" {
+			debugMode = true
+			break
+		}
+	}
+
 	// Inititial print statements
 	fmt.Println("Novus Compiler V" + VERSION)
 	fmt.Println("Made by MJDawson. https://mjdawson.net & https://github.com/MJDaws0n")
@@ -90,12 +101,49 @@ func run() int {
 	}
 	printDebug("Parsing complete. No errors.")
 	printDebug("--- AST ---")
-	fmt.Print(ast.DebugString(program))
+	printDebug(ast.DebugString(program))
 	printDebug("--- End AST ---")
+
+	// --- Import resolution ---
+	var importedFuncs []semantic.ImportedFunc
+	if len(program.Imports) > 0 {
+		printDebug("Resolving imports...")
+		resolver := imports.NewResolver(filePath)
+		mergedProgram, resolveErrors := resolver.Resolve(program, filePath)
+		if len(resolveErrors) > 0 {
+			fmt.Println("Import errors:")
+			for _, e := range resolveErrors {
+				fmt.Printf("  %s\n", e.Error())
+			}
+			return 1
+		}
+
+		// Check for alias conflicts (same function name under same alias from different files).
+		if conflictErrors := resolver.CheckAliasConflicts(); len(conflictErrors) > 0 {
+			fmt.Println("Import errors:")
+			for _, e := range conflictErrors {
+				fmt.Printf("  %s\n", e.Error())
+			}
+			return 1
+		}
+
+		// Build the imported function metadata for semantic analysis.
+		for _, mod := range resolver.GetModules() {
+			for _, fn := range mod.Functions {
+				importedFuncs = append(importedFuncs, semantic.ImportedFunc{
+					Fn:    fn,
+					Alias: mod.Alias,
+				})
+			}
+		}
+
+		program = mergedProgram
+		printDebug(fmt.Sprintf("Import resolution complete. %d imported functions.", len(importedFuncs)))
+	}
 
 	// --- Semantic analysis ---
 	printDebug("Starting semantic analysis...")
-	diagnostics := semantic.Analyze(program)
+	diagnostics := semantic.AnalyzeWithImports(program, importedFuncs)
 
 	// Separate warnings and errors.
 	var semWarnings, semErrors []semantic.Diagnostic
@@ -129,7 +177,7 @@ func run() int {
 	printDebug("Starting code generation...")
 
 	codegenOpts := codegen.DefaultOptions()
-	codegenOpts.Verbose = true
+	codegenOpts.Verbose = debugMode
 
 	// Check for --asm-only flag.
 	for _, arg := range os.Args[1:] {
@@ -202,9 +250,15 @@ func splitTarget(s string) []string {
 * @param message The message to print.
  */
 func printDebug(message string) {
+	if !debugMode {
+		return
+	}
 	fmt.Println("[DEBUG] " + message)
 }
 func printTokens(tokens []lexer.Token) {
+	if !debugMode {
+		return
+	}
 	for _, token := range tokens {
 		fmt.Printf("[DEBUG] Token: %s, Value: %s, Line: %d, Column: %d\n", token.Type, token.Value, token.Line, token.Column)
 	}

@@ -13,7 +13,7 @@ import (
 //
 // Virtual registers and local variables are placed in the stack frame.
 // Slot N is at [x29 - (N+1)*8].  For offsets outside the ldur/stur
-// range of [-256, 255], we use x9 as a scratch to compute the address.
+// range of [-256, 255], we use x17 as a scratch to compute the address.
 // ---------------------------------------------------------------------------
 
 // EmitARM64 converts an IRModule to ARM64 assembly text.
@@ -73,14 +73,12 @@ func (e *arm64Emitter) emit() {
 		w.WriteString("\n")
 	}
 
-	// BSS: string concatenation double-buffer.
-	if e.usesStrConcat() {
-		bufA := e.target.Sym("_novus_strcat_buf_a")
-		bufB := e.target.Sym("_novus_strcat_buf_b")
-		sel := e.target.Sym("_novus_strcat_sel")
-		w.WriteString(fmt.Sprintf(".lcomm %s, 4096\n", bufA))
-		w.WriteString(fmt.Sprintf(".lcomm %s, 4096\n", bufB))
-		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n\n", sel))
+	// BSS: bump-allocator heap for dynamic allocations (strings, arrays).
+	if e.usesHeap() {
+		heapSym := e.target.Sym("_novus_heap")
+		heapPtrSym := e.target.Sym("_novus_heap_ptr")
+		w.WriteString(fmt.Sprintf(".lcomm %s, 1048576\n", heapSym))
+		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n\n", heapPtrSym))
 	}
 
 	// Text section.
@@ -199,8 +197,8 @@ func (e *arm64Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 			} else if off >= -4095 && off < 0 {
 				w.WriteString(fmt.Sprintf("    sub %s, %s, #%d\n", dst, base, -off))
 			} else {
-				e.loadImm("x9", off)
-				w.WriteString(fmt.Sprintf("    add %s, %s, x9\n", dst, base))
+				e.loadImm("x17", off)
+				w.WriteString(fmt.Sprintf("    add %s, %s, x17\n", dst, base))
 			}
 		} else {
 			src := e.loadToReg(fn, instr.Src1, "x11")
@@ -360,8 +358,39 @@ func (e *arm64Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		w.WriteString(fmt.Sprintf("    strb %s, [%s]\n", toW(src), addr))
 	case IRStrConcat:
 		e.emitStrConcat(fn, instr)
-	case IRGetTimeNs:
-		e.emitGetTimeNs(fn, instr)
+
+	// Memory load (raw address read)
+	case IRLoad8:
+		addr := e.loadToReg(fn, instr.Src1, "x10")
+		dst := e.ensureReg(fn, instr.Dst, "x11")
+		w.WriteString(fmt.Sprintf("    ldrb %s, [%s]\n", toW(dst), addr))
+		e.spillIfNeeded(fn, instr.Dst, dst)
+	case IRLoad32:
+		addr := e.loadToReg(fn, instr.Src1, "x10")
+		dst := e.ensureReg(fn, instr.Dst, "x11")
+		w.WriteString(fmt.Sprintf("    ldr %s, [%s]\n", toW(dst), addr))
+		e.spillIfNeeded(fn, instr.Dst, dst)
+	case IRLoad64:
+		addr := e.loadToReg(fn, instr.Src1, "x10")
+		dst := e.ensureReg(fn, instr.Dst, "x11")
+		w.WriteString(fmt.Sprintf("    ldr %s, [%s]\n", dst, addr))
+		e.spillIfNeeded(fn, instr.Dst, dst)
+
+	// Array operations
+	case IRArrayNew:
+		e.emitArrayNew(fn, instr)
+	case IRArrayGet:
+		e.emitArrayGet(fn, instr)
+	case IRArraySet:
+		e.emitArraySet(fn, instr)
+	case IRArrayAppend:
+		e.emitArrayAppend(fn, instr)
+	case IRArrayPop:
+		e.emitArrayPop(fn, instr)
+	case IRArrayLen:
+		e.emitArrayLen(fn, instr)
+	case IRWinCall:
+		w.WriteString("    // win_call: Windows API calls not supported on ARM64\n")
 	}
 }
 
@@ -471,13 +500,10 @@ func (e *arm64Emitter) emitStrConcat(fn *IRFunc, instr IRInstr) {
 	id := e.uniqueID()
 	copy1Label := fmt.Sprintf(".Lsc1_%d", id)
 	copy2Label := fmt.Sprintf(".Lsc2_%d", id)
-	doneLabel := fmt.Sprintf(".Lscd_%d", id)
-	selBLabel := fmt.Sprintf(".Lscb_%d", id)
-	afterSelLabel := fmt.Sprintf(".Lscas_%d", id)
+	readyLabel := fmt.Sprintf(".Lscr_%d", id)
 
-	selSym := e.target.Sym("_novus_strcat_sel")
-	bufA := e.target.Sym("_novus_strcat_buf_a")
-	bufB := e.target.Sym("_novus_strcat_buf_b")
+	heapPtrSym := e.target.Sym("_novus_heap_ptr")
+	heapSym := e.target.Sym("_novus_heap")
 
 	// Move sources into dedicated scratch registers.
 	if src1 != "x13" {
@@ -487,36 +513,9 @@ func (e *arm64Emitter) emitStrConcat(fn *IRFunc, instr IRInstr) {
 		w.WriteString(fmt.Sprintf("    mov x14, %s\n", src2))
 	}
 
-	// Toggle buffer selector.
-	if e.target.OS == OS_Darwin {
-		w.WriteString(fmt.Sprintf("    adrp x15, %s@PAGE\n", selSym))
-		w.WriteString(fmt.Sprintf("    add x15, x15, %s@PAGEOFF\n", selSym))
-	} else {
-		w.WriteString(fmt.Sprintf("    adrp x15, %s\n", selSym))
-		w.WriteString(fmt.Sprintf("    add x15, x15, :lo12:%s\n", selSym))
-	}
-	w.WriteString("    ldrb w16, [x15]\n")
-	w.WriteString("    eor w16, w16, #1\n")
-	w.WriteString("    strb w16, [x15]\n")
-
-	// Select destination buffer: w16==0 → buf_a, w16==1 → buf_b.
-	if e.target.OS == OS_Darwin {
-		w.WriteString(fmt.Sprintf("    adrp x11, %s@PAGE\n", bufA))
-		w.WriteString(fmt.Sprintf("    add x11, x11, %s@PAGEOFF\n", bufA))
-	} else {
-		w.WriteString(fmt.Sprintf("    adrp x11, %s\n", bufA))
-		w.WriteString(fmt.Sprintf("    add x11, x11, :lo12:%s\n", bufA))
-	}
-	w.WriteString(fmt.Sprintf("    cbz w16, %s\n", afterSelLabel))
-	if e.target.OS == OS_Darwin {
-		w.WriteString(fmt.Sprintf("    adrp x11, %s@PAGE\n", bufB))
-		w.WriteString(fmt.Sprintf("    add x11, x11, %s@PAGEOFF\n", bufB))
-	} else {
-		w.WriteString(fmt.Sprintf("    adrp x11, %s\n", bufB))
-		w.WriteString(fmt.Sprintf("    add x11, x11, :lo12:%s\n", bufB))
-	}
-	w.WriteString(fmt.Sprintf("%s:\n", afterSelLabel))
-	w.WriteString("    mov x12, x11\n") // x12 = saved buffer start
+	// Load heap pointer (lazy init on first use).
+	e.loadHeapPtr("x15", "x11", heapPtrSym, heapSym, readyLabel)
+	w.WriteString("    mov x12, x11\n") // x12 = result (start of new string)
 
 	// Copy left string (skip null terminator).
 	w.WriteString(fmt.Sprintf("%s:\n", copy1Label))
@@ -531,76 +530,216 @@ func (e *arm64Emitter) emitStrConcat(fn *IRFunc, instr IRInstr) {
 	w.WriteString("    strb w16, [x11], #1\n")
 	w.WriteString(fmt.Sprintf("    cbnz w16, %s\n", copy2Label))
 
-	// Result = buffer start.
-	w.WriteString(fmt.Sprintf("%s:\n", doneLabel))
+	// Save updated heap pointer.
+	w.WriteString("    str x11, [x15]\n")
+
+	// Result = start of concatenated string.
 	w.WriteString(fmt.Sprintf("    mov %s, x12\n", dst))
 	e.spillIfNeeded(fn, instr.Dst, dst)
-	_ = selBLabel // suppress unused warning
 }
 
-// emitGetTimeNs emits inline assembly to get the current time in nanoseconds
-// using the gettimeofday syscall on macOS or clock_gettime on Linux.
+// loadHeapPtr loads the current heap allocation pointer into heapReg,
+// with lazy initialization.  After this call:
+//   - ptrAddrReg holds the address of _novus_heap_ptr (for later str)
+//   - heapReg holds the current heap pointer value
+func (e *arm64Emitter) loadHeapPtr(ptrAddrReg, heapReg, heapPtrSym, heapSym, readyLabel string) {
+	w := e.b
+	if e.target.OS == OS_Darwin {
+		w.WriteString(fmt.Sprintf("    adrp %s, %s@PAGE\n", ptrAddrReg, heapPtrSym))
+		w.WriteString(fmt.Sprintf("    add %s, %s, %s@PAGEOFF\n", ptrAddrReg, ptrAddrReg, heapPtrSym))
+	} else {
+		w.WriteString(fmt.Sprintf("    adrp %s, %s\n", ptrAddrReg, heapPtrSym))
+		w.WriteString(fmt.Sprintf("    add %s, %s, :lo12:%s\n", ptrAddrReg, ptrAddrReg, heapPtrSym))
+	}
+	w.WriteString(fmt.Sprintf("    ldr %s, [%s]\n", heapReg, ptrAddrReg))
+	w.WriteString(fmt.Sprintf("    cbnz %s, %s\n", heapReg, readyLabel))
+	// First-time init: set heap pointer to start of heap buffer.
+	if e.target.OS == OS_Darwin {
+		w.WriteString(fmt.Sprintf("    adrp %s, %s@PAGE\n", heapReg, heapSym))
+		w.WriteString(fmt.Sprintf("    add %s, %s, %s@PAGEOFF\n", heapReg, heapReg, heapSym))
+	} else {
+		w.WriteString(fmt.Sprintf("    adrp %s, %s\n", heapReg, heapSym))
+		w.WriteString(fmt.Sprintf("    add %s, %s, :lo12:%s\n", heapReg, heapReg, heapSym))
+	}
+	w.WriteString(fmt.Sprintf("%s:\n", readyLabel))
+}
+
+// ---------------------------------------------------------------------------
+// Array operations (ARM64)
 //
-// macOS ARM64:
-//
-//	gettimeofday(struct timeval *tp, void *tzp) → syscall 116 (0x2000074)
-//	struct timeval { int64 tv_sec; int64 tv_usec; }
-//	result = tv_sec * 1_000_000_000 + tv_usec * 1000
-//
-// Linux ARM64:
-//
-//	clock_gettime(CLOCK_MONOTONIC, struct timespec *tp) → syscall 113
-//	struct timespec { int64 tv_sec; int64 tv_nsec; }
-//	result = tv_sec * 1_000_000_000 + tv_nsec
-func (e *arm64Emitter) emitGetTimeNs(fn *IRFunc, instr IRInstr) {
+// Array layout on heap (24 bytes):
+//   [0]  data_ptr  — pointer to element storage
+//   [8]  len       — current number of elements
+//   [16] cap       — allocated capacity (in elements)
+// Elements are always 8 bytes each.
+// ---------------------------------------------------------------------------
+
+// emitArrayNew allocates a new array header + data on the heap.
+// Dst = pointer to header. Src1 = elem_size (imm, always 8). Src2 = initial cap (imm).
+func (e *arm64Emitter) emitArrayNew(fn *IRFunc, instr IRInstr) {
 	w := e.b
 	dst := e.ensureReg(fn, instr.Dst, "x10")
-
-	w.WriteString("    // __time_ns: get current time in nanoseconds\n")
-	// Allocate 16 bytes on the stack for the struct (timeval or timespec).
-	w.WriteString("    sub sp, sp, #16\n")
-
-	if e.target.OS == OS_Darwin {
-		// gettimeofday(x0=ptr, x1=NULL), syscall 0x2000074
-		w.WriteString("    mov x0, sp\n") // x0 = pointer to timeval on stack
-		w.WriteString("    mov x1, #0\n") // x1 = NULL (no timezone)
-		e.loadImm("x16", 0x2000074)       // SYS_gettimeofday with macOS prefix
-		w.WriteString(fmt.Sprintf("    %s\n", e.target.SyscallInstr))
-		// sp+0 = tv_sec (8 bytes), sp+8 = tv_usec (8 bytes)
-		w.WriteString("    ldr x11, [sp, #0]\n") // x11 = tv_sec
-		w.WriteString("    ldr x12, [sp, #8]\n") // x12 = tv_usec
-		// result = tv_sec * 1_000_000_000 + tv_usec * 1000
-		e.loadImm("x13", 1000000000)
-		w.WriteString("    mul x11, x11, x13\n") // x11 = tv_sec * 1e9
-		e.loadImm("x13", 1000)
-		w.WriteString("    mul x12, x12, x13\n") // x12 = tv_usec * 1000
-		w.WriteString("    add x11, x11, x12\n") // x11 = total nanoseconds
-	} else {
-		// Linux: clock_gettime(x0=CLOCK_MONOTONIC=1, x1=ptr), syscall 113
-		w.WriteString("    mov x0, #1\n")   // x0 = CLOCK_MONOTONIC
-		w.WriteString("    mov x1, sp\n")   // x1 = pointer to timespec on stack
-		w.WriteString("    mov x8, #113\n") // SYS_clock_gettime
-		w.WriteString(fmt.Sprintf("    %s\n", e.target.SyscallInstr))
-		// sp+0 = tv_sec (8 bytes), sp+8 = tv_nsec (8 bytes)
-		w.WriteString("    ldr x11, [sp, #0]\n") // x11 = tv_sec
-		w.WriteString("    ldr x12, [sp, #8]\n") // x12 = tv_nsec
-		// result = tv_sec * 1_000_000_000 + tv_nsec
-		e.loadImm("x13", 1000000000)
-		w.WriteString("    mul x11, x11, x13\n") // x11 = tv_sec * 1e9
-		w.WriteString("    add x11, x11, x12\n") // x11 = total nanoseconds
+	cap := instr.Src2.Imm
+	if cap < 4 {
+		cap = 4
 	}
 
-	// Deallocate the stack space.
-	w.WriteString("    add sp, sp, #16\n")
-	// Move result to destination.
-	w.WriteString(fmt.Sprintf("    mov %s, x11\n", dst))
+	id := e.uniqueID()
+	readyLabel := fmt.Sprintf(".Lan_%d", id)
+	heapPtrSym := e.target.Sym("_novus_heap_ptr")
+	heapSym := e.target.Sym("_novus_heap")
+
+	// Load heap pointer into x11, x15 = address of _novus_heap_ptr.
+	e.loadHeapPtr("x15", "x11", heapPtrSym, heapSym, readyLabel)
+
+	// Allocate header (24 bytes).
+	w.WriteString("    mov x12, x11\n")      // x12 = header start
+	w.WriteString("    add x11, x11, #24\n") // advance past header
+	// Allocate data (cap * 8 bytes).
+	dataSize := cap * 8
+	w.WriteString("    mov x13, x11\n") // x13 = data start
+	e.loadImm("x14", dataSize)
+	w.WriteString("    add x11, x11, x14\n") // advance past data
+	// Save updated heap pointer.
+	w.WriteString("    str x11, [x15]\n")
+	// Initialize header: data_ptr, len=0, cap.
+	w.WriteString("    str x13, [x12, #0]\n") // header[0] = data_ptr
+	w.WriteString("    str xzr, [x12, #8]\n") // header[8] = len = 0
+	e.loadImm("x14", cap)
+	w.WriteString("    str x14, [x12, #16]\n") // header[16] = cap
+	// Result = header pointer.
+	w.WriteString(fmt.Sprintf("    mov %s, x12\n", dst))
 	e.spillIfNeeded(fn, instr.Dst, dst)
 }
 
-func (e *arm64Emitter) usesStrConcat() bool {
+// emitArrayGet: dst = arr[index]. Src1 = arrPtr, Src2 = index.
+func (e *arm64Emitter) emitArrayGet(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	arrPtr := e.loadToReg(fn, instr.Src1, "x11")
+	idx := e.loadToReg(fn, instr.Src2, "x12")
+	dst := e.ensureReg(fn, instr.Dst, "x10")
+
+	// Load data_ptr from header.
+	w.WriteString(fmt.Sprintf("    ldr x13, [%s, #0]\n", arrPtr)) // x13 = data_ptr
+	// Load element: data_ptr[index * 8].
+	w.WriteString(fmt.Sprintf("    ldr %s, [x13, %s, lsl #3]\n", dst, idx))
+	e.spillIfNeeded(fn, instr.Dst, dst)
+}
+
+// emitArraySet: arr[index] = val. Dst = arrPtr, Src1 = index, Src2 = val.
+func (e *arm64Emitter) emitArraySet(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	arrPtr := e.loadToReg(fn, instr.Dst, "x11")
+	idx := e.loadToReg(fn, instr.Src1, "x12")
+	val := e.loadToReg(fn, instr.Src2, "x13")
+
+	// Load data_ptr from header.
+	w.WriteString(fmt.Sprintf("    ldr x14, [%s, #0]\n", arrPtr)) // x14 = data_ptr
+	// Store element: data_ptr[index * 8] = val.
+	w.WriteString(fmt.Sprintf("    str %s, [x14, %s, lsl #3]\n", val, idx))
+}
+
+// emitArrayAppend: append val to arr. Dst = arrPtr, Src1 = val.
+// If len == cap, grow the array (allocate new data, copy, update header).
+func (e *arm64Emitter) emitArrayAppend(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	arrPtr := e.loadToReg(fn, instr.Dst, "x11")
+	val := e.loadToReg(fn, instr.Src1, "x12")
+
+	id := e.uniqueID()
+	noGrowLabel := fmt.Sprintf(".Laang_%d", id)
+	capOkLabel := fmt.Sprintf(".Laaco_%d", id)
+	copyLabel := fmt.Sprintf(".Laacp_%d", id)
+	copyDoneLabel := fmt.Sprintf(".Laacd_%d", id)
+	readyLabel := fmt.Sprintf(".Laahr_%d", id)
+
+	heapPtrSym := e.target.Sym("_novus_heap_ptr")
+	heapSym := e.target.Sym("_novus_heap")
+
+	// Load len and cap from header.
+	if arrPtr != "x11" {
+		w.WriteString(fmt.Sprintf("    mov x11, %s\n", arrPtr))
+	}
+	w.WriteString("    ldr x13, [x11, #8]\n")  // x13 = len
+	w.WriteString("    ldr x14, [x11, #16]\n") // x14 = cap
+	// Check if full.
+	w.WriteString("    cmp x13, x14\n")
+	w.WriteString(fmt.Sprintf("    b.lt %s\n", noGrowLabel))
+
+	// --- GROW ---
+	// new_cap = cap * 2 (min 4).
+	w.WriteString("    lsl x14, x14, #1\n")
+	w.WriteString("    cmp x14, #4\n")
+	w.WriteString(fmt.Sprintf("    b.ge %s\n", capOkLabel))
+	w.WriteString("    mov x14, #4\n")
+	w.WriteString(fmt.Sprintf("%s:\n", capOkLabel))
+
+	// Allocate new data from heap (new_cap * 8 bytes).
+	e.loadHeapPtr("x15", "x16", heapPtrSym, heapSym, readyLabel)
+	w.WriteString("    mov x17, x16\n")     // x17 = new_data start
+	w.WriteString("    lsl x9, x14, #3\n")  // x9 = new_cap * 8
+	w.WriteString("    add x16, x16, x9\n") // advance heap ptr
+	w.WriteString("    str x16, [x15]\n")   // save updated heap ptr
+
+	// Copy old data to new data.
+	w.WriteString("    ldr x16, [x11, #0]\n") // x16 = old data_ptr
+	w.WriteString("    mov x9, #0\n")         // i = 0
+	w.WriteString(fmt.Sprintf("%s:\n", copyLabel))
+	w.WriteString("    cmp x9, x13\n") // while i < len
+	w.WriteString(fmt.Sprintf("    b.ge %s\n", copyDoneLabel))
+	w.WriteString("    ldr x18, [x16, x9, lsl #3]\n") // load old[i]
+	w.WriteString("    str x18, [x17, x9, lsl #3]\n") // store new[i]
+	w.WriteString("    add x9, x9, #1\n")
+	w.WriteString(fmt.Sprintf("    b %s\n", copyLabel))
+	w.WriteString(fmt.Sprintf("%s:\n", copyDoneLabel))
+
+	// Update header: data_ptr = new_data, cap = new_cap.
+	w.WriteString("    str x17, [x11, #0]\n")
+	w.WriteString("    str x14, [x11, #16]\n")
+
+	// --- NO GROW --- (or fall through after grow)
+	w.WriteString(fmt.Sprintf("%s:\n", noGrowLabel))
+	// Append value: data[len] = val.
+	w.WriteString("    ldr x16, [x11, #0]\n") // x16 = data_ptr
+	if val != "x12" {
+		w.WriteString(fmt.Sprintf("    mov x12, %s\n", val))
+	}
+	w.WriteString("    str x12, [x16, x13, lsl #3]\n") // data[len] = val
+	// len++.
+	w.WriteString("    add x13, x13, #1\n")
+	w.WriteString("    str x13, [x11, #8]\n") // header[8] = len
+}
+
+// emitArrayPop: dst = pop(arr). Src1 = arrPtr.
+func (e *arm64Emitter) emitArrayPop(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	arrPtr := e.loadToReg(fn, instr.Src1, "x11")
+	dst := e.ensureReg(fn, instr.Dst, "x10")
+
+	// len--.
+	w.WriteString(fmt.Sprintf("    ldr x13, [%s, #8]\n", arrPtr)) // x13 = len
+	w.WriteString("    sub x13, x13, #1\n")
+	w.WriteString(fmt.Sprintf("    str x13, [%s, #8]\n", arrPtr)) // save len
+	// Load element at data[len] (the one we just decremented to).
+	w.WriteString(fmt.Sprintf("    ldr x14, [%s, #0]\n", arrPtr)) // x14 = data_ptr
+	w.WriteString(fmt.Sprintf("    ldr %s, [x14, x13, lsl #3]\n", dst))
+	e.spillIfNeeded(fn, instr.Dst, dst)
+}
+
+// emitArrayLen: dst = len(arr). Src1 = arrPtr.
+func (e *arm64Emitter) emitArrayLen(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	arrPtr := e.loadToReg(fn, instr.Src1, "x11")
+	dst := e.ensureReg(fn, instr.Dst, "x10")
+	w.WriteString(fmt.Sprintf("    ldr %s, [%s, #8]\n", dst, arrPtr))
+	e.spillIfNeeded(fn, instr.Dst, dst)
+}
+
+func (e *arm64Emitter) usesHeap() bool {
 	for _, fn := range e.mod.Functions {
 		for _, instr := range fn.Instrs {
-			if instr.Op == IRStrConcat {
+			switch instr.Op {
+			case IRStrConcat, IRArrayNew, IRArrayAppend:
 				return true
 			}
 		}
@@ -609,7 +748,7 @@ func (e *arm64Emitter) usesStrConcat() bool {
 }
 
 // ---------------------------------------------------------------------------
-// Memory access helpers — handle arbitrary offsets via scratch register x9
+// Memory access helpers — handle arbitrary offsets via scratch register x17
 // ---------------------------------------------------------------------------
 
 func (e *arm64Emitter) emitLoadMem(dst, baseName string, offset int) {
@@ -620,8 +759,8 @@ func (e *arm64Emitter) emitLoadMem(dst, baseName string, offset int) {
 	} else if offset >= 0 && offset <= 32760 && offset%8 == 0 {
 		w.WriteString(fmt.Sprintf("    ldr %s, [%s, #%d]\n", dst, base, offset))
 	} else {
-		e.loadImm("x9", int64(offset))
-		w.WriteString(fmt.Sprintf("    ldr %s, [%s, x9]\n", dst, base))
+		e.loadImm("x17", int64(offset))
+		w.WriteString(fmt.Sprintf("    ldr %s, [%s, x17]\n", dst, base))
 	}
 }
 
@@ -633,8 +772,8 @@ func (e *arm64Emitter) emitStoreMem(src, baseName string, offset int) {
 	} else if offset >= 0 && offset <= 32760 && offset%8 == 0 {
 		w.WriteString(fmt.Sprintf("    str %s, [%s, #%d]\n", src, base, offset))
 	} else {
-		e.loadImm("x9", int64(offset))
-		w.WriteString(fmt.Sprintf("    str %s, [%s, x9]\n", src, base))
+		e.loadImm("x17", int64(offset))
+		w.WriteString(fmt.Sprintf("    str %s, [%s, x17]\n", src, base))
 	}
 }
 

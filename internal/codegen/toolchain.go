@@ -169,11 +169,12 @@ func (tc *Toolchain) linkLinux() error {
 
 func (tc *Toolchain) linkWindows() error {
 	// Try GoLink first (common in hobby compiler setups), then MSVC link.
-	// For NASM + GoLink: golink /entry main /console <obj>
+	// For NASM + GoLink: golink /entry main /console <obj> <dlls>
 	golink, err := exec.LookPath("golink")
 	if err == nil {
 		cmd := exec.Command(golink, "/entry", "main", "/console",
-			tc.ObjFile, "kernel32.dll")
+			tc.ObjFile,
+			"kernel32.dll", "user32.dll", "gdi32.dll", "msvcrt.dll")
 		return tc.runCmd(cmd, "link (golink)")
 	}
 
@@ -185,7 +186,7 @@ func (tc *Toolchain) linkWindows() error {
 			"/SUBSYSTEM:CONSOLE",
 			fmt.Sprintf("/OUT:%s", tc.ExeFile),
 			tc.ObjFile,
-			"kernel32.lib",
+			"kernel32.lib", "user32.lib", "gdi32.lib", "msvcrt.lib",
 		)
 		return tc.runCmd(cmd, "link (msvc)")
 	}

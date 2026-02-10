@@ -1,0 +1,27 @@
+// Novus import test — imports from lib/standard_lib.nov
+module import_test;
+
+import ../lib/standard_lib std;
+
+fn print(msg: str) -> void {
+    // macOS ARM64 write syscall
+    setreg(x0, 1);
+    lea(x1, msg);
+    setreg(x2, len(msg));
+    setreg(x16, 4);
+    syscall();
+}
+
+fn main() -> void {
+    // Use imported function via alias
+    let result: i32 = std.max(42, 17);
+
+    // Use other imports
+    let a: i32 = std.abs(-100);
+    let m: i32 = std.min(5, 10);
+    let c: i32 = std.clamp(150, 0, 100);
+
+    let stars: str = std.str_repeat("*", 5);
+    print(stars);
+    print("\n");
+}

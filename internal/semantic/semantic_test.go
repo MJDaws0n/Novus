@@ -780,11 +780,20 @@ func TestBuiltinGetflagUsableInCondition(t *testing.T) {
 	expectErrors(t, diags, 0)
 }
 
-func TestCannotRedeclareBuiltin(t *testing.T) {
+func TestRedeclareBuiltinIsWarning(t *testing.T) {
 	src := "fn mov() -> void {}"
 	diags := analyze(t, src)
-	expectErrors(t, diags, 1)
-	expectErrorContains(t, diags, "cannot redeclare built-in function")
+	expectErrors(t, diags, 0) // no errors, just a warning
+	// Should have a warning about shadowing.
+	hasWarning := false
+	for _, d := range diags {
+		if d.Severity == semantic.Warning && strings.Contains(d.Message, "shadows built-in") {
+			hasWarning = true
+		}
+	}
+	if !hasWarning {
+		t.Errorf("expected warning about shadowing built-in, got: %v", diags)
+	}
 }
 
 func TestCannotDeclareVarWithBuiltinName(t *testing.T) {

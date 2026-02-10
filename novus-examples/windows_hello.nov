@@ -1,0 +1,104 @@
+// Windows console I/O example using win_call
+// Build: novus --target=windows/amd64 examples/windows_hello.nov
+// This produces a Windows x64 executable using NASM + GoLink/MSVC.
+module windows_hello;
+
+// ---- Integer to string (for printing numbers) ----
+fn itoa(n: i32) -> str {
+    if (n == 0) {
+        return "0";
+    }
+
+    let is_neg: bool = n < 0;
+    let val: i32 = n;
+    if (is_neg) {
+        val = -val;
+    }
+
+    let result: str = "";
+    while (val > 0) {
+        let digit: i32 = val % 10;
+        val = val / 10;
+        if (digit == 0) { result = "0" + result; }
+        if (digit == 1) { result = "1" + result; }
+        if (digit == 2) { result = "2" + result; }
+        if (digit == 3) { result = "3" + result; }
+        if (digit == 4) { result = "4" + result; }
+        if (digit == 5) { result = "5" + result; }
+        if (digit == 6) { result = "6" + result; }
+        if (digit == 7) { result = "7" + result; }
+        if (digit == 8) { result = "8" + result; }
+        if (digit == 9) { result = "9" + result; }
+    }
+
+    if (is_neg) {
+        result = "-" + result;
+    }
+    return result;
+}
+
+// ---- Print string using Windows WriteConsoleA ----
+fn print(msg: str) -> void {
+    // Get stdout handle: GetStdHandle(STD_OUTPUT_HANDLE = -11)
+    win_call("GetStdHandle", -11);
+    let out_handle: u64 = getreg(rax);
+
+    // Write the message: WriteConsoleA(handle, buffer, length, &written, 0)
+    let msg_len: i32 = len(msg);
+    win_call("WriteConsoleA", out_handle, msg, msg_len, 0, 0);
+}
+
+// ---- Read input using Windows ReadConsoleA ----
+fn input(prompt: str) -> str {
+    // Print the prompt.
+    print(prompt);
+
+    // Get stdin handle: GetStdHandle(STD_INPUT_HANDLE = -10)
+    win_call("GetStdHandle", -10);
+    let in_handle: u64 = getreg(rax);
+
+    // Allocate a buffer on the heap for reading input.
+    // We'll use setreg + stack to create a 256-byte buffer.
+    let buf: str = "                                                                                                                                                                                                                                                                ";
+    let buf_len: i32 = 256;
+
+    // ReadConsoleA(handle, buffer, nNumberOfCharsToRead, lpNumberOfCharsRead, pInputControl)
+    // We pass 0 for lpNumberOfCharsRead and pInputControl for simplicity.
+    win_call("ReadConsoleA", in_handle, buf, buf_len, 0, 0);
+    let bytes_read: u64 = getreg(rax);
+
+    // The input includes \r\n at the end. We return the buffer as-is
+    // (the caller can strip trailing whitespace if needed).
+    return buf;
+}
+
+fn main() -> void {
+    print("=== Novus Windows Console Demo ===\n");
+    print("Hello from Novus on Windows!\n");
+
+    // Demonstrate simple output.
+    let x: i32 = 42;
+    print("The answer is: ");
+    print(itoa(x));
+    print("\n");
+
+    // Demonstrate input.
+    let name: str = input("What is your name? ");
+    print("Hello, ");
+    print(name);
+
+    // Demonstrate a loop.
+    print("Counting to 5:\n");
+    let i: i32 = 1;
+    while (i <= 5) {
+        print("  ");
+        print(itoa(i));
+        print("\n");
+        i = i + 1;
+    }
+
+    print("Goodbye!\n");
+
+    // Exit cleanly: ExitProcess(0)
+    win_call("ExitProcess", 0);
+}

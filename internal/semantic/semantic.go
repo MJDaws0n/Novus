@@ -60,7 +60,9 @@ func HasErrors(diags []Diagnostic) bool {
 
 // Type represents a semantic type in the Novus language.
 type Type struct {
-	Name string
+	Name     string
+	IsArray  bool  // true for array types (e.g. []i32)
+	ElemType *Type // element type for arrays (e.g. TypeI32 for []i32)
 }
 
 // Built-in type singletons — concrete types.
@@ -105,8 +107,24 @@ var builtinTypes = map[string]*Type{
 }
 
 // LookupType resolves a type name string to a *Type, or nil if unknown.
+// Supports array types like "[]i32" by dynamically creating array type wrappers.
 func LookupType(name string) *Type {
-	return builtinTypes[name]
+	if t, ok := builtinTypes[name]; ok {
+		return t
+	}
+	// Array type: []<elem>
+	if len(name) > 2 && name[:2] == "[]" {
+		elemName := name[2:]
+		elemType := LookupType(elemName)
+		if elemType == nil {
+			return nil
+		}
+		// Cache the array type so future lookups return the same pointer.
+		arrType := &Type{Name: name, IsArray: true, ElemType: elemType}
+		builtinTypes[name] = arrType
+		return arrType
+	}
+	return nil
 }
 
 // RegisterType adds a new type to the registry (for future extensibility).
@@ -154,6 +172,15 @@ func isAssignableTo(dst, src *Type) bool {
 	if src == TypeUntypedFloat {
 		// Untyped float adapts to any concrete float.
 		return isFloat(dst)
+	}
+	// Array types: compatible if both are arrays and element types match
+	// (or src is an empty-array placeholder).
+	if dst.IsArray && src.IsArray {
+		if src.Name == "[]<unknown>" {
+			return true // empty array literal adapts to any array type
+		}
+		// Allow element-level coercion (e.g. untyped int -> i32).
+		return isAssignableTo(dst.ElemType, src.ElemType)
 	}
 	return false
 }
@@ -367,20 +394,24 @@ type builtinInfo struct {
 // getreg and getflag return concrete data that can be used directly in the
 // language (u64 and bool respectively).
 var builtinFuncTable = map[string]builtinInfo{
-	"push":      {Arity: 1, ReturnType: TypeVoid}, // push value onto stack
-	"pop":       {Arity: 0, ReturnType: TypeU64},  // pop stack → u64 value
-	"lea":       {Arity: 2, ReturnType: TypeVoid}, // load effective address
-	"mov":       {Arity: 2, ReturnType: TypeVoid}, // move data
-	"call":      {Arity: 1, ReturnType: TypeVoid}, // call function
-	"ret":       {Arity: 0, ReturnType: TypeVoid}, // return from call
-	"syscall":   {Arity: 0, ReturnType: TypeVoid}, // invoke system call
-	"int":       {Arity: 1, ReturnType: TypeVoid}, // software interrupt
-	"setreg":    {Arity: 2, ReturnType: TypeVoid}, // set register value
-	"getreg":    {Arity: 1, ReturnType: TypeU64},  // read register → u64
-	"nop":       {Arity: 0, ReturnType: TypeVoid}, // no operation
-	"setflag":   {Arity: 2, ReturnType: TypeVoid}, // set CPU flag
-	"getflag":   {Arity: 1, ReturnType: TypeBool}, // read CPU flag → bool
-	"__time_ns": {Arity: 0, ReturnType: TypeI64},  // current time in nanoseconds
+	"push":     {Arity: 1, ReturnType: TypeVoid},  // push value onto stack
+	"pop":      {Arity: 0, ReturnType: TypeU64},   // pop stack → u64 value
+	"lea":      {Arity: 2, ReturnType: TypeVoid},  // load effective address
+	"mov":      {Arity: 2, ReturnType: TypeVoid},  // move data
+	"call":     {Arity: 1, ReturnType: TypeVoid},  // call function
+	"ret":      {Arity: 0, ReturnType: TypeVoid},  // return from call
+	"syscall":  {Arity: 0, ReturnType: TypeVoid},  // invoke system call
+	"int":      {Arity: 1, ReturnType: TypeVoid},  // software interrupt
+	"setreg":   {Arity: 2, ReturnType: TypeVoid},  // set register value
+	"getreg":   {Arity: 1, ReturnType: TypeU64},   // read register → u64
+	"nop":      {Arity: 0, ReturnType: TypeVoid},  // no operation
+	"setflag":  {Arity: 2, ReturnType: TypeVoid},  // set CPU flag
+	"getflag":  {Arity: 1, ReturnType: TypeBool},  // read CPU flag → bool
+	"load8":    {Arity: 1, ReturnType: TypeI32},   // load byte from address → i32
+	"load32":   {Arity: 1, ReturnType: TypeI32},   // load 32-bit int from address → i32
+	"load64":   {Arity: 1, ReturnType: TypeI64},   // load 64-bit int from address → i64
+	"len":      {Arity: 1, ReturnType: TypeI32},   // string length → i32
+	"win_call": {Arity: -1, ReturnType: TypeVoid}, // call Windows API (variadic: first arg is function name string)
 }
 
 // ---------------------------------------------------------------------------
@@ -422,20 +453,37 @@ var reservedRegisters = []string{
 // Analyser
 // ---------------------------------------------------------------------------
 
+// ImportedFunc describes a function brought into scope by an import.
+type ImportedFunc struct {
+	Fn    *ast.FnDecl
+	Alias string // "" for direct access, otherwise the namespace prefix
+}
+
 // Analyzer holds the state for a single semantic-analysis pass.
 type Analyzer struct {
-	diagnostics []Diagnostic
-	scope       *Scope
-	currentFunc *ast.FnDecl // the function body we are currently inside
-	loopDepth   int         // > 0 when inside a loop
+	diagnostics   []Diagnostic
+	scope         *Scope
+	currentFunc   *ast.FnDecl // the function body we are currently inside
+	loopDepth     int         // > 0 when inside a loop
+	importedFuncs []ImportedFunc
+	importAliases map[string]bool      // set of known import aliases (for MemberExpr resolution)
+	importedFnSet map[*ast.FnDecl]bool // FnDecl pointers registered via imports (skip in prog.Functions pass)
 }
 
 // Analyze runs semantic analysis on the given AST program and returns all
 // diagnostics (errors and warnings).  The returned slice is empty when the
 // program is semantically valid.
 func Analyze(program *ast.Program) []Diagnostic {
+	return AnalyzeWithImports(program, nil)
+}
+
+// AnalyzeWithImports runs semantic analysis with imported function metadata.
+func AnalyzeWithImports(program *ast.Program, importedFuncs []ImportedFunc) []Diagnostic {
 	a := &Analyzer{
-		scope: newScope(nil), // global scope
+		scope:         newScope(nil), // global scope
+		importedFuncs: importedFuncs,
+		importAliases: make(map[string]bool),
+		importedFnSet: make(map[*ast.FnDecl]bool),
 	}
 	a.injectBuiltins()
 	a.analyzeProgram(program)
@@ -475,7 +523,10 @@ func (a *Analyzer) popScope() {
 func (a *Analyzer) injectBuiltins() {
 	// Built-in intrinsic functions.
 	for name, info := range builtinFuncTable {
-		params := make([]*Type, info.Arity) // nil entries → skip arg type check
+		var params []*Type
+		if info.Arity >= 0 {
+			params = make([]*Type, info.Arity) // nil entries → skip arg type check
+		}
 		a.scope.define(&Symbol{
 			Name:       name,
 			Kind:       SymBuiltin,
@@ -500,6 +551,89 @@ func (a *Analyzer) injectBuiltins() {
 // ---------------------------------------------------------------------------
 
 func (a *Analyzer) analyzeProgram(prog *ast.Program) {
+	// Register imported functions in scope.
+	// Pre-scan: count imported function names to detect overloads.
+	importNameCount := map[string]int{}
+	for _, imp := range a.importedFuncs {
+		importNameCount[imp.Fn.Name]++
+	}
+
+	for _, imp := range a.importedFuncs {
+		fn := imp.Fn
+		retType := a.resolveType(fn.ReturnType)
+		paramTypes := make([]*Type, len(fn.Params))
+		paramTypeNames := make([]string, len(fn.Params))
+		defaults := make([]ast.Expr, len(fn.Params))
+		defaultCount := 0
+		for i, p := range fn.Params {
+			paramTypes[i] = a.resolveType(p.Type)
+			if p.Type != nil {
+				paramTypeNames[i] = p.Type.Name
+			} else {
+				paramTypeNames[i] = "void"
+			}
+			if p.Default != nil {
+				defaults[i] = p.Default
+				defaultCount++
+			}
+		}
+
+		mangledName := fn.MangledName
+		if mangledName == "" {
+			mangledName = fn.Name
+		}
+		// Apply overload mangling for imported functions with the same name.
+		if importNameCount[fn.Name] > 1 {
+			mangledName = funcMangle(fn.Name, paramTypeNames)
+		}
+		fn.MangledName = mangledName
+
+		// Track this FnDecl so the prog.Functions pass skips it.
+		a.importedFnSet[fn] = true
+
+		if imp.Alias != "" {
+			// Namespaced import: register under "alias.funcName" so MemberExpr can resolve it.
+			a.importAliases[imp.Alias] = true
+			qualifiedName := imp.Alias + "." + fn.Name
+			// For overloaded functions, also store under the mangled qualified name.
+			qualifiedMangled := imp.Alias + "." + mangledName
+			sym := &Symbol{
+				Name:         fn.Name,
+				MangledName:  mangledName,
+				Kind:         SymFunc,
+				Type:         retType,
+				Pos:          fn.Pos,
+				Params:       paramTypes,
+				Defaults:     defaults,
+				DefaultCount: defaultCount,
+				ReturnType:   retType,
+			}
+			a.scope.symbols[qualifiedMangled] = sym
+			// Also store under the base qualified name for non-overloaded single lookups.
+			if qualifiedMangled == qualifiedName {
+				// Not overloaded — mangled == base, single entry is enough.
+			} else {
+				// Overloaded — keep the base name pointing to the last one for fallback.
+				a.scope.symbols[qualifiedName] = sym
+			}
+			a.scope.funcOverloads[qualifiedName] = append(a.scope.funcOverloads[qualifiedName], sym)
+		} else {
+			// Direct import: register under the function's own name.
+			sym := &Symbol{
+				Name:         fn.Name,
+				MangledName:  mangledName,
+				Kind:         SymFunc,
+				Type:         retType,
+				Pos:          fn.Pos,
+				Params:       paramTypes,
+				Defaults:     defaults,
+				DefaultCount: defaultCount,
+				ReturnType:   retType,
+			}
+			a.scope.defineFunc(sym)
+		}
+	}
+
 	// Pre-scan: detect which function names have multiple declarations
 	// (candidates for overloading).
 	nameCount := map[string]int{}
@@ -510,11 +644,17 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 	// First pass — register every top-level function so that they can call
 	// each other (including recursion) regardless of source order.
 	for _, fn := range prog.Functions {
+		// Skip functions already registered via the imports pass.
+		if a.importedFnSet[fn] {
+			continue
+		}
+
 		// Check for collisions with builtins / registers.
 		if existing := a.scope.lookupLocal(fn.Name); existing != nil {
 			if existing.Kind == SymBuiltin {
-				a.error(fn.Pos, fmt.Sprintf("cannot redeclare built-in function %q", fn.Name))
-				continue
+				// Allow user functions to shadow builtins (the lowerer's
+				// builtin handler will still take priority for the builtin name).
+				a.warn(fn.Pos, fmt.Sprintf("function %q shadows built-in intrinsic", fn.Name))
 			}
 			if existing.Kind == SymReg {
 				a.error(fn.Pos, fmt.Sprintf("cannot use reserved register name %q as function name", fn.Name))
@@ -552,9 +692,14 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 
 		// Check for duplicate with the same mangled signature.
 		if existing := a.scope.lookupLocal(mangledName); existing != nil {
-			a.error(fn.Pos, fmt.Sprintf("function %q with signature (%s) already declared at %s",
-				fn.Name, strings.Join(paramTypeNames, ", "), existing.Pos))
-			continue
+			if existing.Kind == SymBuiltin {
+				// Shadowing a builtin — remove the builtin entry so the user function takes over.
+				delete(a.scope.symbols, mangledName)
+			} else {
+				a.error(fn.Pos, fmt.Sprintf("function %q with signature (%s) already declared at %s",
+					fn.Name, strings.Join(paramTypeNames, ", "), existing.Pos))
+				continue
+			}
 		}
 
 		// Store mangled name on the AST node for the lowerer.
@@ -576,6 +721,10 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 
 	// Second pass — analyse each function body.
 	for _, fn := range prog.Functions {
+		// Skip functions already registered via imports (they're analyzed in their own module context).
+		if a.importedFnSet[fn] {
+			continue
+		}
 		// Skip functions that failed registration (reserved names).
 		mangledName := fn.MangledName
 		if mangledName == "" {
@@ -875,6 +1024,8 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) *Type {
 	case *ast.AddressOfExpr:
 		a.analyzeExpr(e.Operand)
 		return nil // pointer types not yet modelled
+	case *ast.ArrayLitExpr:
+		return a.analyzeArrayLitExpr(e)
 	}
 
 	return nil
@@ -883,6 +1034,10 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) *Type {
 func (a *Analyzer) analyzeIdentExpr(e *ast.IdentExpr) *Type {
 	if e.Name == "<error>" {
 		return nil // parser error-recovery placeholder
+	}
+	// Import alias names are valid identifiers (used as namespace prefixes).
+	if a.importAliases[e.Name] {
+		return nil
 	}
 	sym := a.scope.lookup(e.Name)
 	if sym == nil {
@@ -1004,6 +1159,20 @@ func (a *Analyzer) analyzeCallExpr(e *ast.CallExpr) *Type {
 			argTypes[i] = a.analyzeExpr(arg)
 		}
 
+		// Special handling for array builtins: array_append(arr, val), array_pop(arr).
+		switch callee.Name {
+		case "array_append":
+			if len(e.Args) == 2 && len(argTypes) == 2 && argTypes[0] != nil && argTypes[0].IsArray {
+				e.ResolvedCallee = "array_append"
+				return TypeVoid
+			}
+		case "array_pop":
+			if len(e.Args) == 1 && len(argTypes) == 1 && argTypes[0] != nil && argTypes[0].IsArray {
+				e.ResolvedCallee = "array_pop"
+				return argTypes[0].ElemType
+			}
+		}
+
 		// Try to resolve as a builtin or non-overloaded symbol first.
 		sym := a.scope.lookup(callee.Name)
 
@@ -1041,31 +1210,36 @@ func (a *Analyzer) analyzeCallExpr(e *ast.CallExpr) *Type {
 		}
 
 		// Arity check — allow fewer args when trailing defaults exist.
-		minArgs := len(sym.Params) - sym.DefaultCount
-		if len(e.Args) < minArgs || len(e.Args) > len(sym.Params) {
-			a.error(e.Pos, fmt.Sprintf("function %q expects %d to %d arguments, got %d",
-				callee.Name, minArgs, len(sym.Params), len(e.Args)))
-		}
+		// sym.Params is nil for variadic builtins (arity = -1), so skip check.
+		if sym.Params != nil {
+			minArgs := len(sym.Params) - sym.DefaultCount
+			if len(e.Args) < minArgs || len(e.Args) > len(sym.Params) {
+				a.error(e.Pos, fmt.Sprintf("function %q expects %d to %d arguments, got %d",
+					callee.Name, minArgs, len(sym.Params), len(e.Args)))
+			}
 
-		// Fill in default values for omitted arguments.
-		if len(e.Args) < len(sym.Params) && sym.DefaultCount > 0 {
-			for i := len(e.Args); i < len(sym.Params); i++ {
-				if sym.Defaults[i] != nil {
-					e.Args = append(e.Args, sym.Defaults[i])
-					// Analyse the default expression and add its type.
-					defType := a.analyzeExpr(sym.Defaults[i])
-					argTypes = append(argTypes, defType)
+			// Fill in default values for omitted arguments.
+			if len(e.Args) < len(sym.Params) && sym.DefaultCount > 0 {
+				for i := len(e.Args); i < len(sym.Params); i++ {
+					if sym.Defaults[i] != nil {
+						e.Args = append(e.Args, sym.Defaults[i])
+						// Analyse the default expression and add its type.
+						defType := a.analyzeExpr(sym.Defaults[i])
+						argTypes = append(argTypes, defType)
+					}
 				}
 			}
-		}
 
-		// Argument type checks (nil param entries = skip, used by builtins).
-		for i := range e.Args {
-			if i < len(sym.Params) && sym.Params[i] != nil && i < len(argTypes) && argTypes[i] != nil {
-				if !isAssignableTo(sym.Params[i], argTypes[i]) {
-					a.error(e.Args[i].GetPos(), fmt.Sprintf("argument %d of %q: expected %s, got %s", i+1, callee.Name, sym.Params[i].Name, argTypes[i].Name))
+			// Argument type checks (nil param entries = skip, used by builtins).
+			for i := range e.Args {
+				if i < len(sym.Params) && sym.Params[i] != nil && i < len(argTypes) && argTypes[i] != nil {
+					if !isAssignableTo(sym.Params[i], argTypes[i]) {
+						a.error(e.Args[i].GetPos(), fmt.Sprintf("argument %d of %q: expected %s, got %s", i+1, callee.Name, sym.Params[i].Name, argTypes[i].Name))
+					}
 				}
 			}
+		} else if len(e.Args) < 1 && callee.Name == "win_call" {
+			a.error(e.Pos, fmt.Sprintf("function %q requires at least 1 argument (API function name)", callee.Name))
 		}
 
 		// Set the resolved callee for the lowerer (mangled name for overloads).
@@ -1078,8 +1252,74 @@ func (a *Analyzer) analyzeCallExpr(e *ast.CallExpr) *Type {
 		return sym.ReturnType
 
 	case *ast.MemberExpr:
-		// Module-qualified calls (e.g. win32.ExitProcess) — can't resolve
-		// without module/import information, so just type-check the args.
+		// Module-qualified calls (e.g. std.test()) — resolve via import aliases.
+		if ident, ok := callee.Object.(*ast.IdentExpr); ok && a.importAliases[ident.Name] {
+			alias := ident.Name
+			funcName := callee.Field
+			qualifiedName := alias + "." + funcName
+
+			// Analyze argument types.
+			argTypes := make([]*Type, len(e.Args))
+			for i, arg := range e.Args {
+				argTypes[i] = a.analyzeExpr(arg)
+			}
+
+			// Try overload resolution first (handles overloaded imported functions).
+			overloads := a.scope.lookupFuncOverloads(qualifiedName)
+			var sym *Symbol
+			if len(overloads) > 1 {
+				// Multiple overloads — pick the best match by arg types.
+				sym = a.scope.lookupFunc(qualifiedName, argTypes)
+				if sym == nil {
+					// Build a readable signature list.
+					a.error(callee.GetPos(), fmt.Sprintf("no matching overload for %q in import alias %q", funcName, alias))
+					return nil
+				}
+			} else {
+				sym = a.scope.lookup(qualifiedName)
+			}
+			if sym == nil {
+				a.error(callee.GetPos(), fmt.Sprintf("undefined function %q in import alias %q", funcName, alias))
+				return nil
+			}
+
+			// Arity check.
+			minArgs := len(sym.Params) - sym.DefaultCount
+			if len(e.Args) < minArgs || len(e.Args) > len(sym.Params) {
+				a.error(e.Pos, fmt.Sprintf("function %q expects %d to %d arguments, got %d",
+					funcName, minArgs, len(sym.Params), len(e.Args)))
+			}
+
+			// Fill in defaults.
+			if len(e.Args) < len(sym.Params) && sym.DefaultCount > 0 {
+				for i := len(e.Args); i < len(sym.Params); i++ {
+					if sym.Defaults[i] != nil {
+						e.Args = append(e.Args, sym.Defaults[i])
+						argTypes = append(argTypes, a.analyzeExpr(sym.Defaults[i]))
+					}
+				}
+			}
+
+			// Argument type checks.
+			for i := range e.Args {
+				if i < len(sym.Params) && sym.Params[i] != nil && i < len(argTypes) && argTypes[i] != nil {
+					if !isAssignableTo(sym.Params[i], argTypes[i]) {
+						a.error(e.Args[i].GetPos(), fmt.Sprintf("argument %d of %q: expected %s, got %s",
+							i+1, funcName, sym.Params[i].Name, argTypes[i].Name))
+					}
+				}
+			}
+
+			// Set the resolved callee to the mangled name.
+			if sym.MangledName != "" {
+				e.ResolvedCallee = sym.MangledName
+			} else {
+				e.ResolvedCallee = sym.Name
+			}
+			return sym.ReturnType
+		}
+
+		// Unknown module — fall through to generic handling.
 		a.analyzeExpr(callee.Object)
 		for _, arg := range e.Args {
 			a.analyzeExpr(arg)
@@ -1098,12 +1338,41 @@ func (a *Analyzer) analyzeCallExpr(e *ast.CallExpr) *Type {
 // ---- Member ----
 
 func (a *Analyzer) analyzeMemberExpr(e *ast.MemberExpr) *Type {
+	// For import aliases used in call expressions, the CallExpr handler does resolution.
+	// For standalone member access (not in call position), check if it's a known alias.
+	if ident, ok := e.Object.(*ast.IdentExpr); ok && a.importAliases[ident.Name] {
+		// This is an aliased import reference — type will be resolved in call context.
+		return nil
+	}
 	a.analyzeExpr(e.Object)
 	// Member access on imported modules / structs cannot be resolved yet.
 	return nil
 }
 
 // ---- Index ----
+
+func (a *Analyzer) analyzeArrayLitExpr(e *ast.ArrayLitExpr) *Type {
+	// Analyse each element expression. If non-empty, infer element type from first element.
+	var elemType *Type
+	for _, el := range e.Elems {
+		t := a.analyzeExpr(el)
+		if t == nil {
+			continue
+		}
+		if elemType == nil {
+			elemType = t
+		}
+	}
+	// For empty array literals, the type will be resolved at the let-statement level
+	// based on the declared type annotation.
+	if elemType == nil {
+		// Return a placeholder array type; the let-stmt will refine it.
+		return &Type{Name: "[]<unknown>", IsArray: true, ElemType: TypeI64}
+	}
+	// Keep untyped element types so the let-stmt can coerce to the declared array type.
+	arrTypeName := "[]" + elemType.Name
+	return &Type{Name: arrTypeName, IsArray: true, ElemType: elemType}
+}
 
 func (a *Analyzer) analyzeIndexExpr(e *ast.IndexExpr) *Type {
 	objType := a.analyzeExpr(e.Object)
@@ -1119,9 +1388,12 @@ func (a *Analyzer) analyzeIndexExpr(e *ast.IndexExpr) *Type {
 		return nil
 	}
 
-	// For now, the only indexable type is str. Indexing yields a 1-character str.
+	// For now, the only indexable types are str and arrays.
 	if objType == TypeStr {
 		return TypeStr
+	}
+	if objType.IsArray {
+		return objType.ElemType
 	}
 
 	a.error(e.Pos, fmt.Sprintf("type %s is not indexable", objType.Name))

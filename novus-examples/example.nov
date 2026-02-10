@@ -1,0 +1,74 @@
+// Novus example for macOS Apple Silicon (M1/M2) usingn the standard library
+module example_app_macos_silicon;
+
+// Import the standard library for macOS on Apple Silicon, which provides
+// utility functions like print, array_len, get_time_ns, and input.
+// The standard library is implemented in lib/standard_lib_macos_silicon.nov also
+// includes the generic standard lib
+import ../lib/standard_lib_macos_silicon;
+
+// ===========================================================================
+// Main
+// ===========================================================================
+fn main() -> i32 {
+    // Start timer
+    let start_ns: i64 = get_time_ns();
+
+    let msg: str = "Hello, World!";
+    print(msg);
+
+    let count: i32 = 0;
+    while (count < 5) {
+        print("Count: " + int_to_str(count));
+        count = count + 1;
+    }
+
+    print('Goodbye, World!');
+
+    // -- Array Demo --
+    print("--- Array Demo ---");
+
+    let nums: []i32 = [10, 20, 30];
+    print("Initial array length: " + int_to_str(array_len(nums)));
+
+    array_append(nums, 40);
+    array_append(nums, 50);
+    print("After appends, length: " + int_to_str(array_len(nums)));
+    let i: i32 = 0;
+    while (i < array_len(nums)) {
+        print("  nums[" + int_to_str(i) + "] = " + int_to_str(nums[i]));
+        i = i + 1;
+    }
+
+    nums[2] = 999;
+    print("After nums[2] = 999 -> nums[2] = " + int_to_str(nums[2]));
+
+    let popped: i32 = array_pop(nums);
+    print("Popped: " + int_to_str(popped));
+    print("Length after pop: " + int_to_str(array_len(nums)));
+
+    // -- Memory Load Demo --
+    print("--- Memory Demo ---");
+    let test_str: str = "ABCD";
+    mov(x9, test_str);
+    let addr: u64 = getreg(x9);
+    let byte_a: i32 = load8(addr);
+    let byte_b: i32 = load8(addr + 1);
+    print("Byte 0 of 'ABCD': " + int_to_str(byte_a));
+    print("Byte 1 of 'ABCD': " + int_to_str(byte_b));
+
+    // -- Timing Demo --
+    print("--- Timing Demo ---");
+    let end_ns: i64 = get_time_ns();
+    let elapsed: i64 = (end_ns - start_ns) / 1000000;
+    print("Duration: " + int_to_str(elapsed) + " ms");
+
+    // -- Input Demo --
+    print("--- Input Demo ---");
+    let inp: str = input("Enter something: ", 128);
+    print("You entered: " + inp);
+    print("Input length: " + int_to_str(len(inp)));
+
+    exit(0);
+    return 0;
+}

@@ -1,0 +1,241 @@
+// Novus example for macOS Apple Silicon (M1/M2)
+module example_app_macos_silicon;
+
+// ---- String length (walks bytes until null terminator) ----
+fn len(s: str) -> i32 {
+    let count: i32 = 0;
+    let i: i32 = 0;
+    while (s[i] != '\0') {
+        count = count + 1;
+        i = i + 1;
+    }
+    return count;
+}
+
+// ---- Array length (reads len field from array header in memory) ----
+// Array heap layout: [data_ptr(8 bytes), len(8 bytes), cap(8 bytes)]
+// On little-endian ARM64, loading 4 bytes at offset 8 gives the lower 32 bits
+// of the length field, which is correct for any reasonable array size.
+fn array_len(arr: []i32) -> i32 {
+    mov(x9, arr);
+    let ptr: u64 = getreg(x9);
+    return load32(ptr + 8);
+}
+
+// ---- Print (writes string + newline to stdout) ----
+fn print(msg: str) -> void {
+    msg = msg + "\n";
+    mov(x0, 1);
+    mov(x1, msg);
+    mov(x2, len(msg));
+    mov(x16, 0x2000004);
+    syscall();
+}
+
+// ---- Integer to string conversion ----
+fn itoa(n: i32) -> str {
+    let out: str = "";
+    let neg: i32 = 0;
+    if (n == 0) { return "0"; }
+    if (n < 0) { neg = 1; n = 0 - n; }
+    let digits: str = "";
+    while (n > 0) {
+        let digit: i32 = n % 10;
+        if (digit == 0) { digits = digits + "0"; }
+        else if (digit == 1) { digits = digits + "1"; }
+        else if (digit == 2) { digits = digits + "2"; }
+        else if (digit == 3) { digits = digits + "3"; }
+        else if (digit == 4) { digits = digits + "4"; }
+        else if (digit == 5) { digits = digits + "5"; }
+        else if (digit == 6) { digits = digits + "6"; }
+        else if (digit == 7) { digits = digits + "7"; }
+        else if (digit == 8) { digits = digits + "8"; }
+        else if (digit == 9) { digits = digits + "9"; }
+        n = n / 10;
+    }
+    if (neg == 1) { digits = digits + "-"; }
+    let i: i32 = len(digits) - 1;
+    while (i >= 0) {
+        out = out + digits[i];
+        i = i - 1;
+    }
+    return out;
+}
+
+// ---- i64 to string (for printing timestamps etc.) ----
+fn itoa64(n: i64) -> str {
+    let out: str = "";
+    let neg: i32 = 0;
+    if (n == 0) { return "0"; }
+    if (n < 0) { neg = 1; n = 0 - n; }
+    let digits: str = "";
+    while (n > 0) {
+        let digit: i64 = n % 10;
+        if (digit == 0) { digits = digits + "0"; }
+        else if (digit == 1) { digits = digits + "1"; }
+        else if (digit == 2) { digits = digits + "2"; }
+        else if (digit == 3) { digits = digits + "3"; }
+        else if (digit == 4) { digits = digits + "4"; }
+        else if (digit == 5) { digits = digits + "5"; }
+        else if (digit == 6) { digits = digits + "6"; }
+        else if (digit == 7) { digits = digits + "7"; }
+        else if (digit == 8) { digits = digits + "8"; }
+        else if (digit == 9) { digits = digits + "9"; }
+        n = n / 10;
+    }
+    if (neg == 1) { digits = digits + "-"; }
+    let i: i32 = len(digits) - 1;
+    while (i >= 0) {
+        out = out + digits[i];
+        i = i - 1;
+    }
+    return out;
+}
+
+// ---- Exit process ----
+fn exit(code: i32) -> void {
+    mov(x0, code);
+    mov(x16, 0x2000001);
+    syscall();
+}
+
+// ---- Get current time in nanoseconds (pure assembly, no compiler magic) ----
+// Uses macOS gettimeofday syscall (0x2000074).
+// Writes a timeval struct {int64 tv_sec, int32 tv_usec} into a string buffer,
+// then reads the fields back with load64/load32.
+fn get_time_ns() -> i64 {
+    // Allocate a 16-byte buffer for the timeval struct
+    let buf: str = "0123456789abcdef";
+
+    // gettimeofday(timeval *tp, timezone *tzp)
+    mov(x0, buf);
+    mov(x1, 0);
+    mov(x16, 0x2000074);
+    syscall();
+
+    // Read back the struct fields using raw memory loads
+    mov(x9, buf);
+    let base: u64 = getreg(x9);
+    let tv_sec: i64 = load64(base);
+    let tv_usec: i64 = load64(base + 8);
+
+    // Convert to nanoseconds: tv_sec * 1_000_000_000 + tv_usec * 1000
+    return tv_sec * 1000000000 + tv_usec * 1000;
+}
+
+// ---- u64 to i32 helper (for syscall return values) ----
+fn u64_to_i32(n: u64) -> i32 {
+    let m: u64 = 4294967296;
+    let lower_u64: u64 = n - (n / m) * m;
+    let result: i32 = 0;
+    let factor_u64: u64 = 1;
+    let factor_i32: i32 = 1;
+    let i: i32 = 0;
+    let rem: u64 = lower_u64;
+    while (i < 32) {
+        let digit: u64 = (rem / factor_u64) % 2;
+        if (digit == 1) {
+            result = result + factor_i32;
+        }
+        factor_u64 = factor_u64 * 2;
+        factor_i32 = factor_i32 * 2;
+        i = i + 1;
+    }
+    return result;
+}
+
+// ---- Read user input ----
+fn input(prompt: str, buf_len: i32 = 128) -> str {
+    mov(x0, 1);
+    mov(x1, prompt);
+    mov(x2, len(prompt));
+    mov(x16, 0x2000004);
+    syscall();
+    let buf: str = "";
+    while(len(buf) < buf_len) {
+        buf = buf + " ";
+    }
+    mov(x0, 0);
+    mov(x1, buf);
+    mov(x2, buf_len);
+    mov(x16, 0x2000003);
+    syscall();
+    let nread: i32 = u64_to_i32(getreg(x0));
+    let out: str = "";
+    let i: i32 = 0;
+    while (i < nread) {
+        if (buf[i] == '\n') {
+            break;
+        }
+        out = out + buf[i];
+        i = i + 1;
+    }
+    return out;
+}
+
+// ===========================================================================
+// Main
+// ===========================================================================
+fn main() -> i32 {
+    // Start timer
+    let start_ns: i64 = get_time_ns();
+
+    let msg: str = "Hello, World!";
+    print(msg);
+
+    let count: i32 = 0;
+    while (count < 5) {
+        print("Count: " + itoa(count));
+        count = count + 1;
+    }
+
+    print('Goodbye, World!');
+
+    // -- Array Demo --
+    print("--- Array Demo ---");
+
+    let nums: []i32 = [10, 20, 30];
+    print("Initial array length: " + itoa(array_len(nums)));
+
+    array_append(nums, 40);
+    array_append(nums, 50);
+    print("After appends, length: " + itoa(array_len(nums)));
+
+    let i: i32 = 0;
+    while (i < array_len(nums)) {
+        print("  nums[" + itoa(i) + "] = " + itoa(nums[i]));
+        i = i + 1;
+    }
+
+    nums[2] = 999;
+    print("After nums[2] = 999 -> nums[2] = " + itoa(nums[2]));
+
+    let popped: i32 = array_pop(nums);
+    print("Popped: " + itoa(popped));
+    print("Length after pop: " + itoa(array_len(nums)));
+
+    // -- Memory Load Demo --
+    print("--- Memory Demo ---");
+    let test_str: str = "ABCD";
+    mov(x9, test_str);
+    let addr: u64 = getreg(x9);
+    let byte_a: i32 = load8(addr);
+    let byte_b: i32 = load8(addr + 1);
+    print("Byte 0 of 'ABCD': " + itoa(byte_a));
+    print("Byte 1 of 'ABCD': " + itoa(byte_b));
+
+    // -- Timing Demo --
+    print("--- Timing Demo ---");
+    let end_ns: i64 = get_time_ns();
+    let elapsed: i64 = (end_ns - start_ns) / 1000000;
+    print("Duration: " + itoa64(elapsed) + " ms");
+
+    // -- Input Demo --
+    print("--- Input Demo ---");
+    let inp: str = input("Enter something: ", 128);
+    print("You entered: " + inp);
+    print("Input length: " + itoa(len(inp)));
+
+    exit(0);
+    return 0;
+}
