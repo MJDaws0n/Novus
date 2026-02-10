@@ -1,0 +1,53 @@
+// macOS "window" example for Novus (Apple Silicon)
+//
+// NOTE: The current Novus darwin/arm64 toolchain links only against -lSystem
+// (no AppKit / Cocoa frameworks), so we can't directly create an NSWindow
+// from Novus code alone.
+//
+// This example stays within the existing compiler/runtime constraints and
+// uses raw syscalls + memory writes to exec `osascript`, which displays a
+// simple titled dialog window.
+
+module example_window;
+
+import ../lib/standard_lib_macos_silicon;
+
+fn ptr(s: str) -> u64 {
+	mov(x9, s);
+	return getreg(x9);
+}
+
+fn array_data_ptr_u64(arr: []u64) -> i64 {
+	// Array heap layout: [data_ptr(8 bytes), len(8 bytes), cap(8 bytes)]
+	mov(x9, arr);
+	let hdr: u64 = getreg(x9);
+	return load64(hdr);
+}
+
+fn main() -> i32 {
+	let osascript_path: str = "/usr/bin/osascript";
+	let arg_e: str = "-e";
+	let script: str = "display dialog \"\" with title \"Example Novus App\"";
+
+	// argv: [osascript_path, "-e", script, NULL]
+	// Build as a real []u64 array, then pass its data pointer to execve.
+	let argv: []u64 = [ptr(osascript_path), ptr(arg_e), ptr(script), 0];
+	let argv_ptr: i64 = array_data_ptr_u64(argv);
+
+	// envp: [NULL]
+	let envp: []u64 = [0];
+	let envp_ptr: i64 = array_data_ptr_u64(envp);
+
+	// execve(path, argv, envp)
+	mov(x0, osascript_path);
+	mov(x1, argv_ptr);
+	mov(x2, envp_ptr);
+	mov(x16, 0x200003b);
+	syscall();
+
+	// If we got here, execve failed.
+	print("execve(/usr/bin/osascript) failed");
+	exit(1);
+	return 1;
+}
+
