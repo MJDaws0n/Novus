@@ -3,6 +3,7 @@ package semantic
 import (
 	"fmt"
 	"novus/internal/ast"
+	"strings"
 )
 
 // ---------------------------------------------------------------------------
@@ -224,14 +225,17 @@ const (
 
 // Symbol records the declaration of a name in a scope.
 type Symbol struct {
-	Name string
-	Kind SymbolKind
-	Type *Type // for variables: the declared type; for functions: the return type
-	Pos  ast.Position
+	Name        string
+	MangledName string // for functions: the assembly-level name (may differ for overloads)
+	Kind        SymbolKind
+	Type        *Type // for variables: the declared type; for functions: the return type
+	Pos         ast.Position
 
 	// Function-only fields.
-	Params     []*Type // parameter types (in order); nil entries = skip type check
-	ReturnType *Type   // same as Type for functions
+	Params       []*Type    // parameter types (in order); nil entries = skip type check
+	Defaults     []ast.Expr // default value expressions (parallel to Params; nil = required)
+	DefaultCount int        // number of trailing parameters that have defaults
+	ReturnType   *Type      // same as Type for functions
 }
 
 // ---------------------------------------------------------------------------
@@ -240,12 +244,17 @@ type Symbol struct {
 
 // Scope is a symbol table with an optional parent (lexical scoping).
 type Scope struct {
-	parent  *Scope
-	symbols map[string]*Symbol
+	parent        *Scope
+	symbols       map[string]*Symbol
+	funcOverloads map[string][]*Symbol // original function name → all overloads
 }
 
 func newScope(parent *Scope) *Scope {
-	return &Scope{parent: parent, symbols: make(map[string]*Symbol)}
+	return &Scope{
+		parent:        parent,
+		symbols:       make(map[string]*Symbol),
+		funcOverloads: make(map[string][]*Symbol),
+	}
 }
 
 // define adds a symbol to this scope (overwrites if already present).
@@ -253,9 +262,68 @@ func (s *Scope) define(sym *Symbol) {
 	s.symbols[sym.Name] = sym
 }
 
+// defineFunc adds a function symbol to this scope, supporting overloading.
+// The symbol is stored under its MangledName in the symbols map, and also
+// added to the funcOverloads list for the original function name.
+func (s *Scope) defineFunc(sym *Symbol) {
+	key := sym.MangledName
+	if key == "" {
+		key = sym.Name
+	}
+	s.symbols[key] = sym
+	s.funcOverloads[sym.Name] = append(s.funcOverloads[sym.Name], sym)
+}
+
 // lookupLocal returns the symbol with the given name in this scope only.
 func (s *Scope) lookupLocal(name string) *Symbol {
 	return s.symbols[name]
+}
+
+// lookupFuncOverloads returns all overloads of a function by its original
+// name, searching up the scope chain.
+func (s *Scope) lookupFuncOverloads(name string) []*Symbol {
+	if overloads, ok := s.funcOverloads[name]; ok && len(overloads) > 0 {
+		return overloads
+	}
+	if s.parent != nil {
+		return s.parent.lookupFuncOverloads(name)
+	}
+	return nil
+}
+
+// lookupFunc finds the best matching function overload for the given name
+// and argument types. Returns nil if no match is found.
+func (s *Scope) lookupFunc(name string, argTypes []*Type) *Symbol {
+	overloads := s.lookupFuncOverloads(name)
+	if len(overloads) == 0 {
+		return nil
+	}
+	// If there's only one overload, return it (arity check is done by caller).
+	if len(overloads) == 1 {
+		return overloads[0]
+	}
+	// Multiple overloads — find the one whose parameter types match.
+	for _, sym := range overloads {
+		minArgs := len(sym.Params) - sym.DefaultCount
+		if len(argTypes) < minArgs || len(argTypes) > len(sym.Params) {
+			continue
+		}
+		match := true
+		for i := 0; i < len(argTypes); i++ {
+			paramType := sym.Params[i]
+			if paramType == nil || argTypes[i] == nil {
+				continue // skip unchecked params (builtins)
+			}
+			if !isAssignableTo(paramType, argTypes[i]) {
+				match = false
+				break
+			}
+		}
+		if match {
+			return sym
+		}
+	}
+	return nil
 }
 
 // lookup traverses the scope chain (current → parent → …) to find a symbol.
@@ -267,6 +335,20 @@ func (s *Scope) lookup(name string) *Symbol {
 		return s.parent.lookup(name)
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Function name mangling
+// ---------------------------------------------------------------------------
+
+// funcMangle returns a mangled name for a function with the given name and
+// parameter type names. Non-overloaded functions keep their original name.
+// Overloaded functions get a suffix: "itoa.i32", "itoa.i64", etc.
+func funcMangle(name string, paramTypeNames []string) string {
+	if len(paramTypeNames) == 0 {
+		return name
+	}
+	return name + "." + strings.Join(paramTypeNames, ".")
 }
 
 // ---------------------------------------------------------------------------
@@ -285,19 +367,20 @@ type builtinInfo struct {
 // getreg and getflag return concrete data that can be used directly in the
 // language (u64 and bool respectively).
 var builtinFuncTable = map[string]builtinInfo{
-	"push":    {Arity: 1, ReturnType: TypeVoid}, // push value onto stack
-	"pop":     {Arity: 0, ReturnType: TypeU64},  // pop stack → u64 value
-	"lea":     {Arity: 2, ReturnType: TypeVoid}, // load effective address
-	"mov":     {Arity: 2, ReturnType: TypeVoid}, // move data
-	"call":    {Arity: 1, ReturnType: TypeVoid}, // call function
-	"ret":     {Arity: 0, ReturnType: TypeVoid}, // return from call
-	"syscall": {Arity: 0, ReturnType: TypeVoid}, // invoke system call
-	"int":     {Arity: 1, ReturnType: TypeVoid}, // software interrupt
-	"setreg":  {Arity: 2, ReturnType: TypeVoid}, // set register value
-	"getreg":  {Arity: 1, ReturnType: TypeU64},  // read register → u64
-	"nop":     {Arity: 0, ReturnType: TypeVoid}, // no operation
-	"setflag": {Arity: 2, ReturnType: TypeVoid}, // set CPU flag
-	"getflag": {Arity: 1, ReturnType: TypeBool}, // read CPU flag → bool
+	"push":      {Arity: 1, ReturnType: TypeVoid}, // push value onto stack
+	"pop":       {Arity: 0, ReturnType: TypeU64},  // pop stack → u64 value
+	"lea":       {Arity: 2, ReturnType: TypeVoid}, // load effective address
+	"mov":       {Arity: 2, ReturnType: TypeVoid}, // move data
+	"call":      {Arity: 1, ReturnType: TypeVoid}, // call function
+	"ret":       {Arity: 0, ReturnType: TypeVoid}, // return from call
+	"syscall":   {Arity: 0, ReturnType: TypeVoid}, // invoke system call
+	"int":       {Arity: 1, ReturnType: TypeVoid}, // software interrupt
+	"setreg":    {Arity: 2, ReturnType: TypeVoid}, // set register value
+	"getreg":    {Arity: 1, ReturnType: TypeU64},  // read register → u64
+	"nop":       {Arity: 0, ReturnType: TypeVoid}, // no operation
+	"setflag":   {Arity: 2, ReturnType: TypeVoid}, // set CPU flag
+	"getflag":   {Arity: 1, ReturnType: TypeBool}, // read CPU flag → bool
+	"__time_ns": {Arity: 0, ReturnType: TypeI64},  // current time in nanoseconds
 }
 
 // ---------------------------------------------------------------------------
@@ -305,14 +388,14 @@ var builtinFuncTable = map[string]builtinInfo{
 // ---------------------------------------------------------------------------
 
 var reservedRegisters = []string{
-	// 32-bit general purpose
+	// x86 32-bit general purpose
 	"eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp",
-	// 64-bit general purpose
+	// x86 64-bit general purpose
 	"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp",
 	"r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
-	// Instruction pointers
+	// x86 Instruction pointers
 	"eip", "rip",
-	// Flags
+	// x86 Flags
 	"eflags", "rflags",
 	// x87 FPU
 	"st0", "st1", "st2", "st3", "st4", "st5", "st6", "st7",
@@ -321,6 +404,18 @@ var reservedRegisters = []string{
 	// SSE
 	"xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7",
 	"xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15",
+	// ARM64 64-bit general purpose
+	"x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7",
+	"x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15",
+	"x16", "x17", "x18", "x19", "x20", "x21", "x22", "x23",
+	"x24", "x25", "x26", "x27", "x28", "x29", "x30",
+	// ARM64 32-bit general purpose
+	"w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7",
+	"w8", "w9", "w10", "w11", "w12", "w13", "w14", "w15",
+	"w16", "w17", "w18", "w19", "w20", "w21", "w22", "w23",
+	"w24", "w25", "w26", "w27", "w28", "w29", "w30",
+	// ARM64 special registers
+	"sp", "xzr", "wzr", "lr",
 }
 
 // ---------------------------------------------------------------------------
@@ -405,41 +500,88 @@ func (a *Analyzer) injectBuiltins() {
 // ---------------------------------------------------------------------------
 
 func (a *Analyzer) analyzeProgram(prog *ast.Program) {
+	// Pre-scan: detect which function names have multiple declarations
+	// (candidates for overloading).
+	nameCount := map[string]int{}
+	for _, fn := range prog.Functions {
+		nameCount[fn.Name]++
+	}
+
 	// First pass — register every top-level function so that they can call
 	// each other (including recursion) regardless of source order.
 	for _, fn := range prog.Functions {
+		// Check for collisions with builtins / registers.
 		if existing := a.scope.lookupLocal(fn.Name); existing != nil {
-			switch existing.Kind {
-			case SymBuiltin:
+			if existing.Kind == SymBuiltin {
 				a.error(fn.Pos, fmt.Sprintf("cannot redeclare built-in function %q", fn.Name))
-			case SymReg:
-				a.error(fn.Pos, fmt.Sprintf("cannot use reserved register name %q as function name", fn.Name))
-			default:
-				a.error(fn.Pos, fmt.Sprintf("function %q already declared at %s", fn.Name, existing.Pos))
+				continue
 			}
-			continue
+			if existing.Kind == SymReg {
+				a.error(fn.Pos, fmt.Sprintf("cannot use reserved register name %q as function name", fn.Name))
+				continue
+			}
 		}
 
 		retType := a.resolveType(fn.ReturnType)
 		paramTypes := make([]*Type, len(fn.Params))
+		paramTypeNames := make([]string, len(fn.Params))
+		defaults := make([]ast.Expr, len(fn.Params))
+		defaultCount := 0
+		seenDefault := false
 		for i, p := range fn.Params {
 			paramTypes[i] = a.resolveType(p.Type)
+			if p.Type != nil {
+				paramTypeNames[i] = p.Type.Name
+			} else {
+				paramTypeNames[i] = "void"
+			}
+			if p.Default != nil {
+				seenDefault = true
+				defaults[i] = p.Default
+				defaultCount++
+			} else if seenDefault {
+				a.error(p.Pos, fmt.Sprintf("parameter %q without default follows parameter with default", p.Name))
+			}
 		}
 
-		a.scope.define(&Symbol{
-			Name:       fn.Name,
-			Kind:       SymFunc,
-			Type:       retType,
-			Pos:        fn.Pos,
-			Params:     paramTypes,
-			ReturnType: retType,
-		})
+		// Compute the mangled name. Only overloaded functions get a suffix.
+		mangledName := fn.Name
+		if nameCount[fn.Name] > 1 {
+			mangledName = funcMangle(fn.Name, paramTypeNames)
+		}
+
+		// Check for duplicate with the same mangled signature.
+		if existing := a.scope.lookupLocal(mangledName); existing != nil {
+			a.error(fn.Pos, fmt.Sprintf("function %q with signature (%s) already declared at %s",
+				fn.Name, strings.Join(paramTypeNames, ", "), existing.Pos))
+			continue
+		}
+
+		// Store mangled name on the AST node for the lowerer.
+		fn.MangledName = mangledName
+
+		sym := &Symbol{
+			Name:         fn.Name,
+			MangledName:  mangledName,
+			Kind:         SymFunc,
+			Type:         retType,
+			Pos:          fn.Pos,
+			Params:       paramTypes,
+			Defaults:     defaults,
+			DefaultCount: defaultCount,
+			ReturnType:   retType,
+		}
+		a.scope.defineFunc(sym)
 	}
 
 	// Second pass — analyse each function body.
 	for _, fn := range prog.Functions {
 		// Skip functions that failed registration (reserved names).
-		if sym := a.scope.lookupLocal(fn.Name); sym == nil || (sym.Kind != SymFunc) {
+		mangledName := fn.MangledName
+		if mangledName == "" {
+			mangledName = fn.Name
+		}
+		if sym := a.scope.lookupLocal(mangledName); sym == nil || (sym.Kind != SymFunc) {
 			continue
 		}
 		a.analyzeFunction(fn)
@@ -473,6 +615,15 @@ func (a *Analyzer) analyzeFunction(fn *ast.FnDecl) {
 			Type: pType,
 			Pos:  param.Pos,
 		})
+
+		// Type-check the default value if present.
+		if param.Default != nil {
+			defType := a.analyzeExpr(param.Default)
+			if defType != nil && pType != nil && !isAssignableTo(pType, defType) {
+				a.error(param.Pos, fmt.Sprintf("default value for %q: expected %s, got %s",
+					param.Name, pType.Name, defType.Name))
+			}
+		}
 	}
 
 	// Analyse the function body in a nested scope so that body-level
@@ -847,37 +998,81 @@ func (a *Analyzer) analyzeCallExpr(e *ast.CallExpr) *Type {
 			return nil
 		}
 
+		// First, analyze all argument types so we can resolve overloads.
+		argTypes := make([]*Type, len(e.Args))
+		for i, arg := range e.Args {
+			argTypes[i] = a.analyzeExpr(arg)
+		}
+
+		// Try to resolve as a builtin or non-overloaded symbol first.
 		sym := a.scope.lookup(callee.Name)
+
+		// If not found directly, or if found but it's not callable, try overloads.
+		if sym == nil || (sym.Kind != SymFunc && sym.Kind != SymBuiltin) {
+			// Try function overloads.
+			overloadSym := a.scope.lookupFunc(callee.Name, argTypes)
+			if overloadSym != nil {
+				sym = overloadSym
+			}
+		} else if sym.Kind == SymFunc {
+			// Found a function; check if there are overloads and pick the best match.
+			overloads := a.scope.lookupFuncOverloads(callee.Name)
+			if len(overloads) > 1 {
+				overloadSym := a.scope.lookupFunc(callee.Name, argTypes)
+				if overloadSym != nil {
+					sym = overloadSym
+				} else {
+					// No exact match — report error with available overloads.
+					a.error(e.Pos, fmt.Sprintf("no matching overload of %q for the given argument types", callee.Name))
+					return nil
+				}
+			}
+		}
+
 		if sym == nil {
 			a.error(callee.Pos, fmt.Sprintf("undefined function %q", callee.Name))
-			for _, arg := range e.Args {
-				a.analyzeExpr(arg)
-			}
 			return nil
 		}
 
 		// Only functions and builtins are callable.
 		if sym.Kind != SymFunc && sym.Kind != SymBuiltin {
 			a.error(callee.Pos, fmt.Sprintf("%q is not a function", callee.Name))
-			for _, arg := range e.Args {
-				a.analyzeExpr(arg)
-			}
 			return nil
 		}
 
-		// Arity check.
-		if len(e.Args) != len(sym.Params) {
-			a.error(e.Pos, fmt.Sprintf("function %q expects %d arguments, got %d", callee.Name, len(sym.Params), len(e.Args)))
+		// Arity check — allow fewer args when trailing defaults exist.
+		minArgs := len(sym.Params) - sym.DefaultCount
+		if len(e.Args) < minArgs || len(e.Args) > len(sym.Params) {
+			a.error(e.Pos, fmt.Sprintf("function %q expects %d to %d arguments, got %d",
+				callee.Name, minArgs, len(sym.Params), len(e.Args)))
+		}
+
+		// Fill in default values for omitted arguments.
+		if len(e.Args) < len(sym.Params) && sym.DefaultCount > 0 {
+			for i := len(e.Args); i < len(sym.Params); i++ {
+				if sym.Defaults[i] != nil {
+					e.Args = append(e.Args, sym.Defaults[i])
+					// Analyse the default expression and add its type.
+					defType := a.analyzeExpr(sym.Defaults[i])
+					argTypes = append(argTypes, defType)
+				}
+			}
 		}
 
 		// Argument type checks (nil param entries = skip, used by builtins).
-		for i, arg := range e.Args {
-			argType := a.analyzeExpr(arg)
-			if i < len(sym.Params) && sym.Params[i] != nil && argType != nil {
-				if !isAssignableTo(sym.Params[i], argType) {
-					a.error(arg.GetPos(), fmt.Sprintf("argument %d of %q: expected %s, got %s", i+1, callee.Name, sym.Params[i].Name, argType.Name))
+		for i := range e.Args {
+			if i < len(sym.Params) && sym.Params[i] != nil && i < len(argTypes) && argTypes[i] != nil {
+				if !isAssignableTo(sym.Params[i], argTypes[i]) {
+					a.error(e.Args[i].GetPos(), fmt.Sprintf("argument %d of %q: expected %s, got %s", i+1, callee.Name, sym.Params[i].Name, argTypes[i].Name))
 				}
 			}
+		}
+
+		// Set the resolved callee for the lowerer (mangled name for overloads).
+		if sym.MangledName != "" && sym.MangledName != sym.Name {
+			e.ResolvedCallee = sym.MangledName
+		} else {
+			e.ResolvedCallee = sym.Name
 		}
 
 		return sym.ReturnType

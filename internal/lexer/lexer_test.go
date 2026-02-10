@@ -544,7 +544,7 @@ func TestExampleNovFile(t *testing.T) {
 		val string
 	}{
 		{MODULE, "module"},
-		{IDENT, "hello_world_macos_silicon"},
+		{IDENT, "example_app_macos_silicon"},
 		{SEMICOLON, ";"},
 	}
 	for i, exp := range expectedStart {

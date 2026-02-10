@@ -71,11 +71,12 @@ type ImportDecl struct {
 
 func (n *ImportDecl) GetPos() Position { return n.Pos }
 
-// Param represents a single function parameter (name: type).
+// Param represents a single function parameter (name: type) or (name: type = default).
 type Param struct {
-	Name string
-	Type *TypeExpr
-	Pos  Position
+	Name    string
+	Type    *TypeExpr
+	Default Expr // optional default value expression (nil if no default)
+	Pos     Position
 }
 
 // TypeExpr represents a type annotation such as "i32", "str", "void".
@@ -85,11 +86,12 @@ type TypeExpr struct {
 }
 
 type FnDecl struct {
-	Name       string
-	Params     []*Param
-	ReturnType *TypeExpr
-	Body       *BlockStmt
-	Pos        Position
+	Name        string
+	MangledName string // set by semantic analysis; used as the assembly/IR label
+	Params      []*Param
+	ReturnType  *TypeExpr
+	Body        *BlockStmt
+	Pos         Position
 }
 
 func (n *FnDecl) GetPos() Position { return n.Pos }
@@ -267,9 +269,10 @@ func (n *BinaryExpr) exprNode()        {}
 
 // CallExpr: <callee>(<args>)
 type CallExpr struct {
-	Callee Expr
-	Args   []Expr
-	Pos    Position
+	Callee         Expr
+	Args           []Expr
+	ResolvedCallee string // set by semantic analysis; the mangled function name to call
+	Pos            Position
 }
 
 func (n *CallExpr) GetPos() Position { return n.Pos }
@@ -351,7 +354,11 @@ func debugFnDecl(b *strings.Builder, fn *FnDecl, level int) {
 	writeIndent(b, level)
 	params := make([]string, len(fn.Params))
 	for i, p := range fn.Params {
-		params[i] = p.Name + ": " + p.Type.Name
+		s := p.Name + ": " + p.Type.Name
+		if p.Default != nil {
+			s += " = " + ExprString(p.Default)
+		}
+		params[i] = s
 	}
 	retName := "void"
 	if fn.ReturnType != nil {

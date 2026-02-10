@@ -29,8 +29,9 @@ type Lowerer struct {
 	nextSlot int            // next slot index
 
 	// Type tracking for string-aware lowering.
-	varTypes  map[string]string // variable name → declared type (e.g. "str", "i32")
-	vregIsStr map[int]bool      // vreg number → true if it holds a string pointer
+	varTypes     map[string]string // variable name → declared type (e.g. "str", "i32")
+	vregIsStr    map[int]bool      // vreg number → true if it holds a string pointer
+	funcRetTypes map[string]string // function name → return type (pre-scanned)
 
 	// Loop context for break/continue.
 	loopBreakLabel    string
@@ -42,10 +43,24 @@ type Lowerer struct {
 
 // Lower translates an AST Program into an IRModule for the given target.
 func Lower(program *ast.Program, target *Target) *IRModule {
+	// Pre-scan function signatures to know return types.
+	funcRetTypes := map[string]string{}
+	for _, fn := range program.Functions {
+		if fn.ReturnType != nil {
+			// Use MangledName if set (for overloaded functions), otherwise plain Name.
+			key := fn.MangledName
+			if key == "" {
+				key = fn.Name
+			}
+			funcRetTypes[key] = fn.ReturnType.Name
+		}
+	}
+
 	l := &Lowerer{
-		module:   &IRModule{EntryFunc: "main"},
-		target:   target,
-		physRegs: makePhysRegSet(),
+		module:       &IRModule{EntryFunc: "main"},
+		target:       target,
+		physRegs:     makePhysRegSet(),
+		funcRetTypes: funcRetTypes,
 	}
 
 	for _, fn := range program.Functions {
@@ -59,17 +74,17 @@ func Lower(program *ast.Program, target *Target) *IRModule {
 // Novus (same list as semantic.reservedRegisters).
 func makePhysRegSet() map[string]bool {
 	regs := map[string]bool{
-		// 32-bit general purpose
+		// x86 32-bit general purpose
 		"eax": true, "ebx": true, "ecx": true, "edx": true,
 		"esi": true, "edi": true, "ebp": true, "esp": true,
-		// 64-bit general purpose
+		// x86 64-bit general purpose
 		"rax": true, "rbx": true, "rcx": true, "rdx": true,
 		"rsi": true, "rdi": true, "rbp": true, "rsp": true,
 		"r8": true, "r9": true, "r10": true, "r11": true,
 		"r12": true, "r13": true, "r14": true, "r15": true,
-		// Instruction pointers
+		// x86 Instruction pointers
 		"eip": true, "rip": true,
-		// Flags
+		// x86 Flags
 		"eflags": true, "rflags": true,
 		// x87 FPU
 		"st0": true, "st1": true, "st2": true, "st3": true,
@@ -82,6 +97,26 @@ func makePhysRegSet() map[string]bool {
 		"xmm4": true, "xmm5": true, "xmm6": true, "xmm7": true,
 		"xmm8": true, "xmm9": true, "xmm10": true, "xmm11": true,
 		"xmm12": true, "xmm13": true, "xmm14": true, "xmm15": true,
+		// ARM64 64-bit general purpose
+		"x0": true, "x1": true, "x2": true, "x3": true,
+		"x4": true, "x5": true, "x6": true, "x7": true,
+		"x8": true, "x9": true, "x10": true, "x11": true,
+		"x12": true, "x13": true, "x14": true, "x15": true,
+		"x16": true, "x17": true, "x18": true, "x19": true,
+		"x20": true, "x21": true, "x22": true, "x23": true,
+		"x24": true, "x25": true, "x26": true, "x27": true,
+		"x28": true, "x29": true, "x30": true,
+		// ARM64 32-bit general purpose
+		"w0": true, "w1": true, "w2": true, "w3": true,
+		"w4": true, "w5": true, "w6": true, "w7": true,
+		"w8": true, "w9": true, "w10": true, "w11": true,
+		"w12": true, "w13": true, "w14": true, "w15": true,
+		"w16": true, "w17": true, "w18": true, "w19": true,
+		"w20": true, "w21": true, "w22": true, "w23": true,
+		"w24": true, "w25": true, "w26": true, "w27": true,
+		"w28": true, "w29": true, "w30": true,
+		// ARM64 special registers
+		"sp": true, "xzr": true, "wzr": true, "lr": true,
 	}
 	return regs
 }
@@ -141,8 +176,14 @@ func (l *Lowerer) slotMem(slot int) Operand {
 // ---------------------------------------------------------------------------
 
 func (l *Lowerer) lowerFunction(fn *ast.FnDecl) {
+	// Use the mangled name for the IR label (handles overloaded functions).
+	irName := fn.MangledName
+	if irName == "" {
+		irName = fn.Name
+	}
+
 	irFn := &IRFunc{
-		Name:       fn.Name,
+		Name:       irName,
 		ParamCount: len(fn.Params),
 		ParamNames: make([]string, len(fn.Params)),
 	}
@@ -156,7 +197,7 @@ func (l *Lowerer) lowerFunction(fn *ast.FnDecl) {
 	l.vregIsStr = map[int]bool{}
 
 	// Function prologue label.
-	l.emit(IRInstr{Op: IRLabel, Dst: LabelOp(fn.Name)})
+	l.emit(IRInstr{Op: IRLabel, Dst: LabelOp(irName)})
 	l.emitComment(fmt.Sprintf("function %s", fn.Name))
 
 	// Allocate stack slots for parameters and store them.
@@ -372,12 +413,12 @@ func (l *Lowerer) lowerAssignStmt(s *ast.AssignStmt) {
 			l.emit(IRInstr{Op: IRStore, Dst: l.slotMem(slot), Src1: valOp})
 		}
 	case *ast.IndexExpr:
-		// arr[idx] = val  →  compute base+idx, store
+		// str[idx] = val  →  compute base+idx, store a single byte.
 		baseOp := l.lowerExpr(target.Object)
 		idxOp := l.lowerExpr(target.Index)
 		addrReg := l.freshVReg()
 		l.emit(IRInstr{Op: IRAdd, Dst: VReg(addrReg), Src1: baseOp, Src2: idxOp})
-		l.emit(IRInstr{Op: IRStore, Dst: Mem("", 0), Src1: valOp, Src2: VReg(addrReg)})
+		l.emit(IRInstr{Op: IRStoreByte, Dst: VReg(addrReg), Src1: valOp})
 	}
 }
 
@@ -511,27 +552,52 @@ func (l *Lowerer) operandIsStr(op Operand) bool {
 	return false
 }
 
+// charToStr converts a byte value (e.g. from str_index) into a 1-char
+// null-terminated string by storing it on the stack and returning the address.
+// On little-endian systems, storing a byte value as a 64-bit qword naturally
+// places the byte at offset 0 and zeros (null terminators) at offsets 1-7.
+func (l *Lowerer) charToStr(byteOp Operand) Operand {
+	slot := l.allocVar(fmt.Sprintf("_c2s_%d", l.nextVReg))
+	l.emit(IRInstr{Op: IRStore, Dst: l.slotMem(slot), Src1: byteOp})
+	reg := l.freshVReg()
+	l.emit(IRInstr{Op: IRLea, Dst: VReg(reg), Src1: l.slotMem(slot)})
+	l.vregIsStr[reg] = true
+	return VReg(reg)
+}
+
 func (l *Lowerer) lowerBinaryExpr(e *ast.BinaryExpr) Operand {
 	left := l.lowerExpr(e.Left)
 	right := l.lowerExpr(e.Right)
 
-	// String concatenation: if both operands are strings, emit IRStrConcat.
-	if e.Op == "+" && l.operandIsStr(left) && l.operandIsStr(right) {
-		// Compile-time constant folding when both are literal string refs.
-		if left.Kind == OpStringRef && right.Kind == OpStringRef {
-			li := int(left.Imm)
-			ri := int(right.Imm)
-			if li >= 0 && li < len(l.module.Strings) && ri >= 0 && ri < len(l.module.Strings) {
-				combined := l.module.Strings[li].Value + l.module.Strings[ri].Value
-				idx := l.module.AddString(combined)
-				return StrRef(idx)
+	// String concatenation: if at least one operand is a string and op is +.
+	if e.Op == "+" {
+		leftStr := l.operandIsStr(left)
+		rightStr := l.operandIsStr(right)
+
+		if leftStr || rightStr {
+			// Compile-time constant folding when both are literal string refs.
+			if left.Kind == OpStringRef && right.Kind == OpStringRef {
+				li := int(left.Imm)
+				ri := int(right.Imm)
+				if li >= 0 && li < len(l.module.Strings) && ri >= 0 && ri < len(l.module.Strings) {
+					combined := l.module.Strings[li].Value + l.module.Strings[ri].Value
+					idx := l.module.AddString(combined)
+					return StrRef(idx)
+				}
 			}
+			// Convert non-string operand (byte) to a 1-char string if needed.
+			if !leftStr {
+				left = l.charToStr(left)
+			}
+			if !rightStr {
+				right = l.charToStr(right)
+			}
+			// Runtime concatenation.
+			dst := l.freshVReg()
+			l.vregIsStr[dst] = true
+			l.emit(IRInstr{Op: IRStrConcat, Dst: VReg(dst), Src1: left, Src2: right})
+			return VReg(dst)
 		}
-		// Runtime concatenation.
-		dst := l.freshVReg()
-		l.vregIsStr[dst] = true
-		l.emit(IRInstr{Op: IRStrConcat, Dst: VReg(dst), Src1: left, Src2: right})
-		return VReg(dst)
 	}
 	dst := l.freshVReg()
 
@@ -589,6 +655,12 @@ func (l *Lowerer) lowerCallExpr(e *ast.CallExpr) Operand {
 		return handler(e)
 	}
 
+	// Use the resolved callee name from semantic analysis (handles overloads).
+	resolvedName := calleeName
+	if e.ResolvedCallee != "" {
+		resolvedName = e.ResolvedCallee
+	}
+
 	// Regular function call — lower arguments, emit call.
 	var argOps []Operand
 	for _, arg := range e.Args {
@@ -599,9 +671,12 @@ func (l *Lowerer) lowerCallExpr(e *ast.CallExpr) Operand {
 	l.emit(IRInstr{
 		Op:   IRCall,
 		Dst:  VReg(dst),
-		Src1: LabelOp(calleeName),
+		Src1: LabelOp(resolvedName),
 		Args: argOps,
 	})
+	if l.funcRetTypes[resolvedName] == "str" {
+		l.vregIsStr[dst] = true
+	}
 	return VReg(dst)
 }
 
@@ -634,20 +709,21 @@ type builtinHandler func(e *ast.CallExpr) Operand
 
 func (l *Lowerer) builtinHandlers() map[string]builtinHandler {
 	return map[string]builtinHandler{
-		"mov":     l.builtinMov,
-		"lea":     l.builtinLea,
-		"push":    l.builtinPush,
-		"pop":     l.builtinPop,
-		"syscall": l.builtinSyscall,
-		"int":     l.builtinInt,
-		"call":    l.builtinCall,
-		"ret":     l.builtinRet,
-		"nop":     l.builtinNop,
-		"setreg":  l.builtinSetReg,
-		"getreg":  l.builtinGetReg,
-		"setflag": l.builtinSetFlag,
-		"getflag": l.builtinGetFlag,
-		"len":     l.builtinLen,
+		"mov":       l.builtinMov,
+		"lea":       l.builtinLea,
+		"push":      l.builtinPush,
+		"pop":       l.builtinPop,
+		"syscall":   l.builtinSyscall,
+		"int":       l.builtinInt,
+		"call":      l.builtinCall,
+		"ret":       l.builtinRet,
+		"nop":       l.builtinNop,
+		"setreg":    l.builtinSetReg,
+		"getreg":    l.builtinGetReg,
+		"setflag":   l.builtinSetFlag,
+		"getflag":   l.builtinGetFlag,
+		"len":       l.builtinLen,
+		"__time_ns": l.builtinTimeNs,
 	}
 }
 
@@ -797,6 +873,13 @@ func (l *Lowerer) builtinLen(e *ast.CallExpr) Operand {
 	srcOp := l.lowerExpr(e.Args[0])
 	dst := l.freshVReg()
 	l.emit(IRInstr{Op: IRStrLen, Dst: VReg(dst), Src1: srcOp})
+	return VReg(dst)
+}
+
+// __time_ns() — get current time in nanoseconds.
+func (l *Lowerer) builtinTimeNs(e *ast.CallExpr) Operand {
+	dst := l.freshVReg()
+	l.emit(IRInstr{Op: IRGetTimeNs, Dst: VReg(dst)})
 	return VReg(dst)
 }
 

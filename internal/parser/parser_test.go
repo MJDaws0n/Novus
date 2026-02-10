@@ -634,7 +634,7 @@ func TestParseExampleNovFile(t *testing.T) {
 		t.FailNow()
 	}
 
-	if prog.Module == nil || prog.Module.Name != "hello_world_macos_silicon" {
+	if prog.Module == nil || prog.Module.Name != "example_app_macos_silicon" {
 		t.Errorf("module: got %v", prog.Module)
 	}
 
@@ -642,8 +642,8 @@ func TestParseExampleNovFile(t *testing.T) {
 		t.Errorf("imports: got %v", prog.Imports)
 	}
 
-	if len(prog.Functions) != 4 {
-		t.Fatalf("expected 4 functions, got %d", len(prog.Functions))
+	if len(prog.Functions) != 9 {
+		t.Fatalf("expected 9 functions, got %d", len(prog.Functions))
 	}
 	if prog.Functions[0].Name != "len" {
 		t.Errorf("fn[0] name: got %q", prog.Functions[0].Name)
@@ -654,8 +654,23 @@ func TestParseExampleNovFile(t *testing.T) {
 	if prog.Functions[2].Name != "main" {
 		t.Errorf("fn[2] name: got %q", prog.Functions[2].Name)
 	}
-	if prog.Functions[3].Name != "exit" {
+	if prog.Functions[3].Name != "itoa" {
 		t.Errorf("fn[3] name: got %q", prog.Functions[3].Name)
+	}
+	if prog.Functions[4].Name != "itoa" {
+		t.Errorf("fn[4] name: got %q", prog.Functions[4].Name)
+	}
+	if prog.Functions[5].Name != "exit" {
+		t.Errorf("fn[5] name: got %q", prog.Functions[5].Name)
+	}
+	if prog.Functions[6].Name != "get_time_ns" {
+		t.Errorf("fn[6] name: got %q", prog.Functions[6].Name)
+	}
+	if prog.Functions[7].Name != "u64_to_i32" {
+		t.Errorf("fn[7] name: got %q", prog.Functions[7].Name)
+	}
+	if prog.Functions[8].Name != "input" {
+		t.Errorf("fn[8] name: got %q", prog.Functions[8].Name)
 	}
 
 	t.Logf("AST:\n%s", ast.DebugString(prog))

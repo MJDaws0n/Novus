@@ -176,6 +176,14 @@ func run() int {
 		fmt.Printf("  Binary:   %s\n", result.ExeFile)
 	}
 
+	// Print register-target warnings at the end.
+	if len(result.Warnings) > 0 {
+		fmt.Println()
+		for _, w := range result.Warnings {
+			fmt.Printf("  %s\n", w)
+		}
+	}
+
 	printDebug("Compilation pipeline finished successfully.")
 	return 0
 }

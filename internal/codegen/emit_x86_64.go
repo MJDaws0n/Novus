@@ -110,10 +110,14 @@ func (e *x86_64Emitter) emitGAS() {
 		w.WriteString("\n")
 	}
 
-	// --- BSS: string concatenation buffer ---
+	// --- BSS: string concatenation double-buffer ---
 	if e.usesStrConcat() {
-		bufSym := e.target.Sym("_novus_strcat_buf")
-		w.WriteString(fmt.Sprintf(".lcomm %s, 4096\n\n", bufSym))
+		bufA := e.target.Sym("_novus_strcat_buf_a")
+		bufB := e.target.Sym("_novus_strcat_buf_b")
+		sel := e.target.Sym("_novus_strcat_sel")
+		w.WriteString(fmt.Sprintf(".lcomm %s, 4096\n", bufA))
+		w.WriteString(fmt.Sprintf(".lcomm %s, 4096\n", bufB))
+		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n\n", sel))
 	}
 
 	// --- Text section ---
@@ -425,6 +429,12 @@ func (e *x86_64Emitter) emitGASInstr(fn *IRFunc, instr IRInstr) {
 		e.emitGASStrLen(fn, instr)
 	case IRStrIndex:
 		e.emitGASStrIndex(fn, instr)
+	case IRStoreByte:
+		addr := e.gasLoadToReg(fn, instr.Dst, "%r11")
+		src := e.gasLoadToReg(fn, instr.Src1, "%r10")
+		w.WriteString(fmt.Sprintf("    movb %sb, (%s)\n", src, addr))
+	case IRGetTimeNs:
+		e.emitGASGetTimeNs(fn, instr)
 
 	case IRData:
 		// handled in data section
@@ -548,6 +558,45 @@ func (e *x86_64Emitter) emitGASCall(fn *IRFunc, instr IRInstr) {
 // GAS string operations (inline)
 // ---------------------------------------------------------------------------
 
+// emitGASGetTimeNs emits inline GAS assembly to get time in nanoseconds.
+// macOS x86_64: gettimeofday syscall 0x2000074 (rdi=ptr, rsi=NULL).
+// Linux x86_64: clock_gettime syscall 228 (rdi=CLOCK_MONOTONIC, rsi=ptr).
+func (e *x86_64Emitter) emitGASGetTimeNs(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	w.WriteString("    // __time_ns: get current time in nanoseconds\n")
+	w.WriteString("    subq $16, %rsp\n") // allocate 16 bytes for struct
+
+	if e.target.OS == OS_Darwin {
+		// gettimeofday(rdi=ptr, rsi=NULL), syscall 0x2000074
+		w.WriteString("    movq %rsp, %rdi\n")
+		w.WriteString("    xorq %rsi, %rsi\n")
+		w.WriteString("    movq $0x2000074, %rax\n")
+		w.WriteString("    syscall\n")
+		// rsp+0 = tv_sec, rsp+8 = tv_usec
+		w.WriteString("    movq 0(%rsp), %r10\n") // tv_sec
+		w.WriteString("    movq 8(%rsp), %r11\n") // tv_usec
+		// result = tv_sec * 1_000_000_000 + tv_usec * 1000
+		w.WriteString("    imulq $1000000000, %r10, %r10\n")
+		w.WriteString("    imulq $1000, %r11, %r11\n")
+		w.WriteString("    addq %r11, %r10\n")
+	} else {
+		// clock_gettime(rdi=CLOCK_MONOTONIC=1, rsi=ptr), syscall 228
+		w.WriteString("    movq $1, %rdi\n")
+		w.WriteString("    movq %rsp, %rsi\n")
+		w.WriteString("    movq $228, %rax\n")
+		w.WriteString("    syscall\n")
+		// rsp+0 = tv_sec, rsp+8 = tv_nsec
+		w.WriteString("    movq 0(%rsp), %r10\n") // tv_sec
+		w.WriteString("    movq 8(%rsp), %r11\n") // tv_nsec
+		// result = tv_sec * 1_000_000_000 + tv_nsec
+		w.WriteString("    imulq $1000000000, %r10, %r10\n")
+		w.WriteString("    addq %r11, %r10\n")
+	}
+
+	w.WriteString("    addq $16, %rsp\n") // deallocate
+	e.gasStoreToOperand(fn, instr.Dst, "%r10")
+}
+
 func (e *x86_64Emitter) emitGASStrConcat(fn *IRFunc, instr IRInstr) {
 	w := e.b
 	src1 := e.gasLoadToReg(fn, instr.Src1, "%r10")
@@ -660,10 +709,12 @@ func (e *x86_64Emitter) emitNASM() {
 		w.WriteString("\n")
 	}
 
-	// BSS: string concatenation buffer.
+	// BSS: string concatenation double-buffer.
 	if e.usesStrConcat() {
 		w.WriteString("section .bss\n")
-		w.WriteString("    _novus_strcat_buf: resb 4096\n\n")
+		w.WriteString("    _novus_strcat_buf_a: resb 4096\n")
+		w.WriteString("    _novus_strcat_buf_b: resb 4096\n")
+		w.WriteString("    _novus_strcat_sel: resb 8\n\n")
 	}
 
 	w.WriteString("section .text\n")
@@ -938,8 +989,14 @@ func (e *x86_64Emitter) emitNASMInstr(fn *IRFunc, instr IRInstr) {
 		e.emitNASMStrLen(fn, instr)
 	case IRStrIndex:
 		e.emitNASMStrIndex(fn, instr)
+	case IRStoreByte:
+		addr := e.nasmLoadToReg(fn, instr.Dst, "r11")
+		src := e.nasmLoadToReg(fn, instr.Src1, "r10")
+		w.WriteString(fmt.Sprintf("    mov byte [%s], %sb\n", addr, src))
 	case IRStrConcat:
 		e.emitNASMStrConcat(fn, instr)
+	case IRGetTimeNs:
+		e.emitNASMGetTimeNs(fn, instr)
 	}
 }
 
@@ -1037,6 +1094,34 @@ func (e *x86_64Emitter) emitNASMStrIndex(fn *IRFunc, instr IRInstr) {
 	e.nasmStoreToOperand(fn, instr.Dst, "rax")
 }
 
+// emitNASMGetTimeNs emits inline NASM assembly to get time in nanoseconds.
+// Windows x86_64: stub returning 0 (no raw syscall equivalent).
+// Linux NASM: clock_gettime syscall 228.
+func (e *x86_64Emitter) emitNASMGetTimeNs(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	w.WriteString("    ; __time_ns: get current time in nanoseconds\n")
+	w.WriteString("    sub rsp, 16\n") // allocate 16 bytes for struct
+
+	if e.target.OS == OS_Linux {
+		// clock_gettime(rdi=CLOCK_MONOTONIC=1, rsi=ptr), syscall 228
+		w.WriteString("    mov rdi, 1\n")
+		w.WriteString("    mov rsi, rsp\n")
+		w.WriteString("    mov rax, 228\n")
+		w.WriteString("    syscall\n")
+		// rsp+0 = tv_sec, rsp+8 = tv_nsec
+		w.WriteString("    mov r10, [rsp]\n")   // tv_sec
+		w.WriteString("    mov r11, [rsp+8]\n") // tv_nsec
+		w.WriteString("    imul r10, r10, 1000000000\n")
+		w.WriteString("    add r10, r11\n")
+	} else {
+		// Windows or other: return 0 as stub
+		w.WriteString("    xor r10, r10\n")
+	}
+
+	w.WriteString("    add rsp, 16\n") // deallocate
+	e.nasmStoreToOperand(fn, instr.Dst, "r10")
+}
+
 func (e *x86_64Emitter) emitNASMStrConcat(fn *IRFunc, instr IRInstr) {
 	w := e.b
 	src1 := e.nasmLoadToReg(fn, instr.Src1, "r10")
@@ -1046,6 +1131,7 @@ func (e *x86_64Emitter) emitNASMStrConcat(fn *IRFunc, instr IRInstr) {
 	copy1Label := fmt.Sprintf(".sc1_%d", id)
 	copy2Label := fmt.Sprintf(".sc2_%d", id)
 	doneLabel := fmt.Sprintf(".scd_%d", id)
+	selALabel := fmt.Sprintf(".sca_%d", id)
 
 	if src1 != "r10" {
 		w.WriteString(fmt.Sprintf("    mov r10, %s\n", src1))
@@ -1056,7 +1142,17 @@ func (e *x86_64Emitter) emitNASMStrConcat(fn *IRFunc, instr IRInstr) {
 
 	w.WriteString("    push rdi\n")
 	w.WriteString("    push rcx\n")
-	w.WriteString("    lea rdi, [rel _novus_strcat_buf]\n")
+	w.WriteString("    push rax\n")
+
+	// Toggle buffer selector and pick destination buffer.
+	w.WriteString("    lea rax, [rel _novus_strcat_sel]\n")
+	w.WriteString("    xor byte [rax], 1\n")
+	w.WriteString("    movzx eax, byte [rax]\n")
+	w.WriteString("    lea rdi, [rel _novus_strcat_buf_a]\n")
+	w.WriteString("    test eax, eax\n")
+	w.WriteString(fmt.Sprintf("    jz %s\n", selALabel))
+	w.WriteString("    lea rdi, [rel _novus_strcat_buf_b]\n")
+	w.WriteString(fmt.Sprintf("%s:\n", selALabel))
 	w.WriteString("    push rdi\n")
 
 	w.WriteString(fmt.Sprintf("%s:\n", copy1Label))
@@ -1079,6 +1175,7 @@ func (e *x86_64Emitter) emitNASMStrConcat(fn *IRFunc, instr IRInstr) {
 
 	w.WriteString(fmt.Sprintf("%s:\n", doneLabel))
 	w.WriteString("    pop r10\n")
+	w.WriteString("    pop rax\n")
 	w.WriteString("    pop rcx\n")
 	w.WriteString("    pop rdi\n")
 	e.nasmStoreToOperand(fn, instr.Dst, "r10")

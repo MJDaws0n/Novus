@@ -241,7 +241,7 @@ func TestDuplicateFunction(t *testing.T) {
 	src := "fn foo() -> void {} fn foo() -> void {}"
 	diags := analyze(t, src)
 	expectErrors(t, diags, 1)
-	expectErrorContains(t, diags, "function \"foo\" already declared")
+	expectErrorContains(t, diags, "function \"foo\" with signature () already declared")
 }
 
 func TestDuplicateParameter(t *testing.T) {
@@ -429,14 +429,14 @@ func TestCallArityTooFew(t *testing.T) {
 	src := "fn add(a: i32, b: i32) -> i32 { return a + b; } fn main() -> void { let x: i32 = add(1); }"
 	diags := analyze(t, src)
 	expectErrors(t, diags, 1)
-	expectErrorContains(t, diags, "expects 2 arguments, got 1")
+	expectErrorContains(t, diags, "expects 2 to 2 arguments, got 1")
 }
 
 func TestCallArityTooMany(t *testing.T) {
 	src := "fn add(a: i32, b: i32) -> i32 { return a + b; } fn main() -> void { let x: i32 = add(1, 2, 3); }"
 	diags := analyze(t, src)
 	expectErrors(t, diags, 1)
-	expectErrorContains(t, diags, "expects 2 arguments, got 3")
+	expectErrorContains(t, diags, "expects 2 to 2 arguments, got 3")
 }
 
 func TestCallArgTypeMismatch(t *testing.T) {
@@ -751,14 +751,14 @@ func TestBuiltinArityError(t *testing.T) {
 	src := "fn f() -> void { mov(eax); }"
 	diags := analyze(t, src)
 	expectErrors(t, diags, 1)
-	expectErrorContains(t, diags, "expects 2 arguments, got 1")
+	expectErrorContains(t, diags, "expects 2 to 2 arguments, got 1")
 }
 
 func TestBuiltinArityErrorTooMany(t *testing.T) {
 	src := "fn f() -> void { nop(1); }"
 	diags := analyze(t, src)
 	expectErrors(t, diags, 1)
-	expectErrorContains(t, diags, "expects 0 arguments, got 1")
+	expectErrorContains(t, diags, "expects 0 to 0 arguments, got 1")
 }
 
 func TestBuiltinSkipsArgTypeCheck(t *testing.T) {
