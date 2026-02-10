@@ -48,6 +48,8 @@ const (
 	RPAREN    = "RPAREN"    // )
 	LBRACE    = "LBRACE"    // {
 	RBRACE    = "RBRACE"    // }
+	LBRACKET  = "LBRACKET"  // [
+	RBRACKET  = "RBRACKET"  // ]
 	SEMICOLON = "SEMICOLON" // ;
 	COLON     = "COLON"     // :
 	COMMA     = "COMMA"     // ,
@@ -79,11 +81,11 @@ const (
 
 // keywords maps reserved words to their token types.
 var keywords = map[string]string{
-	"module": MODULE,
-	"import": IMPORT,
-	"fn":     FN,
-	"let":    LET,
-	"return": RETURN,
+	"module":   MODULE,
+	"import":   IMPORT,
+	"fn":       FN,
+	"let":      LET,
+	"return":   RETURN,
 	"true":     TRUE,
 	"false":    FALSE,
 	"if":       IF,
@@ -93,18 +95,18 @@ var keywords = map[string]string{
 	"break":    BREAK,
 	"continue": CONTINUE,
 	"void":     VOID,
-	"bool":   BOOL,
-	"str":    STR,
-	"u8":     U8,
-	"u16":    U16,
-	"u32":    U32,
-	"u64":    U64,
-	"i8":     I8,
-	"i16":    I16,
-	"i32":    I32,
-	"i64":    I64,
-	"f32":    F32,
-	"f64":    F64,
+	"bool":     BOOL,
+	"str":      STR,
+	"u8":       U8,
+	"u16":      U16,
+	"u32":      U32,
+	"u64":      U64,
+	"i8":       I8,
+	"i16":      I16,
+	"i32":      I32,
+	"i64":      I64,
+	"f32":      F32,
+	"f64":      F64,
 }
 
 // Token represents a single lexical token produced by the lexer.
@@ -404,6 +406,7 @@ func lexIdentifier(input string, start int, line int, col int) (Token, int, int)
 	}
 	return Token{tokType, word, line, startCol}, i, col
 }
+
 // lexOperatorOrDelimiter tries to match a 1- or 2-character operator or
 // delimiter starting at input[i]. Returns the token and the number of
 // characters consumed (0 if nothing matched).
@@ -463,6 +466,10 @@ func lexOperatorOrDelimiter(input string, i int, line int, col int) (Token, int)
 		return Token{LBRACE, "{", line, col}, 1
 	case '}':
 		return Token{RBRACE, "}", line, col}, 1
+	case '[':
+		return Token{LBRACKET, "[", line, col}, 1
+	case ']':
+		return Token{RBRACKET, "]", line, col}, 1
 	case ';':
 		return Token{SEMICOLON, ";", line, col}, 1
 	case ':':
