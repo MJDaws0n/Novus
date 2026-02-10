@@ -53,8 +53,66 @@ func TestParseImportDecl(t *testing.T) {
 	if len(prog.Imports) != 1 {
 		t.Fatalf("expected 1 import, got %d", len(prog.Imports))
 	}
-	if prog.Imports[0].Name != "bar" {
-		t.Errorf("import name: got %q, want %q", prog.Imports[0].Name, "bar")
+	if prog.Imports[0].Path != "bar" {
+		t.Errorf("import path: got %q, want %q", prog.Imports[0].Path, "bar")
+	}
+}
+
+func TestParseImportAlias(t *testing.T) {
+	prog := parseInput(t, "import standard_lib std;")
+	if len(prog.Imports) != 1 {
+		t.Fatalf("expected 1 import, got %d", len(prog.Imports))
+	}
+	if prog.Imports[0].Path != "standard_lib" {
+		t.Errorf("import path: got %q, want %q", prog.Imports[0].Path, "standard_lib")
+	}
+	if prog.Imports[0].Alias != "std" {
+		t.Errorf("import alias: got %q, want %q", prog.Imports[0].Alias, "std")
+	}
+}
+
+func TestParseImportSelective(t *testing.T) {
+	prog := parseInput(t, "import mylib[foo, bar, baz];")
+	if len(prog.Imports) != 1 {
+		t.Fatalf("expected 1 import, got %d", len(prog.Imports))
+	}
+	if prog.Imports[0].Path != "mylib" {
+		t.Errorf("import path: got %q, want %q", prog.Imports[0].Path, "mylib")
+	}
+	if len(prog.Imports[0].SelectFns) != 3 {
+		t.Fatalf("expected 3 select fns, got %d", len(prog.Imports[0].SelectFns))
+	}
+	expected := []string{"foo", "bar", "baz"}
+	for i, name := range expected {
+		if prog.Imports[0].SelectFns[i] != name {
+			t.Errorf("selectFns[%d]: got %q, want %q", i, prog.Imports[0].SelectFns[i], name)
+		}
+	}
+}
+
+func TestParseImportSelectiveAlias(t *testing.T) {
+	prog := parseInput(t, "import utils[helper] u;")
+	if len(prog.Imports) != 1 {
+		t.Fatalf("expected 1 import, got %d", len(prog.Imports))
+	}
+	if prog.Imports[0].Path != "utils" {
+		t.Errorf("import path: got %q, want %q", prog.Imports[0].Path, "utils")
+	}
+	if prog.Imports[0].Alias != "u" {
+		t.Errorf("import alias: got %q, want %q", prog.Imports[0].Alias, "u")
+	}
+	if len(prog.Imports[0].SelectFns) != 1 || prog.Imports[0].SelectFns[0] != "helper" {
+		t.Errorf("selectFns: got %v, want [helper]", prog.Imports[0].SelectFns)
+	}
+}
+
+func TestParseImportSlashPath(t *testing.T) {
+	prog := parseInput(t, "import test/cool/standard_lib;")
+	if len(prog.Imports) != 1 {
+		t.Fatalf("expected 1 import, got %d", len(prog.Imports))
+	}
+	if prog.Imports[0].Path != "test/cool/standard_lib" {
+		t.Errorf("import path: got %q, want %q", prog.Imports[0].Path, "test/cool/standard_lib")
 	}
 }
 
@@ -66,8 +124,8 @@ func TestParseModuleAndImports(t *testing.T) {
 	if len(prog.Imports) != 2 {
 		t.Fatalf("expected 2 imports, got %d", len(prog.Imports))
 	}
-	if prog.Imports[0].Name != "foo" || prog.Imports[1].Name != "bar" {
-		t.Errorf("imports: got %q %q", prog.Imports[0].Name, prog.Imports[1].Name)
+	if prog.Imports[0].Path != "foo" || prog.Imports[1].Path != "bar" {
+		t.Errorf("imports: got %q %q", prog.Imports[0].Path, prog.Imports[1].Path)
 	}
 }
 
@@ -642,35 +700,17 @@ func TestParseExampleNovFile(t *testing.T) {
 		t.Errorf("imports: got %v", prog.Imports)
 	}
 
-	if len(prog.Functions) != 9 {
-		t.Fatalf("expected 9 functions, got %d", len(prog.Functions))
+	if len(prog.Functions) != 10 {
+		t.Fatalf("expected 10 functions, got %d", len(prog.Functions))
 	}
-	if prog.Functions[0].Name != "len" {
-		t.Errorf("fn[0] name: got %q", prog.Functions[0].Name)
+	expectedNames := []string{
+		"len", "array_len", "print", "itoa", "itoa64",
+		"exit", "get_time_ns", "u64_to_i32", "input", "main",
 	}
-	if prog.Functions[1].Name != "print" {
-		t.Errorf("fn[1] name: got %q", prog.Functions[1].Name)
-	}
-	if prog.Functions[2].Name != "main" {
-		t.Errorf("fn[2] name: got %q", prog.Functions[2].Name)
-	}
-	if prog.Functions[3].Name != "itoa" {
-		t.Errorf("fn[3] name: got %q", prog.Functions[3].Name)
-	}
-	if prog.Functions[4].Name != "itoa" {
-		t.Errorf("fn[4] name: got %q", prog.Functions[4].Name)
-	}
-	if prog.Functions[5].Name != "exit" {
-		t.Errorf("fn[5] name: got %q", prog.Functions[5].Name)
-	}
-	if prog.Functions[6].Name != "get_time_ns" {
-		t.Errorf("fn[6] name: got %q", prog.Functions[6].Name)
-	}
-	if prog.Functions[7].Name != "u64_to_i32" {
-		t.Errorf("fn[7] name: got %q", prog.Functions[7].Name)
-	}
-	if prog.Functions[8].Name != "input" {
-		t.Errorf("fn[8] name: got %q", prog.Functions[8].Name)
+	for i, want := range expectedNames {
+		if prog.Functions[i].Name != want {
+			t.Errorf("fn[%d] name: got %q, want %q", i, prog.Functions[i].Name, want)
+		}
 	}
 
 	t.Logf("AST:\n%s", ast.DebugString(prog))

@@ -141,8 +141,21 @@ const (
 	IRStrIndex  // dst = src1[src2]
 	IRStoreByte // store byte src1 at address [dst] (for string index assignment)
 
-	// Platform intrinsics
-	IRGetTimeNs // dst = current time in nanoseconds (platform-specific)
+	// Memory load (raw address read)
+	IRLoad8  // dst = *(uint8*)src1  (load byte from address, zero-extend)
+	IRLoad32 // dst = *(int32*)src1  (load 32-bit word from address)
+	IRLoad64 // dst = *(int64*)src1  (load 64-bit qword from address)
+
+	// Array operations
+	IRArrayNew    // dst = new array (Src1=elem size imm, Src2=initial cap imm)
+	IRArrayGet    // dst = arr[index] (Src1=arrPtr, Src2=index)
+	IRArraySet    // arr[index] = val (Dst=arrPtr, Src1=index, Src2=val)
+	IRArrayAppend // append val to arr (Dst=arrPtr, Src1=val)
+	IRArrayPop    // dst = pop(arr) (Src1=arrPtr)
+	IRArrayLen    // dst = len(arr) (Src1=arrPtr)
+
+	// Windows API call
+	IRWinCall // call Windows API function (Src1=string ref with function name, Args=arguments)
 
 	// Misc
 	IRComment // emit a comment in the output (src1 = label with comment text)
@@ -161,8 +174,11 @@ var irOpNames = map[IROp]string{
 	IRSyscall: "syscall", IRInt: "int", IRNop: "nop",
 	IRSetReg: "setreg", IRGetReg: "getreg", IRSetFlag: "setflag", IRGetFlag: "getflag",
 	IRStrConcat: "str_concat", IRStrLen: "str_len", IRStrIndex: "str_index", IRStoreByte: "store_byte",
-	IRGetTimeNs: "get_time_ns",
-	IRComment:   "comment", IRData: "data",
+	IRLoad8: "load8", IRLoad32: "load32", IRLoad64: "load64",
+	IRArrayNew: "array_new", IRArrayGet: "array_get", IRArraySet: "array_set",
+	IRArrayAppend: "array_append", IRArrayPop: "array_pop", IRArrayLen: "array_len",
+	IRWinCall: "win_call",
+	IRComment: "comment", IRData: "data",
 }
 
 func (op IROp) String() string {

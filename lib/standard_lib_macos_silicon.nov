@@ -1,0 +1,74 @@
+module standard_lib_macos_silicon;
+
+// ---------------------------------------------------------------------------
+// Standard Library for Novus
+// Provides common utility functions for macos on Apple Silicon (M1/M2...).
+// Requires standard_lib.nov to function
+// ---------------------------------------------------------------------------
+
+import standard_lib;
+
+fn array_len(arr: []i32) -> i32 {
+    mov(x9, arr);
+    let ptr: u64 = getreg(x9);
+    return load32(ptr + 8);
+}
+fn print(msg: str) -> void {
+    msg = msg + "\n";
+    mov(x0, 1);
+    mov(x1, msg);
+    mov(x2, len(msg));
+    mov(x16, 0x2000004);
+    syscall();
+}
+fn exit(code: i32) -> void {
+    mov(x0, code);
+    mov(x16, 0x2000001);
+    syscall();
+}
+fn get_time_ns() -> i64 {
+    // Allocate a 16-byte buffer for the timeval struct
+    let buf: str = "0123456789abcdef";
+
+    // gettimeofday(timeval *tp, timezone *tzp)
+    mov(x0, buf);
+    mov(x1, 0);
+    mov(x16, 0x2000074);
+    syscall();
+
+    // Read back the struct fields using raw memory loads
+    mov(x9, buf);
+    let base: u64 = getreg(x9);
+    let tv_sec: i64 = load64(base);
+    let tv_usec: i64 = load64(base + 8);
+
+    // Convert to nanoseconds: tv_sec * 1_000_000_000 + tv_usec * 1000
+    return tv_sec * 1000000000 + tv_usec * 1000;
+}
+fn input(prompt: str, buf_len: i32 = 128) -> str {
+    mov(x0, 1);
+    mov(x1, prompt);
+    mov(x2, len(prompt));
+    mov(x16, 0x2000004);
+    syscall();
+    let buf: str = "";
+    while(len(buf) < buf_len) {
+        buf = buf + " ";
+    }
+    mov(x0, 0);
+    mov(x1, buf);
+    mov(x2, buf_len);
+    mov(x16, 0x2000003);
+    syscall();
+    let nread: i32 = u64_to_i32(getreg(x0));
+    let out: str = "";
+    let i: i32 = 0;
+    while (i < nread) {
+        if (buf[i] == '\n') {
+            break;
+        }
+        out = out + buf[i];
+        i = i + 1;
+    }
+    return out;
+}

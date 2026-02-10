@@ -110,14 +110,12 @@ func (e *x86_64Emitter) emitGAS() {
 		w.WriteString("\n")
 	}
 
-	// --- BSS: string concatenation double-buffer ---
-	if e.usesStrConcat() {
-		bufA := e.target.Sym("_novus_strcat_buf_a")
-		bufB := e.target.Sym("_novus_strcat_buf_b")
-		sel := e.target.Sym("_novus_strcat_sel")
-		w.WriteString(fmt.Sprintf(".lcomm %s, 4096\n", bufA))
-		w.WriteString(fmt.Sprintf(".lcomm %s, 4096\n", bufB))
-		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n\n", sel))
+	// --- BSS: bump-allocator heap ---
+	if e.usesHeap() {
+		heapSym := e.target.Sym("_novus_heap")
+		heapPtrSym := e.target.Sym("_novus_heap_ptr")
+		w.WriteString(fmt.Sprintf(".lcomm %s, 1048576\n", heapSym))
+		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n\n", heapPtrSym))
 	}
 
 	// --- Text section ---
@@ -433,8 +431,37 @@ func (e *x86_64Emitter) emitGASInstr(fn *IRFunc, instr IRInstr) {
 		addr := e.gasLoadToReg(fn, instr.Dst, "%r11")
 		src := e.gasLoadToReg(fn, instr.Src1, "%r10")
 		w.WriteString(fmt.Sprintf("    movb %sb, (%s)\n", src, addr))
-	case IRGetTimeNs:
-		e.emitGASGetTimeNs(fn, instr)
+
+	// Memory load (raw address read)
+	case IRLoad8:
+		addr := e.gasLoadToReg(fn, instr.Src1, "%r10")
+		w.WriteString(fmt.Sprintf("    movzbl (%s), %%r11d\n", addr))
+		e.gasStoreToOperand(fn, instr.Dst, "%r11")
+	case IRLoad32:
+		addr := e.gasLoadToReg(fn, instr.Src1, "%r10")
+		w.WriteString(fmt.Sprintf("    movl (%s), %%r11d\n", addr))
+		e.gasStoreToOperand(fn, instr.Dst, "%r11")
+	case IRLoad64:
+		addr := e.gasLoadToReg(fn, instr.Src1, "%r10")
+		w.WriteString(fmt.Sprintf("    movq (%s), %%r11\n", addr))
+		e.gasStoreToOperand(fn, instr.Dst, "%r11")
+
+	// Array operations
+	case IRArrayNew:
+		e.emitGASArrayNew(fn, instr)
+	case IRArrayGet:
+		e.emitGASArrayGet(fn, instr)
+	case IRArraySet:
+		e.emitGASArraySet(fn, instr)
+	case IRArrayAppend:
+		e.emitGASArrayAppend(fn, instr)
+	case IRArrayPop:
+		e.emitGASArrayPop(fn, instr)
+	case IRArrayLen:
+		e.emitGASArrayLen(fn, instr)
+
+	case IRWinCall:
+		w.WriteString("    ## win_call: Windows API calls not supported on this target\n")
 
 	case IRData:
 		// handled in data section
@@ -558,45 +585,6 @@ func (e *x86_64Emitter) emitGASCall(fn *IRFunc, instr IRInstr) {
 // GAS string operations (inline)
 // ---------------------------------------------------------------------------
 
-// emitGASGetTimeNs emits inline GAS assembly to get time in nanoseconds.
-// macOS x86_64: gettimeofday syscall 0x2000074 (rdi=ptr, rsi=NULL).
-// Linux x86_64: clock_gettime syscall 228 (rdi=CLOCK_MONOTONIC, rsi=ptr).
-func (e *x86_64Emitter) emitGASGetTimeNs(fn *IRFunc, instr IRInstr) {
-	w := e.b
-	w.WriteString("    // __time_ns: get current time in nanoseconds\n")
-	w.WriteString("    subq $16, %rsp\n") // allocate 16 bytes for struct
-
-	if e.target.OS == OS_Darwin {
-		// gettimeofday(rdi=ptr, rsi=NULL), syscall 0x2000074
-		w.WriteString("    movq %rsp, %rdi\n")
-		w.WriteString("    xorq %rsi, %rsi\n")
-		w.WriteString("    movq $0x2000074, %rax\n")
-		w.WriteString("    syscall\n")
-		// rsp+0 = tv_sec, rsp+8 = tv_usec
-		w.WriteString("    movq 0(%rsp), %r10\n") // tv_sec
-		w.WriteString("    movq 8(%rsp), %r11\n") // tv_usec
-		// result = tv_sec * 1_000_000_000 + tv_usec * 1000
-		w.WriteString("    imulq $1000000000, %r10, %r10\n")
-		w.WriteString("    imulq $1000, %r11, %r11\n")
-		w.WriteString("    addq %r11, %r10\n")
-	} else {
-		// clock_gettime(rdi=CLOCK_MONOTONIC=1, rsi=ptr), syscall 228
-		w.WriteString("    movq $1, %rdi\n")
-		w.WriteString("    movq %rsp, %rsi\n")
-		w.WriteString("    movq $228, %rax\n")
-		w.WriteString("    syscall\n")
-		// rsp+0 = tv_sec, rsp+8 = tv_nsec
-		w.WriteString("    movq 0(%rsp), %r10\n") // tv_sec
-		w.WriteString("    movq 8(%rsp), %r11\n") // tv_nsec
-		// result = tv_sec * 1_000_000_000 + tv_nsec
-		w.WriteString("    imulq $1000000000, %r10, %r10\n")
-		w.WriteString("    addq %r11, %r10\n")
-	}
-
-	w.WriteString("    addq $16, %rsp\n") // deallocate
-	e.gasStoreToOperand(fn, instr.Dst, "%r10")
-}
-
 func (e *x86_64Emitter) emitGASStrConcat(fn *IRFunc, instr IRInstr) {
 	w := e.b
 	src1 := e.gasLoadToReg(fn, instr.Src1, "%r10")
@@ -606,8 +594,10 @@ func (e *x86_64Emitter) emitGASStrConcat(fn *IRFunc, instr IRInstr) {
 	copy1Label := fmt.Sprintf(".Lsc1_%d", id)
 	copy2Label := fmt.Sprintf(".Lsc2_%d", id)
 	doneLabel := fmt.Sprintf(".Lscd_%d", id)
+	readyLabel := fmt.Sprintf(".Lscr_%d", id)
 
-	bufSym := e.target.Sym("_novus_strcat_buf")
+	heapPtrSym := e.target.Sym("_novus_heap_ptr")
+	heapSym := e.target.Sym("_novus_heap")
 
 	// Ensure source operands are in r10 / r11.
 	if src1 != "%r10" {
@@ -617,11 +607,22 @@ func (e *x86_64Emitter) emitGASStrConcat(fn *IRFunc, instr IRInstr) {
 		w.WriteString(fmt.Sprintf("    movq %s, %%r11\n", src2))
 	}
 
-	// Save working registers and load buffer address.
+	// Save working registers.
 	w.WriteString("    pushq %rdi\n")
 	w.WriteString("    pushq %rcx\n")
-	w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %%rdi\n", bufSym))
-	w.WriteString("    pushq %rdi\n") // save buffer start
+
+	// Load heap pointer (lazy init).
+	w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %%rdi\n", heapPtrSym))
+	w.WriteString("    movq (%rdi), %rcx\n")
+	w.WriteString(fmt.Sprintf("    testq %%rcx, %%rcx\n"))
+	w.WriteString(fmt.Sprintf("    jnz %s\n", readyLabel))
+	w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %%rcx\n", heapSym))
+	w.WriteString(fmt.Sprintf("%s:\n", readyLabel))
+	w.WriteString("    pushq %rcx\n") // save result start
+	w.WriteString("    pushq %rdi\n") // save heap_ptr address
+
+	// rdi = write cursor (starts at current heap ptr in rcx)
+	w.WriteString("    movq %rcx, %rdi\n")
 
 	// Copy left string (skip null terminator).
 	w.WriteString(fmt.Sprintf("%s:\n", copy1Label))
@@ -643,11 +644,14 @@ func (e *x86_64Emitter) emitGASStrConcat(fn *IRFunc, instr IRInstr) {
 	w.WriteString("    incq %rdi\n")
 	w.WriteString(fmt.Sprintf("    jmp %s\n", copy2Label))
 
-	// Done — recover buffer start as result.
+	// Done — save updated heap pointer, recover result.
 	w.WriteString(fmt.Sprintf("%s:\n", doneLabel))
-	w.WriteString("    popq %r10\n") // buffer start
-	w.WriteString("    popq %rcx\n") // restore
-	w.WriteString("    popq %rdi\n") // restore
+	w.WriteString("    incq %rdi\n")         // advance past null byte
+	w.WriteString("    popq %rcx\n")         // rcx = heap_ptr address
+	w.WriteString("    movq %rdi, (%rcx)\n") // save updated heap ptr
+	w.WriteString("    popq %r10\n")         // r10 = result start
+	w.WriteString("    popq %rcx\n")         // restore
+	w.WriteString("    popq %rdi\n")         // restore
 	e.gasStoreToOperand(fn, instr.Dst, "%r10")
 }
 
@@ -709,12 +713,20 @@ func (e *x86_64Emitter) emitNASM() {
 		w.WriteString("\n")
 	}
 
-	// BSS: string concatenation double-buffer.
-	if e.usesStrConcat() {
+	// BSS: bump-allocator heap.
+	if e.usesHeap() {
 		w.WriteString("section .bss\n")
-		w.WriteString("    _novus_strcat_buf_a: resb 4096\n")
-		w.WriteString("    _novus_strcat_buf_b: resb 4096\n")
-		w.WriteString("    _novus_strcat_sel: resb 8\n\n")
+		w.WriteString("    _novus_heap: resb 1048576\n")
+		w.WriteString("    _novus_heap_ptr: resq 1\n\n")
+	}
+
+	// Collect all Windows API functions used by win_call and emit extern declarations.
+	winExterns := e.collectWinCallExterns()
+	if len(winExterns) > 0 {
+		for _, name := range winExterns {
+			w.WriteString(fmt.Sprintf("extern %s\n", name))
+		}
+		w.WriteString("\n")
 	}
 
 	w.WriteString("section .text\n")
@@ -995,8 +1007,38 @@ func (e *x86_64Emitter) emitNASMInstr(fn *IRFunc, instr IRInstr) {
 		w.WriteString(fmt.Sprintf("    mov byte [%s], %sb\n", addr, src))
 	case IRStrConcat:
 		e.emitNASMStrConcat(fn, instr)
-	case IRGetTimeNs:
-		e.emitNASMGetTimeNs(fn, instr)
+
+	// Memory load (raw address read)
+	case IRLoad8:
+		addr := e.nasmLoadToReg(fn, instr.Src1, "r10")
+		w.WriteString(fmt.Sprintf("    movzx r11d, byte [%s]\n", addr))
+		e.nasmStoreToOperand(fn, instr.Dst, "r11")
+	case IRLoad32:
+		addr := e.nasmLoadToReg(fn, instr.Src1, "r10")
+		w.WriteString(fmt.Sprintf("    mov r11d, dword [%s]\n", addr))
+		e.nasmStoreToOperand(fn, instr.Dst, "r11")
+	case IRLoad64:
+		addr := e.nasmLoadToReg(fn, instr.Src1, "r10")
+		w.WriteString(fmt.Sprintf("    mov r11, qword [%s]\n", addr))
+		e.nasmStoreToOperand(fn, instr.Dst, "r11")
+
+	// Array operations
+	case IRArrayNew:
+		e.emitNASMArrayNew(fn, instr)
+	case IRArrayGet:
+		e.emitNASMArrayGet(fn, instr)
+	case IRArraySet:
+		e.emitNASMArraySet(fn, instr)
+	case IRArrayAppend:
+		e.emitNASMArrayAppend(fn, instr)
+	case IRArrayPop:
+		e.emitNASMArrayPop(fn, instr)
+	case IRArrayLen:
+		e.emitNASMArrayLen(fn, instr)
+
+	// Windows API call
+	case IRWinCall:
+		e.emitNASMWinCall(fn, instr)
 	}
 }
 
@@ -1094,34 +1136,6 @@ func (e *x86_64Emitter) emitNASMStrIndex(fn *IRFunc, instr IRInstr) {
 	e.nasmStoreToOperand(fn, instr.Dst, "rax")
 }
 
-// emitNASMGetTimeNs emits inline NASM assembly to get time in nanoseconds.
-// Windows x86_64: stub returning 0 (no raw syscall equivalent).
-// Linux NASM: clock_gettime syscall 228.
-func (e *x86_64Emitter) emitNASMGetTimeNs(fn *IRFunc, instr IRInstr) {
-	w := e.b
-	w.WriteString("    ; __time_ns: get current time in nanoseconds\n")
-	w.WriteString("    sub rsp, 16\n") // allocate 16 bytes for struct
-
-	if e.target.OS == OS_Linux {
-		// clock_gettime(rdi=CLOCK_MONOTONIC=1, rsi=ptr), syscall 228
-		w.WriteString("    mov rdi, 1\n")
-		w.WriteString("    mov rsi, rsp\n")
-		w.WriteString("    mov rax, 228\n")
-		w.WriteString("    syscall\n")
-		// rsp+0 = tv_sec, rsp+8 = tv_nsec
-		w.WriteString("    mov r10, [rsp]\n")   // tv_sec
-		w.WriteString("    mov r11, [rsp+8]\n") // tv_nsec
-		w.WriteString("    imul r10, r10, 1000000000\n")
-		w.WriteString("    add r10, r11\n")
-	} else {
-		// Windows or other: return 0 as stub
-		w.WriteString("    xor r10, r10\n")
-	}
-
-	w.WriteString("    add rsp, 16\n") // deallocate
-	e.nasmStoreToOperand(fn, instr.Dst, "r10")
-}
-
 func (e *x86_64Emitter) emitNASMStrConcat(fn *IRFunc, instr IRInstr) {
 	w := e.b
 	src1 := e.nasmLoadToReg(fn, instr.Src1, "r10")
@@ -1131,7 +1145,7 @@ func (e *x86_64Emitter) emitNASMStrConcat(fn *IRFunc, instr IRInstr) {
 	copy1Label := fmt.Sprintf(".sc1_%d", id)
 	copy2Label := fmt.Sprintf(".sc2_%d", id)
 	doneLabel := fmt.Sprintf(".scd_%d", id)
-	selALabel := fmt.Sprintf(".sca_%d", id)
+	readyLabel := fmt.Sprintf(".scr_%d", id)
 
 	if src1 != "r10" {
 		w.WriteString(fmt.Sprintf("    mov r10, %s\n", src1))
@@ -1142,19 +1156,21 @@ func (e *x86_64Emitter) emitNASMStrConcat(fn *IRFunc, instr IRInstr) {
 
 	w.WriteString("    push rdi\n")
 	w.WriteString("    push rcx\n")
-	w.WriteString("    push rax\n")
 
-	// Toggle buffer selector and pick destination buffer.
-	w.WriteString("    lea rax, [rel _novus_strcat_sel]\n")
-	w.WriteString("    xor byte [rax], 1\n")
-	w.WriteString("    movzx eax, byte [rax]\n")
-	w.WriteString("    lea rdi, [rel _novus_strcat_buf_a]\n")
-	w.WriteString("    test eax, eax\n")
-	w.WriteString(fmt.Sprintf("    jz %s\n", selALabel))
-	w.WriteString("    lea rdi, [rel _novus_strcat_buf_b]\n")
-	w.WriteString(fmt.Sprintf("%s:\n", selALabel))
-	w.WriteString("    push rdi\n")
+	// Load heap pointer (lazy init).
+	w.WriteString("    lea rdi, [rel _novus_heap_ptr]\n")
+	w.WriteString("    mov rcx, [rdi]\n")
+	w.WriteString("    test rcx, rcx\n")
+	w.WriteString(fmt.Sprintf("    jnz %s\n", readyLabel))
+	w.WriteString("    lea rcx, [rel _novus_heap]\n")
+	w.WriteString(fmt.Sprintf("%s:\n", readyLabel))
+	w.WriteString("    push rcx\n") // save result start
+	w.WriteString("    push rdi\n") // save heap_ptr address
 
+	// rdi = write cursor.
+	w.WriteString("    mov rdi, rcx\n")
+
+	// Copy left string (skip null terminator).
 	w.WriteString(fmt.Sprintf("%s:\n", copy1Label))
 	w.WriteString("    mov cl, [r10]\n")
 	w.WriteString("    test cl, cl\n")
@@ -1164,6 +1180,7 @@ func (e *x86_64Emitter) emitNASMStrConcat(fn *IRFunc, instr IRInstr) {
 	w.WriteString("    inc rdi\n")
 	w.WriteString(fmt.Sprintf("    jmp %s\n", copy1Label))
 
+	// Copy right string (including null terminator).
 	w.WriteString(fmt.Sprintf("%s:\n", copy2Label))
 	w.WriteString("    mov cl, [r11]\n")
 	w.WriteString("    mov [rdi], cl\n")
@@ -1173,18 +1190,296 @@ func (e *x86_64Emitter) emitNASMStrConcat(fn *IRFunc, instr IRInstr) {
 	w.WriteString("    inc rdi\n")
 	w.WriteString(fmt.Sprintf("    jmp %s\n", copy2Label))
 
+	// Done — save updated heap pointer, recover result.
 	w.WriteString(fmt.Sprintf("%s:\n", doneLabel))
-	w.WriteString("    pop r10\n")
-	w.WriteString("    pop rax\n")
+	w.WriteString("    inc rdi\n")        // advance past null byte
+	w.WriteString("    pop rcx\n")        // rcx = heap_ptr address
+	w.WriteString("    mov [rcx], rdi\n") // save updated heap ptr
+	w.WriteString("    pop r10\n")        // r10 = result start
+	w.WriteString("    pop rcx\n")        // restore
+	w.WriteString("    pop rdi\n")        // restore
+	e.nasmStoreToOperand(fn, instr.Dst, "r10")
+}
+
+// ---------------------------------------------------------------------------
+// GAS array operations (x86_64)
+// ---------------------------------------------------------------------------
+
+func (e *x86_64Emitter) emitGASArrayNew(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	cap := instr.Src2.Imm
+	if cap < 4 {
+		cap = 4
+	}
+	id := e.uniqueID()
+	readyLabel := fmt.Sprintf(".Lan_%d", id)
+	heapPtrSym := e.target.Sym("_novus_heap_ptr")
+	heapSym := e.target.Sym("_novus_heap")
+
+	w.WriteString("    pushq %rdi\n")
+	w.WriteString("    pushq %rcx\n")
+	// Load heap ptr.
+	w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %%rdi\n", heapPtrSym))
+	w.WriteString("    movq (%rdi), %rcx\n")
+	w.WriteString("    testq %rcx, %rcx\n")
+	w.WriteString(fmt.Sprintf("    jnz %s\n", readyLabel))
+	w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %%rcx\n", heapSym))
+	w.WriteString(fmt.Sprintf("%s:\n", readyLabel))
+	// rcx = header start, rdi = heap_ptr address.
+	w.WriteString("    pushq %rcx\n") // save header start
+	// Allocate header (24 bytes) + data (cap*8 bytes).
+	w.WriteString("    leaq 24(%rcx), %r10\n")                       // r10 = data start
+	w.WriteString(fmt.Sprintf("    leaq %d(%%r10), %%rcx\n", cap*8)) // rcx = new heap ptr
+	w.WriteString("    movq %rcx, (%rdi)\n")                         // save heap ptr
+	w.WriteString("    popq %rcx\n")                                 // rcx = header start
+	// Init header.
+	w.WriteString("    movq %r10, (%rcx)\n")                     // data_ptr
+	w.WriteString("    movq $0, 8(%rcx)\n")                      // len = 0
+	w.WriteString(fmt.Sprintf("    movq $%d, 16(%%rcx)\n", cap)) // cap
+	w.WriteString("    movq %rcx, %r10\n")                       // result = header
+	w.WriteString("    popq %rcx\n")
+	w.WriteString("    popq %rdi\n")
+	e.gasStoreToOperand(fn, instr.Dst, "%r10")
+}
+
+func (e *x86_64Emitter) emitGASArrayGet(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	arrPtr := e.gasLoadToReg(fn, instr.Src1, "%r10")
+	idx := e.gasLoadToReg(fn, instr.Src2, "%r11")
+	w.WriteString(fmt.Sprintf("    movq (%s), %%r10\n", arrPtr)) // data_ptr
+	w.WriteString(fmt.Sprintf("    movq (%%r10,%s,8), %%r10\n", stripPercent(idx)))
+	e.gasStoreToOperand(fn, instr.Dst, "%r10")
+}
+
+func (e *x86_64Emitter) emitGASArraySet(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	arrPtr := e.gasLoadToReg(fn, instr.Dst, "%r10")
+	idx := e.gasLoadToReg(fn, instr.Src1, "%r11")
+	val := e.gasLoadToReg(fn, instr.Src2, "%rcx")
+	w.WriteString(fmt.Sprintf("    movq (%s), %%r10\n", arrPtr))
+	w.WriteString(fmt.Sprintf("    movq %s, (%%r10,%s,8)\n", val, stripPercent(idx)))
+}
+
+func (e *x86_64Emitter) emitGASArrayAppend(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	arrPtr := e.gasLoadToReg(fn, instr.Dst, "%r10")
+	val := e.gasLoadToReg(fn, instr.Src1, "%r11")
+
+	if arrPtr != "%r10" {
+		w.WriteString(fmt.Sprintf("    movq %s, %%r10\n", arrPtr))
+	}
+	if val != "%r11" {
+		w.WriteString(fmt.Sprintf("    movq %s, %%r11\n", val))
+	}
+	w.WriteString("    pushq %rdi\n")
+	w.WriteString("    pushq %rcx\n")
+	// Simple append (no grow — rely on initial capacity).
+	w.WriteString("    movq 8(%r10), %rcx\n")       // len
+	w.WriteString("    movq (%r10), %rdi\n")        // data_ptr
+	w.WriteString("    movq %r11, (%rdi,%rcx,8)\n") // data[len] = val
+	w.WriteString("    incq %rcx\n")
+	w.WriteString("    movq %rcx, 8(%r10)\n") // len++
+	w.WriteString("    popq %rcx\n")
+	w.WriteString("    popq %rdi\n")
+}
+
+func (e *x86_64Emitter) emitGASArrayPop(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	arrPtr := e.gasLoadToReg(fn, instr.Src1, "%r10")
+	w.WriteString(fmt.Sprintf("    movq 8(%s), %%r11\n", arrPtr)) // len
+	w.WriteString("    decq %r11\n")
+	w.WriteString(fmt.Sprintf("    movq %%r11, 8(%s)\n", arrPtr)) // save len
+	w.WriteString(fmt.Sprintf("    movq (%s), %%r10\n", arrPtr))  // data_ptr
+	w.WriteString("    movq (%r10,%r11,8), %r10\n")
+	e.gasStoreToOperand(fn, instr.Dst, "%r10")
+}
+
+func (e *x86_64Emitter) emitGASArrayLen(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	arrPtr := e.gasLoadToReg(fn, instr.Src1, "%r10")
+	w.WriteString(fmt.Sprintf("    movq 8(%s), %%r10\n", arrPtr))
+	e.gasStoreToOperand(fn, instr.Dst, "%r10")
+}
+
+// ---------------------------------------------------------------------------
+// NASM array operations (x86_64)
+// ---------------------------------------------------------------------------
+
+func (e *x86_64Emitter) emitNASMArrayNew(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	cap := instr.Src2.Imm
+	if cap < 4 {
+		cap = 4
+	}
+	id := e.uniqueID()
+	readyLabel := fmt.Sprintf(".an_%d", id)
+
+	w.WriteString("    push rdi\n")
+	w.WriteString("    push rcx\n")
+	w.WriteString("    lea rdi, [rel _novus_heap_ptr]\n")
+	w.WriteString("    mov rcx, [rdi]\n")
+	w.WriteString("    test rcx, rcx\n")
+	w.WriteString(fmt.Sprintf("    jnz %s\n", readyLabel))
+	w.WriteString("    lea rcx, [rel _novus_heap]\n")
+	w.WriteString(fmt.Sprintf("%s:\n", readyLabel))
+	w.WriteString("    push rcx\n")          // save header start
+	w.WriteString("    lea r10, [rcx+24]\n") // data start
+	w.WriteString(fmt.Sprintf("    lea rcx, [r10+%d]\n", cap*8))
+	w.WriteString("    mov [rdi], rcx\n") // save heap ptr
+	w.WriteString("    pop rcx\n")        // header start
+	w.WriteString("    mov [rcx], r10\n")
+	w.WriteString("    mov qword [rcx+8], 0\n")
+	w.WriteString(fmt.Sprintf("    mov qword [rcx+16], %d\n", cap))
+	w.WriteString("    mov r10, rcx\n")
 	w.WriteString("    pop rcx\n")
 	w.WriteString("    pop rdi\n")
 	e.nasmStoreToOperand(fn, instr.Dst, "r10")
 }
 
-func (e *x86_64Emitter) usesStrConcat() bool {
+func (e *x86_64Emitter) emitNASMArrayGet(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	arrPtr := e.nasmLoadToReg(fn, instr.Src1, "r10")
+	idx := e.nasmLoadToReg(fn, instr.Src2, "r11")
+	w.WriteString(fmt.Sprintf("    mov r10, [%s]\n", arrPtr))
+	w.WriteString(fmt.Sprintf("    mov r10, [r10+%s*8]\n", idx))
+	e.nasmStoreToOperand(fn, instr.Dst, "r10")
+}
+
+func (e *x86_64Emitter) emitNASMArraySet(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	arrPtr := e.nasmLoadToReg(fn, instr.Dst, "r10")
+	idx := e.nasmLoadToReg(fn, instr.Src1, "r11")
+	val := e.nasmLoadToReg(fn, instr.Src2, "rcx")
+	w.WriteString(fmt.Sprintf("    mov r10, [%s]\n", arrPtr))
+	w.WriteString(fmt.Sprintf("    mov [r10+%s*8], %s\n", idx, val))
+}
+
+func (e *x86_64Emitter) emitNASMArrayAppend(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	arrPtr := e.nasmLoadToReg(fn, instr.Dst, "r10")
+	val := e.nasmLoadToReg(fn, instr.Src1, "r11")
+
+	id := e.uniqueID()
+	noGrowLabel := fmt.Sprintf(".aang_%d", id)
+
+	if arrPtr != "r10" {
+		w.WriteString(fmt.Sprintf("    mov r10, %s\n", arrPtr))
+	}
+	if val != "r11" {
+		w.WriteString(fmt.Sprintf("    mov r11, %s\n", val))
+	}
+	w.WriteString("    push rdi\n")
+	w.WriteString("    push rcx\n")
+	// Simple append without grow for NASM (grow same as GAS — simplified).
+	w.WriteString("    mov rcx, [r10+8]\n")     // len
+	w.WriteString("    mov rdi, [r10]\n")       // data_ptr
+	w.WriteString("    mov [rdi+rcx*8], r11\n") // data[len] = val
+	w.WriteString("    inc rcx\n")
+	w.WriteString("    mov [r10+8], rcx\n") // len++
+	w.WriteString("    pop rcx\n")
+	w.WriteString("    pop rdi\n")
+	_ = noGrowLabel
+}
+
+func (e *x86_64Emitter) emitNASMArrayPop(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	arrPtr := e.nasmLoadToReg(fn, instr.Src1, "r10")
+	w.WriteString(fmt.Sprintf("    mov r11, [%s+8]\n", arrPtr))
+	w.WriteString("    dec r11\n")
+	w.WriteString(fmt.Sprintf("    mov [%s+8], r11\n", arrPtr))
+	w.WriteString(fmt.Sprintf("    mov r10, [%s]\n", arrPtr))
+	w.WriteString("    mov r10, [r10+r11*8]\n")
+	e.nasmStoreToOperand(fn, instr.Dst, "r10")
+}
+
+func (e *x86_64Emitter) emitNASMArrayLen(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	arrPtr := e.nasmLoadToReg(fn, instr.Src1, "r10")
+	w.WriteString(fmt.Sprintf("    mov r10, [%s+8]\n", arrPtr))
+	e.nasmStoreToOperand(fn, instr.Dst, "r10")
+}
+
+// collectWinCallExterns scans all IR functions for IRWinCall instructions
+// and returns a deduplicated list of Windows API function names to extern.
+func (e *x86_64Emitter) collectWinCallExterns() []string {
+	seen := map[string]bool{}
+	var result []string
 	for _, fn := range e.mod.Functions {
 		for _, instr := range fn.Instrs {
-			if instr.Op == IRStrConcat {
+			if instr.Op == IRWinCall && instr.Src1.Kind == OpLabel {
+				name := instr.Src1.Label
+				if !seen[name] {
+					seen[name] = true
+					result = append(result, name)
+				}
+			}
+		}
+	}
+	return result
+}
+
+// emitNASMWinCall emits a Windows API call using the x64 calling convention:
+//   - First 4 args in rcx, rdx, r8, r9
+//   - 32-byte shadow space always allocated
+//   - Additional args pushed right-to-left on stack
+//   - Stack aligned to 16 bytes before call
+//   - Return value in rax
+func (e *x86_64Emitter) emitNASMWinCall(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	apiName := instr.Src1.Label
+	winArgRegs := []string{"rcx", "rdx", "r8", "r9"}
+
+	w.WriteString(fmt.Sprintf("    ; win_call %s (%d args)\n", apiName, len(instr.Args)))
+
+	// Push any extra stack arguments (beyond 4) right-to-left.
+	stackArgs := 0
+	if len(instr.Args) > 4 {
+		// Ensure 16-byte alignment: if odd number of stack args, add padding.
+		extraArgs := len(instr.Args) - 4
+		if extraArgs%2 != 0 {
+			w.WriteString("    sub rsp, 8\n") // alignment padding
+			stackArgs++
+		}
+		for i := len(instr.Args) - 1; i >= 4; i-- {
+			src := e.nasmLoadToReg(fn, instr.Args[i], "r10")
+			w.WriteString(fmt.Sprintf("    push %s\n", src))
+			stackArgs++
+		}
+	}
+
+	// Move first 4 args into register args.
+	for i := 0; i < len(instr.Args) && i < 4; i++ {
+		src := e.nasmLoadToReg(fn, instr.Args[i], "r10")
+		if src != winArgRegs[i] {
+			w.WriteString(fmt.Sprintf("    mov %s, %s\n", winArgRegs[i], src))
+		}
+	}
+
+	// Allocate 32-byte shadow space (required by Windows x64 ABI).
+	w.WriteString("    sub rsp, 32\n")
+
+	// Call the API function.
+	w.WriteString(fmt.Sprintf("    call %s\n", apiName))
+
+	// Clean up shadow space.
+	w.WriteString("    add rsp, 32\n")
+
+	// Clean up extra stack args.
+	if stackArgs > 0 {
+		w.WriteString(fmt.Sprintf("    add rsp, %d\n", stackArgs*8))
+	}
+
+	// Store return value (rax) if destination is specified.
+	if instr.Dst.Kind != OpNone {
+		e.nasmStoreToOperand(fn, instr.Dst, "rax")
+	}
+}
+
+func (e *x86_64Emitter) usesHeap() bool {
+	for _, fn := range e.mod.Functions {
+		for _, instr := range fn.Instrs {
+			switch instr.Op {
+			case IRStrConcat, IRArrayNew, IRArrayAppend:
 				return true
 			}
 		}

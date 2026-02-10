@@ -413,12 +413,20 @@ func (l *Lowerer) lowerAssignStmt(s *ast.AssignStmt) {
 			l.emit(IRInstr{Op: IRStore, Dst: l.slotMem(slot), Src1: valOp})
 		}
 	case *ast.IndexExpr:
-		// str[idx] = val  →  compute base+idx, store a single byte.
-		baseOp := l.lowerExpr(target.Object)
-		idxOp := l.lowerExpr(target.Index)
-		addrReg := l.freshVReg()
-		l.emit(IRInstr{Op: IRAdd, Dst: VReg(addrReg), Src1: baseOp, Src2: idxOp})
-		l.emit(IRInstr{Op: IRStoreByte, Dst: VReg(addrReg), Src1: valOp})
+		// Check if target is an array or string.
+		if ident, ok := target.Object.(*ast.IdentExpr); ok && l.varIsArray(ident.Name) {
+			// arr[idx] = val → IRArraySet
+			baseOp := l.lowerExpr(target.Object)
+			idxOp := l.lowerExpr(target.Index)
+			l.emit(IRInstr{Op: IRArraySet, Dst: baseOp, Src1: idxOp, Src2: valOp})
+		} else {
+			// str[idx] = val → compute base+idx, store a single byte.
+			baseOp := l.lowerExpr(target.Object)
+			idxOp := l.lowerExpr(target.Index)
+			addrReg := l.freshVReg()
+			l.emit(IRInstr{Op: IRAdd, Dst: VReg(addrReg), Src1: baseOp, Src2: idxOp})
+			l.emit(IRInstr{Op: IRStoreByte, Dst: VReg(addrReg), Src1: valOp})
+		}
 	}
 }
 
@@ -457,8 +465,13 @@ func (l *Lowerer) lowerExpr(expr ast.Expr) Operand {
 		return l.lowerIndexExpr(e)
 	case *ast.AddressOfExpr:
 		return l.lowerAddressOfExpr(e)
+	case *ast.ArrayLitExpr:
+		return l.lowerArrayLitExpr(e)
 	case *ast.MemberExpr:
-		// Member expressions not fully supported yet; return none.
+		// Member expressions (import aliases) — return a label if possible.
+		if ident, ok := e.Object.(*ast.IdentExpr); ok {
+			return LabelOp(ident.Name + "." + e.Field)
+		}
 		return None()
 	}
 	return None()
@@ -550,6 +563,12 @@ func (l *Lowerer) operandIsStr(op Operand) bool {
 		return l.vregIsStr[op.Reg]
 	}
 	return false
+}
+
+// varIsArray reports whether a variable is an array type.
+func (l *Lowerer) varIsArray(name string) bool {
+	t := l.varTypes[name]
+	return len(t) > 2 && t[:2] == "[]"
 }
 
 // charToStr converts a byte value (e.g. from str_index) into a 1-char
@@ -644,8 +663,12 @@ func (l *Lowerer) lowerCallExpr(e *ast.CallExpr) Operand {
 	case *ast.IdentExpr:
 		calleeName = c.Name
 	case *ast.MemberExpr:
-		// Module.func — for now use "module_func" as label
-		calleeName = ast.ExprString(c)
+		// For import-aliased calls, use the resolved callee set by semantic analysis.
+		if e.ResolvedCallee != "" {
+			calleeName = e.ResolvedCallee
+		} else {
+			calleeName = ast.ExprString(c)
+		}
 	default:
 		calleeName = ast.ExprString(e.Callee)
 	}
@@ -681,6 +704,16 @@ func (l *Lowerer) lowerCallExpr(e *ast.CallExpr) Operand {
 }
 
 func (l *Lowerer) lowerIndexExpr(e *ast.IndexExpr) Operand {
+	// Determine if the object is an array or string.
+	if ident, ok := e.Object.(*ast.IdentExpr); ok && l.varIsArray(ident.Name) {
+		// Array indexing: arr[i] → IRArrayGet
+		objOp := l.lowerExpr(e.Object)
+		idxOp := l.lowerExpr(e.Index)
+		dst := l.freshVReg()
+		l.emit(IRInstr{Op: IRArrayGet, Dst: VReg(dst), Src1: objOp, Src2: idxOp})
+		return VReg(dst)
+	}
+	// String indexing: str[i] → IRStrIndex
 	objOp := l.lowerExpr(e.Object)
 	idxOp := l.lowerExpr(e.Index)
 	dst := l.freshVReg()
@@ -701,6 +734,22 @@ func (l *Lowerer) lowerAddressOfExpr(e *ast.AddressOfExpr) Operand {
 	return l.lowerExpr(e.Operand)
 }
 
+func (l *Lowerer) lowerArrayLitExpr(e *ast.ArrayLitExpr) Operand {
+	// Create array with initial capacity = max(len(elems), 4).
+	cap := len(e.Elems)
+	if cap < 4 {
+		cap = 4
+	}
+	dst := l.freshVReg()
+	l.emit(IRInstr{Op: IRArrayNew, Dst: VReg(dst), Src1: Imm(8), Src2: Imm(int64(cap))})
+	// Append each initial element.
+	for _, elem := range e.Elems {
+		elemOp := l.lowerExpr(elem)
+		l.emit(IRInstr{Op: IRArrayAppend, Dst: VReg(dst), Src1: elemOp})
+	}
+	return VReg(dst)
+}
+
 // ---------------------------------------------------------------------------
 // Built-in intrinsic handlers
 // ---------------------------------------------------------------------------
@@ -709,21 +758,26 @@ type builtinHandler func(e *ast.CallExpr) Operand
 
 func (l *Lowerer) builtinHandlers() map[string]builtinHandler {
 	return map[string]builtinHandler{
-		"mov":       l.builtinMov,
-		"lea":       l.builtinLea,
-		"push":      l.builtinPush,
-		"pop":       l.builtinPop,
-		"syscall":   l.builtinSyscall,
-		"int":       l.builtinInt,
-		"call":      l.builtinCall,
-		"ret":       l.builtinRet,
-		"nop":       l.builtinNop,
-		"setreg":    l.builtinSetReg,
-		"getreg":    l.builtinGetReg,
-		"setflag":   l.builtinSetFlag,
-		"getflag":   l.builtinGetFlag,
-		"len":       l.builtinLen,
-		"__time_ns": l.builtinTimeNs,
+		"mov":          l.builtinMov,
+		"lea":          l.builtinLea,
+		"push":         l.builtinPush,
+		"pop":          l.builtinPop,
+		"syscall":      l.builtinSyscall,
+		"int":          l.builtinInt,
+		"call":         l.builtinCall,
+		"ret":          l.builtinRet,
+		"nop":          l.builtinNop,
+		"setreg":       l.builtinSetReg,
+		"getreg":       l.builtinGetReg,
+		"setflag":      l.builtinSetFlag,
+		"getflag":      l.builtinGetFlag,
+		"array_append": l.builtinAppend,
+		"array_pop":    l.builtinArrayPop,
+		"len":          l.builtinLen,
+		"load8":        l.builtinLoad8,
+		"load32":       l.builtinLoad32,
+		"load64":       l.builtinLoad64,
+		"win_call":     l.builtinWinCall,
 	}
 }
 
@@ -776,8 +830,20 @@ func (l *Lowerer) builtinPush(e *ast.CallExpr) Operand {
 
 // pop() -> value
 func (l *Lowerer) builtinPop(e *ast.CallExpr) Operand {
+	// pop() — CPU stack pop.
 	dst := l.freshVReg()
 	l.emit(IRInstr{Op: IRPop, Dst: VReg(dst)})
+	return VReg(dst)
+}
+
+// array_pop(arr) — pop the last element from an array.
+func (l *Lowerer) builtinArrayPop(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	arrOp := l.lowerExpr(e.Args[0])
+	dst := l.freshVReg()
+	l.emit(IRInstr{Op: IRArrayPop, Dst: VReg(dst), Src1: arrOp})
 	return VReg(dst)
 }
 
@@ -863,9 +929,18 @@ func (l *Lowerer) builtinGetFlag(e *ast.CallExpr) Operand {
 	return VReg(dst)
 }
 
-// len(s) — string length (not the same as the user's own "len" function,
-// but if the user defines their own it will shadow this; we only hit this
-// when "len" resolves to a builtin).
+// array_append(arr, val) — append a value to an array.
+func (l *Lowerer) builtinAppend(e *ast.CallExpr) Operand {
+	if len(e.Args) != 2 {
+		return None()
+	}
+	arrOp := l.lowerExpr(e.Args[0])
+	valOp := l.lowerExpr(e.Args[1])
+	l.emit(IRInstr{Op: IRArrayAppend, Dst: arrOp, Src1: valOp})
+	return None()
+}
+
+// len(s) — string length (inline, no function call, does NOT clobber regs).
 func (l *Lowerer) builtinLen(e *ast.CallExpr) Operand {
 	if len(e.Args) != 1 {
 		return None()
@@ -876,10 +951,77 @@ func (l *Lowerer) builtinLen(e *ast.CallExpr) Operand {
 	return VReg(dst)
 }
 
-// __time_ns() — get current time in nanoseconds.
-func (l *Lowerer) builtinTimeNs(e *ast.CallExpr) Operand {
+// load8(addr) — load unsigned byte from memory address → i32.
+func (l *Lowerer) builtinLoad8(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	srcOp := l.lowerExpr(e.Args[0])
 	dst := l.freshVReg()
-	l.emit(IRInstr{Op: IRGetTimeNs, Dst: VReg(dst)})
+	l.emit(IRInstr{Op: IRLoad8, Dst: VReg(dst), Src1: srcOp})
+	return VReg(dst)
+}
+
+// load32(addr) — load 32-bit integer from memory address → i32.
+func (l *Lowerer) builtinLoad32(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	srcOp := l.lowerExpr(e.Args[0])
+	dst := l.freshVReg()
+	l.emit(IRInstr{Op: IRLoad32, Dst: VReg(dst), Src1: srcOp})
+	return VReg(dst)
+}
+
+// load64(addr) — load 64-bit integer from memory address → i64.
+func (l *Lowerer) builtinLoad64(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	srcOp := l.lowerExpr(e.Args[0])
+	dst := l.freshVReg()
+	l.emit(IRInstr{Op: IRLoad64, Dst: VReg(dst), Src1: srcOp})
+	return VReg(dst)
+}
+
+// win_call("FuncName", arg1, arg2, ...) — call a Windows API function.
+// The first argument must be a string literal naming the API function.
+// Remaining arguments are passed via Windows x64 calling convention.
+func (l *Lowerer) builtinWinCall(e *ast.CallExpr) Operand {
+	if len(e.Args) < 1 {
+		return None()
+	}
+
+	// The first argument is the API function name (string literal).
+	// We store it as a label operand (the emitter will use it as an extern).
+	nameArg := e.Args[0]
+	apiName := ""
+	if strLit, ok := nameArg.(*ast.StringLitExpr); ok {
+		raw := strLit.Value
+		if len(raw) >= 2 && (raw[0] == '"' || raw[0] == '\'') {
+			raw = raw[1 : len(raw)-1]
+		}
+		apiName = raw
+	}
+
+	if apiName == "" {
+		// Fallback: lower the expression and use it as a label.
+		apiName = "unknown_win_api"
+	}
+
+	// Lower remaining arguments.
+	var argOps []Operand
+	for _, arg := range e.Args[1:] {
+		argOps = append(argOps, l.lowerExpr(arg))
+	}
+
+	dst := l.freshVReg()
+	l.emit(IRInstr{
+		Op:   IRWinCall,
+		Dst:  VReg(dst),
+		Src1: LabelOp(apiName),
+		Args: argOps,
+	})
 	return VReg(dst)
 }
 

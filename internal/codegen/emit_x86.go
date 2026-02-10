@@ -44,14 +44,12 @@ func (e *x86Emitter) emit() {
 		w.WriteString("\n")
 	}
 
-	// BSS: string concatenation double-buffer.
-	if e.usesStrConcat() {
+	// BSS: bump-allocator heap.
+	if e.usesHeap() {
 		w.WriteString(".bss\n")
-		w.WriteString("_novus_strcat_buf_a:\n")
-		w.WriteString("    .space 4096\n")
-		w.WriteString("_novus_strcat_buf_b:\n")
-		w.WriteString("    .space 4096\n")
-		w.WriteString("_novus_strcat_sel:\n")
+		w.WriteString("_novus_heap:\n")
+		w.WriteString("    .space 1048576\n")
+		w.WriteString("_novus_heap_ptr:\n")
 		w.WriteString("    .space 4\n\n")
 	}
 
@@ -261,8 +259,37 @@ func (e *x86Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		w.WriteString(fmt.Sprintf("    movb %s, (%s)\n", src, stripPercent(addr)))
 	case IRStrConcat:
 		e.emitStrConcat(instr)
-	case IRGetTimeNs:
-		e.emitGetTimeNs(instr)
+
+	// Memory load (32-bit stubs)
+	case IRLoad8:
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
+	case IRLoad32:
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
+	case IRLoad64:
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
+
+	// Array operations (32-bit stubs — return 0 / no-op for now).
+	case IRArrayNew:
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
+	case IRArrayGet:
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
+	case IRArraySet:
+		w.WriteString("    // array_set (32-bit stub)\n")
+	case IRArrayAppend:
+		w.WriteString("    // array_append (32-bit stub)\n")
+	case IRArrayPop:
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
+	case IRArrayLen:
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
+	case IRWinCall:
+		w.WriteString("    ## win_call: Windows API calls not supported on x86-32\n")
 	}
 }
 
@@ -349,22 +376,23 @@ func (e *x86Emitter) emitStrConcat(instr IRInstr) {
 	copy1Label := fmt.Sprintf(".Lsc32_1_%p", &instr)
 	copy2Label := fmt.Sprintf(".Lsc32_2_%p", &instr)
 	doneLabel := fmt.Sprintf(".Lsc32_d_%p", &instr)
-	selALabel := fmt.Sprintf(".Lsc32_a_%p", &instr)
+	readyLabel := fmt.Sprintf(".Lsc32_r_%p", &instr)
 
 	// Load source pointers.
 	w.WriteString(fmt.Sprintf("    movl %s, %%esi\n", src1))
 	w.WriteString(fmt.Sprintf("    movl %s, %%edx\n", src2))
 
-	// Toggle buffer selector and pick destination buffer.
+	// Load heap pointer (lazy init).
 	w.WriteString("    pushl %edi\n")
-	w.WriteString("    xorb $1, _novus_strcat_sel\n")
-	w.WriteString("    movzbl _novus_strcat_sel, %eax\n")
-	w.WriteString("    movl $_novus_strcat_buf_a, %edi\n")
-	w.WriteString("    testl %eax, %eax\n")
-	w.WriteString(fmt.Sprintf("    jz %s\n", selALabel))
-	w.WriteString("    movl $_novus_strcat_buf_b, %edi\n")
-	w.WriteString(fmt.Sprintf("%s:\n", selALabel))
-	w.WriteString("    pushl %edi\n") // save buffer start
+	w.WriteString("    movl _novus_heap_ptr, %ecx\n")
+	w.WriteString("    testl %ecx, %ecx\n")
+	w.WriteString(fmt.Sprintf("    jnz %s\n", readyLabel))
+	w.WriteString("    movl $_novus_heap, %ecx\n")
+	w.WriteString(fmt.Sprintf("%s:\n", readyLabel))
+	w.WriteString("    pushl %ecx\n") // save result start
+
+	// edi = write cursor.
+	w.WriteString("    movl %ecx, %edi\n")
 
 	// Copy left string (skip null terminator).
 	w.WriteString(fmt.Sprintf("%s:\n", copy1Label))
@@ -386,29 +414,20 @@ func (e *x86Emitter) emitStrConcat(instr IRInstr) {
 	w.WriteString("    incl %edi\n")
 	w.WriteString(fmt.Sprintf("    jmp %s\n", copy2Label))
 
-	// Done \u2014 recover buffer start.
+	// Done: save updated heap pointer, recover result.
 	w.WriteString(fmt.Sprintf("%s:\n", doneLabel))
-	w.WriteString("    popl %eax\n") // buffer start
-	w.WriteString("    popl %edi\n") // restore
+	w.WriteString("    incl %edi\n")                  // advance past null byte
+	w.WriteString("    movl %edi, _novus_heap_ptr\n") // save updated heap ptr
+	w.WriteString("    popl %eax\n")                  // result start
+	w.WriteString("    popl %edi\n")                  // restore
 	w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
 }
 
-// emitGetTimeNs emits inline x86 assembly to get time in nanoseconds.
-// Uses gettimeofday syscall 78 on Linux (int 0x80 ABI).
-func (e *x86Emitter) emitGetTimeNs(instr IRInstr) {
-	w := e.b
-	dst := e.operand(instr.Dst)
-	w.WriteString("    // __time_ns: get current time in nanoseconds (32-bit stub)\n")
-	// On 32-bit x86 we return 0 as a simplified stub. Timing is primarily
-	// used on 64-bit targets. A full implementation would need to handle
-	// 32-bit overflow carefully for the multiplication.
-	w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
-}
-
-func (e *x86Emitter) usesStrConcat() bool {
+func (e *x86Emitter) usesHeap() bool {
 	for _, fn := range e.mod.Functions {
 		for _, instr := range fn.Instrs {
-			if instr.Op == IRStrConcat {
+			switch instr.Op {
+			case IRStrConcat, IRArrayNew, IRArrayAppend:
 				return true
 			}
 		}

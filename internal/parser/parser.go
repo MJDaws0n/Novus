@@ -68,6 +68,15 @@ func (p *Parser) peek() lexer.Token {
 	return lexer.Token{Type: lexer.EOF}
 }
 
+// peekAt returns the token at a given offset from the current position.
+func (p *Parser) peekAt(offset int) lexer.Token {
+	idx := p.pos + offset
+	if idx >= 0 && idx < len(p.tokens) {
+		return p.tokens[idx]
+	}
+	return lexer.Token{Type: lexer.EOF}
+}
+
 // advance consumes and returns the current token.
 func (p *Parser) advance() lexer.Token {
 	tok := p.peek()
@@ -200,9 +209,69 @@ func (p *Parser) parseModuleDecl() *ast.ModuleDecl {
 
 func (p *Parser) parseImportDecl() *ast.ImportDecl {
 	tok := p.advance() // consume IMPORT
-	name := p.expect(lexer.IDENT, "expected import name")
+
+	// Parse the import path which can be:
+	//   import foo;                      → path="foo"
+	//   import foo/bar/baz;              → path="foo/bar/baz"
+	//   import ../lib/foo;               → path="../lib/foo"
+	//   import foo bar;                  → path="foo", alias="bar"
+	//   import foo[fn1, fn2];            → path="foo", selectFns=["fn1","fn2"]
+	//   import foo[fn1, fn2] bar;        → path="foo", selectFns=["fn1","fn2"], alias="bar"
+	//   import foo/bar baz;              → path="foo/bar", alias="baz"
+	//   import foo/bar[fn1] baz;         → path="foo/bar", selectFns=["fn1"], alias="baz"
+
+	// Parse first path segment: can be ".." (DOT DOT) or an IDENT.
+	path := ""
+	if p.check(lexer.DOT) && p.peekAt(1).Type == lexer.DOT {
+		p.advance() // consume first '.'
+		p.advance() // consume second '.'
+		path = ".."
+	} else {
+		first := p.expect(lexer.IDENT, "expected import path")
+		path = first.Value
+	}
+
+	// Consume additional path segments: /ident or /.. sequences.
+	for p.check(lexer.SLASH) {
+		p.advance() // consume '/'
+		if p.check(lexer.DOT) && p.peekAt(1).Type == lexer.DOT {
+			p.advance() // consume first '.'
+			p.advance() // consume second '.'
+			path += "/.."
+		} else {
+			seg := p.expect(lexer.IDENT, "expected path segment after '/'")
+			path += "/" + seg.Value
+		}
+	}
+
+	// Optional selective imports: [fn1, fn2, ...]
+	var selectFns []string
+	if p.check(lexer.LBRACKET) {
+		p.advance() // consume '['
+		if !p.check(lexer.RBRACKET) {
+			fn := p.expect(lexer.IDENT, "expected function name in import selector")
+			selectFns = append(selectFns, fn.Value)
+			for p.match(lexer.COMMA) {
+				fn = p.expect(lexer.IDENT, "expected function name in import selector")
+				selectFns = append(selectFns, fn.Value)
+			}
+		}
+		p.expect(lexer.RBRACKET, "expected ']' after import selector")
+	}
+
+	// Optional alias: the next IDENT before the semicolon.
+	alias := ""
+	if p.check(lexer.IDENT) {
+		alias = p.advance().Value
+	}
+
 	p.expect(lexer.SEMICOLON, "expected ';' after import declaration")
-	return &ast.ImportDecl{Name: name.Value, Pos: p.position(tok)}
+	return &ast.ImportDecl{
+		Path:      path,
+		SelectFns: selectFns,
+		Alias:     alias,
+		Pos:       p.position(tok),
+	}
 }
 
 func (p *Parser) parseFnDecl() *ast.FnDecl {
@@ -264,6 +333,19 @@ func (p *Parser) parseParam() *ast.Param {
 // and plain identifiers are both accepted.
 func (p *Parser) parseType() *ast.TypeExpr {
 	tok := p.peek()
+
+	// Array type: []<element_type>
+	if tok.Type == lexer.LBRACKET {
+		p.advance() // consume '['
+		p.expect(lexer.RBRACKET, "expected ']' in array type")
+		elemType := p.parseType()
+		return &ast.TypeExpr{
+			Name:     "[]" + elemType.Name,
+			IsArray:  true,
+			ElemName: elemType.Name,
+			Pos:      p.position(tok),
+		}
+	}
 
 	if isTypeKeyword(tok.Type) {
 		p.advance()
@@ -545,6 +627,9 @@ func (p *Parser) parsePrefix() ast.Expr {
 		operand := p.parsePrecedence(precUnary)
 		return &ast.AddressOfExpr{Operand: operand, Pos: p.position(tok)}
 
+	case lexer.LBRACKET:
+		return p.parseArrayLitExpr()
+
 	default:
 		// Type keywords (str, i32, …) used as identifiers in expression
 		// context. This lets code like  str = str + '\r\n';  work even
@@ -566,6 +651,24 @@ func (p *Parser) parseGroupExpr() ast.Expr {
 	expr := p.parseExpression()
 	p.expect(lexer.RPAREN, "expected ')' after expression")
 	return &ast.GroupExpr{Expression: expr, Pos: p.position(tok)}
+}
+
+// parseArrayLitExpr parses [expr, expr, ...] or [] (empty array).
+func (p *Parser) parseArrayLitExpr() ast.Expr {
+	tok := p.advance() // consume '['
+	var elems []ast.Expr
+	if p.peek().Type != lexer.RBRACKET {
+		elems = append(elems, p.parseExpression())
+		for p.peek().Type == lexer.COMMA {
+			p.advance() // consume ','
+			if p.peek().Type == lexer.RBRACKET {
+				break // allow trailing comma
+			}
+			elems = append(elems, p.parseExpression())
+		}
+	}
+	p.expect(lexer.RBRACKET, "expected ']' after array elements")
+	return &ast.ArrayLitExpr{Elems: elems, Pos: p.position(tok)}
 }
 
 // ---- Infix precedence table ----
