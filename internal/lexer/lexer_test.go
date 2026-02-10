@@ -504,6 +504,23 @@ func TestMultipleErrorRecovery(t *testing.T) {
 	}
 }
 
+func TestIndexingTokens(t *testing.T) {
+	tokens, errs := Lex("a[0];")
+	if len(errs) > 0 {
+		t.Fatalf("unexpected lex errors: %v", errs)
+	}
+	want := []string{IDENT, LBRACKET, INT, RBRACKET, SEMICOLON, EOF}
+	got := tokenTypes(tokens)
+	if len(got) != len(want) {
+		t.Fatalf("token count: got %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("token[%d]: got %s, want %s", i, got[i], want[i])
+		}
+	}
+}
+
 func TestExampleNovFile(t *testing.T) {
 	content, err := os.ReadFile("../../example.nov")
 	if err != nil {
@@ -527,21 +544,8 @@ func TestExampleNovFile(t *testing.T) {
 		val string
 	}{
 		{MODULE, "module"},
-		{IDENT, "hello_win32"},
+		{IDENT, "hello_world_macos_silicon"},
 		{SEMICOLON, ";"},
-		{IMPORT, "import"},
-		{IDENT, "win32"},
-		{SEMICOLON, ";"},
-		{FN, "fn"},
-		{IDENT, "print"},
-		{LPAREN, "("},
-		{IDENT, "msg"},
-		{COLON, ":"},
-		{STR, "str"},
-		{RPAREN, ")"},
-		{ARROW, "->"},
-		{VOID, "void"},
-		{LBRACE, "{"},
 	}
 	for i, exp := range expectedStart {
 		if i >= len(tokens) {
@@ -557,14 +561,14 @@ func TestExampleNovFile(t *testing.T) {
 		t.Errorf("last token should be EOF, got %s", last.Type)
 	}
 	foundHelloWorld := false
-	foundGetStdHandle := false
+	foundIndexing := false
 	foundReturn := false
 	for _, tok := range tokens {
 		if tok.Type == STRING && tok.Value == `"Hello, World!"` {
 			foundHelloWorld = true
 		}
-		if tok.Type == IDENT && tok.Value == "GetStdHandle" {
-			foundGetStdHandle = true
+		if tok.Type == LBRACKET {
+			foundIndexing = true
 		}
 		if tok.Type == RETURN {
 			foundReturn = true
@@ -573,8 +577,8 @@ func TestExampleNovFile(t *testing.T) {
 	if !foundHelloWorld {
 		t.Error("did not find string token for Hello, World!")
 	}
-	if !foundGetStdHandle {
-		t.Error("did not find identifier GetStdHandle")
+	if !foundIndexing {
+		t.Error("did not find '[' token (expected indexing in example.nov)")
 	}
 	if !foundReturn {
 		t.Error("did not find RETURN keyword")
