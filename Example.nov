@@ -1,5 +1,5 @@
 // Hello World example for macOS Apple Silicon (M1/M2) using Novus
-module hello_world_macos_silicon;
+module example_app_macos_silicon;
 
 /*
 * This function calculates the length of a string. It iterates through the characters
@@ -22,12 +22,12 @@ fn len(s: str) -> i32 {
  * @param msg The string message to be printed.
  */
 fn print(msg: str) -> void {
-    msg = msg + "\n"; // Append newline to the message
-    
-    mov(eax, 1);            // x0 = fd (stdout)
-    mov(ebx, msg);          // x1 = buf (pointer)
-    mov(ecx, len(msg));     // x2 = len
-    mov(r8, 0x2000004);     // x16 = SYS_write
+    msg = msg + "\n";
+
+    mov(x0, 1);             // x0 = fd (stdout)
+    mov(x1, msg);           // x1 = buf (pointer to string)
+    mov(x2, len(msg));      // x2 = len (byte count)
+    mov(x16, 0x2000004);    // x16 = SYS_write (macOS ARM64)
     syscall();              // svc #0x80
 }
 
@@ -36,21 +36,215 @@ fn print(msg: str) -> void {
 * to display the message on the console.
 */
 fn main() -> i32 {
-    // The string we want to print (include a newline)
+    // Start the timer
+    let start_ns: i64 = get_time_ns();
+
+    // The string we want to print
     let msg: str = "Hello, World!";
 
-    // Calling out custom coded print function
+    // Calling our custom coded print function
     print(msg);
 
+    // A loop
+    let count: i32 = 0;
+    while (count < 5) {
+        print("Count: " + itoa(count));
+        count = count + 1;
+    }
+
     // Print message to the console with normal string
-    print("Goodbye, World!");
+    print('Goodbye, World!');
+
+    // Output the time take for the application to run
+    let end_ns: i64 = get_time_ns();
+    print("Duration: " + itoa((end_ns - start_ns) / 1000000) + " ms");
+
+    // Using inputs
+    let inp: str = input("Enter something: ", 128);
+    print("DEBUG LEN: " + itoa(len(inp)));
+    print("You entered: " + inp);
+    let i: i32 = 0;
+    while (i < len(inp)) {
+        print("Char " + itoa(i) + ": [" + inp[i] + "]");
+        i = i + 1;
+    }
 
     exit(0);
     return 0;
 }
 
+/*
+ * Helper function to convert an integer to a string.
+ * This is a simple implementation that handles positive and negative integers.
+ * It builds the string in reverse and then reverses it back before returning.
+ */
+fn itoa(n: i32) -> str {
+    let out: str = "";
+    let neg: i32 = 0;
+
+    if (n == 0) {
+        return "0";
+    }
+
+    if (n < 0) {
+        neg = 1;
+        n = 0 - n;
+    }
+
+    // Build digits backwards
+    let digits: str = "";
+    while (n > 0) {
+        let digit: i32 = n % 10;
+        
+        // Convert digit to char string: "0" + digit
+        if (digit == 0) { digits = digits + "0"; }
+        else if (digit == 1) { digits = digits + "1"; }
+        else if (digit == 2) { digits = digits + "2"; }
+        else if (digit == 3) { digits = digits + "3"; }
+        else if (digit == 4) { digits = digits + "4"; }
+        else if (digit == 5) { digits = digits + "5"; }
+        else if (digit == 6) { digits = digits + "6"; }
+        else if (digit == 7) { digits = digits + "7"; }
+        else if (digit == 8) { digits = digits + "8"; }
+        else if (digit == 9) { digits = digits + "9"; }
+
+        n = n / 10;
+    }
+
+    if (neg == 1) {
+        digits = digits + "-";
+    }
+
+    // Reverse the digits string since you built it backwards
+    let i: i32 = len(digits) - 1;
+    while (i >= 0) {
+        out = out + digits[i];
+        i = i - 1;
+    }
+
+    return out;
+}
+fn itoa(n: i64) -> str {
+    let out: str = "";
+    let neg: i32 = 0;
+
+    if (n == 0) {
+        return "0";
+    }
+
+    if (n < 0) {
+        neg = 1;
+        n = 0 - n;
+    }
+
+    let digits: str = "";
+    while (n > 0) {
+        let digit: i64 = n % 10;
+
+        if (digit == 0) { digits = digits + "0"; }
+        else if (digit == 1) { digits = digits + "1"; }
+        else if (digit == 2) { digits = digits + "2"; }
+        else if (digit == 3) { digits = digits + "3"; }
+        else if (digit == 4) { digits = digits + "4"; }
+        else if (digit == 5) { digits = digits + "5"; }
+        else if (digit == 6) { digits = digits + "6"; }
+        else if (digit == 7) { digits = digits + "7"; }
+        else if (digit == 8) { digits = digits + "8"; }
+        else if (digit == 9) { digits = digits + "9"; }
+
+        n = n / 10;
+    }
+
+    if (neg == 1) {
+        digits = digits + "-";
+    }
+
+    let i: i32 = len(digits) - 1;
+    while (i >= 0) {
+        out = out + digits[i];
+        i = i - 1;
+    }
+
+    return out;
+}
+
 fn exit(code: i32) -> void {
-    mov(eax, code);         // x0 = exit code
-    mov(r8, 0x2000001);     // x16 = SYS_exit
+    mov(x0, code);          // x0 = exit code
+    mov(x16, 0x2000001);    // x16 = SYS_exit (macOS ARM64)
+    syscall();              // svc #0x80
+}
+
+/*
+ * Returns the current time in nanoseconds using the __time_ns compiler
+ * intrinsic.  On macOS ARM64 this emits gettimeofday (syscall 0x2000074);
+ * on Linux it uses clock_gettime.
+ */
+fn get_time_ns() -> i64 {
+    return __time_ns();
+}
+
+fn u64_to_i32(n: u64) -> i32 {
+    // Only keep values from 0 to 4294967295 (2^32 - 1)
+    let m: u64 = 4294967296; // 2^32
+    let lower_u64: u64 = n - (n / m) * m; // This is n % 4294967296 using math, not %
+
+    // Now, manually build back i32 (adds up 2^i for each digit)
+    let result: i32 = 0;
+    let factor: u64 = 1;
+    let i: i32 = 0;
+    let rem: u64 = lower_u64;
+
+    while (i < 32) {
+        let digit: u64 = (rem / factor) % 2;
+        if (digit == 1) {
+            result = result + (1 * i);
+        }
+        factor = factor * 2;
+        i = i + 1;
+    }
+
+    return result;
+}
+
+/*
+ * Gets input from the user after displaying the prompt (no newline).
+ * prompt: str — string to show
+ * buf_len: i32 — how much to read at most
+ * Returns: str — input string entered by the user
+ */
+fn input(prompt: str, buf_len: i32 = 128) -> str {
+    // Print the prompt (no newline)
+    mov(x0, 1);
+    mov(x1, prompt);
+    mov(x2, len(prompt));
+    mov(x16, 0x2000004);
     syscall();
+
+    // Prepare buffer for input
+    let buf: str = "";
+    
+    while(len(buf) < buf_len) {
+        buf = buf + " "; // ensure buffer is long enough
+    }
+    
+    // Read input
+    mov(x0, 0);
+    mov(x1, buf);
+    mov(x2, buf_len);
+    mov(x16, 0x2000003);
+    syscall();
+    
+    let nread: i32 = u64_to_i32(getreg(x0));
+
+    // Create an output string the correct length (not reusing buf)
+    let out: str = "";
+    let i: i32 = 0;
+    while (i < nread) {
+        if (buf[i] == '\n') {
+            break;
+        }
+        out = out + buf[i];
+        i = i + 1;
+    }
+    return out;
 }

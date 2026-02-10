@@ -44,11 +44,15 @@ func (e *x86Emitter) emit() {
 		w.WriteString("\n")
 	}
 
-	// BSS: string concatenation buffer.
+	// BSS: string concatenation double-buffer.
 	if e.usesStrConcat() {
 		w.WriteString(".bss\n")
-		w.WriteString("_novus_strcat_buf:\n")
-		w.WriteString("    .space 4096\n\n")
+		w.WriteString("_novus_strcat_buf_a:\n")
+		w.WriteString("    .space 4096\n")
+		w.WriteString("_novus_strcat_buf_b:\n")
+		w.WriteString("    .space 4096\n")
+		w.WriteString("_novus_strcat_sel:\n")
+		w.WriteString("    .space 4\n\n")
 	}
 
 	// Text section.
@@ -251,8 +255,14 @@ func (e *x86Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		e.emitStrLen(instr)
 	case IRStrIndex:
 		e.emitStrIndex(instr)
+	case IRStoreByte:
+		addr := e.operand(instr.Dst)
+		src := e.operand(instr.Src1)
+		w.WriteString(fmt.Sprintf("    movb %s, (%s)\n", src, stripPercent(addr)))
 	case IRStrConcat:
 		e.emitStrConcat(instr)
+	case IRGetTimeNs:
+		e.emitGetTimeNs(instr)
 	}
 }
 
@@ -339,14 +349,21 @@ func (e *x86Emitter) emitStrConcat(instr IRInstr) {
 	copy1Label := fmt.Sprintf(".Lsc32_1_%p", &instr)
 	copy2Label := fmt.Sprintf(".Lsc32_2_%p", &instr)
 	doneLabel := fmt.Sprintf(".Lsc32_d_%p", &instr)
+	selALabel := fmt.Sprintf(".Lsc32_a_%p", &instr)
 
 	// Load source pointers.
 	w.WriteString(fmt.Sprintf("    movl %s, %%esi\n", src1))
 	w.WriteString(fmt.Sprintf("    movl %s, %%edx\n", src2))
 
-	// Save edi, load buffer address.
+	// Toggle buffer selector and pick destination buffer.
 	w.WriteString("    pushl %edi\n")
-	w.WriteString("    movl $_novus_strcat_buf, %edi\n")
+	w.WriteString("    xorb $1, _novus_strcat_sel\n")
+	w.WriteString("    movzbl _novus_strcat_sel, %eax\n")
+	w.WriteString("    movl $_novus_strcat_buf_a, %edi\n")
+	w.WriteString("    testl %eax, %eax\n")
+	w.WriteString(fmt.Sprintf("    jz %s\n", selALabel))
+	w.WriteString("    movl $_novus_strcat_buf_b, %edi\n")
+	w.WriteString(fmt.Sprintf("%s:\n", selALabel))
 	w.WriteString("    pushl %edi\n") // save buffer start
 
 	// Copy left string (skip null terminator).
@@ -374,6 +391,18 @@ func (e *x86Emitter) emitStrConcat(instr IRInstr) {
 	w.WriteString("    popl %eax\n") // buffer start
 	w.WriteString("    popl %edi\n") // restore
 	w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+}
+
+// emitGetTimeNs emits inline x86 assembly to get time in nanoseconds.
+// Uses gettimeofday syscall 78 on Linux (int 0x80 ABI).
+func (e *x86Emitter) emitGetTimeNs(instr IRInstr) {
+	w := e.b
+	dst := e.operand(instr.Dst)
+	w.WriteString("    // __time_ns: get current time in nanoseconds (32-bit stub)\n")
+	// On 32-bit x86 we return 0 as a simplified stub. Timing is primarily
+	// used on 64-bit targets. A full implementation would need to handle
+	// 32-bit overflow carefully for the multiplication.
+	w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
 }
 
 func (e *x86Emitter) usesStrConcat() bool {

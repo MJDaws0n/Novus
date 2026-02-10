@@ -139,6 +139,10 @@ const (
 	IRStrConcat // dst = src1 + src2 (string concatenation, helper call)
 	IRStrLen    // dst = len(src1)
 	IRStrIndex  // dst = src1[src2]
+	IRStoreByte // store byte src1 at address [dst] (for string index assignment)
+
+	// Platform intrinsics
+	IRGetTimeNs // dst = current time in nanoseconds (platform-specific)
 
 	// Misc
 	IRComment // emit a comment in the output (src1 = label with comment text)
@@ -156,8 +160,9 @@ var irOpNames = map[IROp]string{
 	IRLabel: "label", IRCall: "call", IRRet: "ret",
 	IRSyscall: "syscall", IRInt: "int", IRNop: "nop",
 	IRSetReg: "setreg", IRGetReg: "getreg", IRSetFlag: "setflag", IRGetFlag: "getflag",
-	IRStrConcat: "str_concat", IRStrLen: "str_len", IRStrIndex: "str_index",
-	IRComment: "comment", IRData: "data",
+	IRStrConcat: "str_concat", IRStrLen: "str_len", IRStrIndex: "str_index", IRStoreByte: "store_byte",
+	IRGetTimeNs: "get_time_ns",
+	IRComment:   "comment", IRData: "data",
 }
 
 func (op IROp) String() string {

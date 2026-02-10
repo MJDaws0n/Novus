@@ -1,0 +1,6 @@
+// Stardard library for Novus. This module is NOT automatically imported by all Novus programs.
+// However most programs will want to import this module to get access to the standard library functions.
+// Otherwise you would just be re-inventing the wheel.
+// Feel free to copy any functions from here and include in your own code to
+// keep lightweight and avoid importing the whole standard library .
+module standard_lib;

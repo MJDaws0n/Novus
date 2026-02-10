@@ -245,10 +245,18 @@ func (p *Parser) parseParam() *ast.Param {
 	name := p.expect(lexer.IDENT, "expected parameter name")
 	p.expect(lexer.COLON, "expected ':' after parameter name")
 	typ := p.parseType()
+
+	// Optional default value: param: type = expr
+	var defaultVal ast.Expr
+	if p.match(lexer.ASSIGN) {
+		defaultVal = p.parseExpression()
+	}
+
 	return &ast.Param{
-		Name: name.Value,
-		Type: typ,
-		Pos:  p.position(name),
+		Name:    name.Value,
+		Type:    typ,
+		Default: defaultVal,
+		Pos:     p.position(name),
 	}
 }
 

@@ -39,6 +39,15 @@ func (e *arm64Emitter) uniqueID() int {
 	return e.uid
 }
 
+// toW converts an ARM64 x-register name to its w-register (32-bit) counterpart,
+// e.g. "x10" → "w10".  Used for byte-level operations (ldrb/strb).
+func toW(reg string) string {
+	if len(reg) > 0 && reg[0] == 'x' {
+		return "w" + reg[1:]
+	}
+	return reg
+}
+
 // ---------------------------------------------------------------------------
 // Top-level emission
 // ---------------------------------------------------------------------------
@@ -64,10 +73,14 @@ func (e *arm64Emitter) emit() {
 		w.WriteString("\n")
 	}
 
-	// BSS: string concatenation buffer.
+	// BSS: string concatenation double-buffer.
 	if e.usesStrConcat() {
-		bufSym := e.target.Sym("_novus_strcat_buf")
-		w.WriteString(fmt.Sprintf(".lcomm %s, 4096\n\n", bufSym))
+		bufA := e.target.Sym("_novus_strcat_buf_a")
+		bufB := e.target.Sym("_novus_strcat_buf_b")
+		sel := e.target.Sym("_novus_strcat_sel")
+		w.WriteString(fmt.Sprintf(".lcomm %s, 4096\n", bufA))
+		w.WriteString(fmt.Sprintf(".lcomm %s, 4096\n", bufB))
+		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n\n", sel))
 	}
 
 	// Text section.
@@ -341,8 +354,14 @@ func (e *arm64Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		e.emitStrLen(fn, instr)
 	case IRStrIndex:
 		e.emitStrIndex(fn, instr)
+	case IRStoreByte:
+		addr := e.loadToReg(fn, instr.Dst, "x11")
+		src := e.loadToReg(fn, instr.Src1, "x10")
+		w.WriteString(fmt.Sprintf("    strb %s, [%s]\n", toW(src), addr))
 	case IRStrConcat:
 		e.emitStrConcat(fn, instr)
+	case IRGetTimeNs:
+		e.emitGetTimeNs(fn, instr)
 	}
 }
 
@@ -453,8 +472,12 @@ func (e *arm64Emitter) emitStrConcat(fn *IRFunc, instr IRInstr) {
 	copy1Label := fmt.Sprintf(".Lsc1_%d", id)
 	copy2Label := fmt.Sprintf(".Lsc2_%d", id)
 	doneLabel := fmt.Sprintf(".Lscd_%d", id)
+	selBLabel := fmt.Sprintf(".Lscb_%d", id)
+	afterSelLabel := fmt.Sprintf(".Lscas_%d", id)
 
-	bufSym := e.target.Sym("_novus_strcat_buf")
+	selSym := e.target.Sym("_novus_strcat_sel")
+	bufA := e.target.Sym("_novus_strcat_buf_a")
+	bufB := e.target.Sym("_novus_strcat_buf_b")
 
 	// Move sources into dedicated scratch registers.
 	if src1 != "x13" {
@@ -464,16 +487,36 @@ func (e *arm64Emitter) emitStrConcat(fn *IRFunc, instr IRInstr) {
 		w.WriteString(fmt.Sprintf("    mov x14, %s\n", src2))
 	}
 
-	// Load buffer address into x15, save start in x12.
+	// Toggle buffer selector.
 	if e.target.OS == OS_Darwin {
-		w.WriteString(fmt.Sprintf("    adrp x15, %s@PAGE\n", bufSym))
-		w.WriteString(fmt.Sprintf("    add x15, x15, %s@PAGEOFF\n", bufSym))
+		w.WriteString(fmt.Sprintf("    adrp x15, %s@PAGE\n", selSym))
+		w.WriteString(fmt.Sprintf("    add x15, x15, %s@PAGEOFF\n", selSym))
 	} else {
-		w.WriteString(fmt.Sprintf("    adrp x15, %s\n", bufSym))
-		w.WriteString(fmt.Sprintf("    add x15, x15, :lo12:%s\n", bufSym))
+		w.WriteString(fmt.Sprintf("    adrp x15, %s\n", selSym))
+		w.WriteString(fmt.Sprintf("    add x15, x15, :lo12:%s\n", selSym))
 	}
-	w.WriteString("    mov x11, x15\n") // x11 = write pointer
-	w.WriteString("    mov x12, x15\n") // x12 = saved buffer start
+	w.WriteString("    ldrb w16, [x15]\n")
+	w.WriteString("    eor w16, w16, #1\n")
+	w.WriteString("    strb w16, [x15]\n")
+
+	// Select destination buffer: w16==0 → buf_a, w16==1 → buf_b.
+	if e.target.OS == OS_Darwin {
+		w.WriteString(fmt.Sprintf("    adrp x11, %s@PAGE\n", bufA))
+		w.WriteString(fmt.Sprintf("    add x11, x11, %s@PAGEOFF\n", bufA))
+	} else {
+		w.WriteString(fmt.Sprintf("    adrp x11, %s\n", bufA))
+		w.WriteString(fmt.Sprintf("    add x11, x11, :lo12:%s\n", bufA))
+	}
+	w.WriteString(fmt.Sprintf("    cbz w16, %s\n", afterSelLabel))
+	if e.target.OS == OS_Darwin {
+		w.WriteString(fmt.Sprintf("    adrp x11, %s@PAGE\n", bufB))
+		w.WriteString(fmt.Sprintf("    add x11, x11, %s@PAGEOFF\n", bufB))
+	} else {
+		w.WriteString(fmt.Sprintf("    adrp x11, %s\n", bufB))
+		w.WriteString(fmt.Sprintf("    add x11, x11, :lo12:%s\n", bufB))
+	}
+	w.WriteString(fmt.Sprintf("%s:\n", afterSelLabel))
+	w.WriteString("    mov x12, x11\n") // x12 = saved buffer start
 
 	// Copy left string (skip null terminator).
 	w.WriteString(fmt.Sprintf("%s:\n", copy1Label))
@@ -491,6 +534,66 @@ func (e *arm64Emitter) emitStrConcat(fn *IRFunc, instr IRInstr) {
 	// Result = buffer start.
 	w.WriteString(fmt.Sprintf("%s:\n", doneLabel))
 	w.WriteString(fmt.Sprintf("    mov %s, x12\n", dst))
+	e.spillIfNeeded(fn, instr.Dst, dst)
+	_ = selBLabel // suppress unused warning
+}
+
+// emitGetTimeNs emits inline assembly to get the current time in nanoseconds
+// using the gettimeofday syscall on macOS or clock_gettime on Linux.
+//
+// macOS ARM64:
+//
+//	gettimeofday(struct timeval *tp, void *tzp) → syscall 116 (0x2000074)
+//	struct timeval { int64 tv_sec; int64 tv_usec; }
+//	result = tv_sec * 1_000_000_000 + tv_usec * 1000
+//
+// Linux ARM64:
+//
+//	clock_gettime(CLOCK_MONOTONIC, struct timespec *tp) → syscall 113
+//	struct timespec { int64 tv_sec; int64 tv_nsec; }
+//	result = tv_sec * 1_000_000_000 + tv_nsec
+func (e *arm64Emitter) emitGetTimeNs(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	dst := e.ensureReg(fn, instr.Dst, "x10")
+
+	w.WriteString("    // __time_ns: get current time in nanoseconds\n")
+	// Allocate 16 bytes on the stack for the struct (timeval or timespec).
+	w.WriteString("    sub sp, sp, #16\n")
+
+	if e.target.OS == OS_Darwin {
+		// gettimeofday(x0=ptr, x1=NULL), syscall 0x2000074
+		w.WriteString("    mov x0, sp\n") // x0 = pointer to timeval on stack
+		w.WriteString("    mov x1, #0\n") // x1 = NULL (no timezone)
+		e.loadImm("x16", 0x2000074)       // SYS_gettimeofday with macOS prefix
+		w.WriteString(fmt.Sprintf("    %s\n", e.target.SyscallInstr))
+		// sp+0 = tv_sec (8 bytes), sp+8 = tv_usec (8 bytes)
+		w.WriteString("    ldr x11, [sp, #0]\n") // x11 = tv_sec
+		w.WriteString("    ldr x12, [sp, #8]\n") // x12 = tv_usec
+		// result = tv_sec * 1_000_000_000 + tv_usec * 1000
+		e.loadImm("x13", 1000000000)
+		w.WriteString("    mul x11, x11, x13\n") // x11 = tv_sec * 1e9
+		e.loadImm("x13", 1000)
+		w.WriteString("    mul x12, x12, x13\n") // x12 = tv_usec * 1000
+		w.WriteString("    add x11, x11, x12\n") // x11 = total nanoseconds
+	} else {
+		// Linux: clock_gettime(x0=CLOCK_MONOTONIC=1, x1=ptr), syscall 113
+		w.WriteString("    mov x0, #1\n")   // x0 = CLOCK_MONOTONIC
+		w.WriteString("    mov x1, sp\n")   // x1 = pointer to timespec on stack
+		w.WriteString("    mov x8, #113\n") // SYS_clock_gettime
+		w.WriteString(fmt.Sprintf("    %s\n", e.target.SyscallInstr))
+		// sp+0 = tv_sec (8 bytes), sp+8 = tv_nsec (8 bytes)
+		w.WriteString("    ldr x11, [sp, #0]\n") // x11 = tv_sec
+		w.WriteString("    ldr x12, [sp, #8]\n") // x12 = tv_nsec
+		// result = tv_sec * 1_000_000_000 + tv_nsec
+		e.loadImm("x13", 1000000000)
+		w.WriteString("    mul x11, x11, x13\n") // x11 = tv_sec * 1e9
+		w.WriteString("    add x11, x11, x12\n") // x11 = total nanoseconds
+	}
+
+	// Deallocate the stack space.
+	w.WriteString("    add sp, sp, #16\n")
+	// Move result to destination.
+	w.WriteString(fmt.Sprintf("    mov %s, x11\n", dst))
 	e.spillIfNeeded(fn, instr.Dst, dst)
 }
 
