@@ -27,7 +27,7 @@ fn array_data_ptr_u64(arr: []u64) -> i64 {
 fn main() -> i32 {
 	let osascript_path: str = "/usr/bin/osascript";
 	let arg_e: str = "-e";
-	let script: str = "display dialog \"\" with title \"Example Novus App\"";
+    let script: str = "display dialog \"Welcome to this window made in novus!\\nThis is basically a fake window. A proper interface applicaiton will be made at some point.\" with title \"Example Novus App\"";
 
 	// argv: [osascript_path, "-e", script, NULL]
 	// Build as a real []u64 array, then pass its data pointer to execve.
