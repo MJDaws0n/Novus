@@ -1,0 +1,38 @@
+// Novus example for macOS Apple Silicon (M1/M2) usingn the standard library
+module example2_app_macos_silicon;
+
+// Import the standard library for macOS on Apple Silicon, which provides
+// utility functions like print, array_len, get_time_ns, and input.
+// The standard library is implemented in lib/standard_lib_macos_silicon.nov also
+// includes the generic standard lib
+import ../lib/standard_lib_macos_silicon;
+
+// ===========================================================================
+// Main
+// ===========================================================================
+fn main() -> i32 {
+    // Start timer
+    let start_ns: i64 = get_time_ns();
+
+    // Print something
+    print("Hello World!");
+
+    // Enter an input
+    let inp: str = input("Enter a string: ");
+    print("You entered: " + inp);
+
+    // Loop
+    let n: i32 = 100;
+    while(n > 0) {
+        n = n - 1;
+        print("Countdown: " + int_to_str(n));
+    }
+
+
+    // Output how long it took to run
+    let end_ns: i64 = get_time_ns();
+    let elapsed_ms: i64 = (end_ns - start_ns) / 1000000;
+    print("Elapsed time: " + int_to_str(elapsed_ms) + " ms");
+    exit(0);
+    return 0;
+}
