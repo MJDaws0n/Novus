@@ -11,7 +11,6 @@ fn abs(x: i32) -> i32 {
     }
     return x;
 }
-
 fn max(a: i32, b: i32) -> i32 {
     if (a > b) {
         return a;
