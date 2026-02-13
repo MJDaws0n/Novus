@@ -7,12 +7,11 @@ fn main() -> i32 {
     // Start timer
     let start_ns: i64 = get_time_ns();
     let count: i32 = 0;
-    while (count < 1000000000) {
+    while (count < 10000000000) {
         count = count + 1;
     }
     let end_ns: i64 = get_time_ns();
-    print("Final count: " + int_to_str(count));
-    print("Elapsed time (ms): " + int_to_str((end_ns - start_ns) / 1000000));
+    print("Elapsed time (s): " + int_to_str((end_ns - start_ns) / 1000000000));
 
     exit(0);
     return 0;
