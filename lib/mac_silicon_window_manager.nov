@@ -1,0 +1,185 @@
+// Novus wrapper around the mac_silicon_window_manager C helper.
+//
+// NOTE: This relies only on raw macOS syscalls (no Cocoa frameworks).
+// It connects to a UNIX domain socket and sends simple line commands.
+
+module mac_silicon_window_manager;
+
+import standard_lib;
+import standard_lib_macos_silicon;
+
+// -----------------------------------------------------------------------------
+// Constants
+// -----------------------------------------------------------------------------
+
+let AF_UNIX: i32 = 1;
+let SOCK_STREAM: i32 = 1;
+
+// macOS syscall numbers (SYS_*), invoked with x16=0x2000000+SYS_*
+let SYS_read: i64 = 3;
+let SYS_write: i64 = 4;
+let SYS_close: i64 = 6;
+let SYS_socket: i64 = 97;
+let SYS_connect: i64 = 98;
+
+// -----------------------------------------------------------------------------
+// Raw memory helpers (no store8 builtin; uses str[idx] = byte)
+// -----------------------------------------------------------------------------
+
+fn u8(v: i32) -> i32 {
+    // Keep in 0..255
+    return v & 255;
+}
+
+fn sock_path_default() -> str {
+    return "/tmp/novus_wm.sock";
+}
+
+fn sockaddr_un_make(path: str) -> str {
+    // struct sockaddr_un {
+    //   u8  sun_len;
+    //   u8  sun_family;
+    //   char sun_path[104];
+    // }
+    // We'll build a 106-byte string and fill it.
+    let buf: str = "";
+    let i: i32 = 0;
+    while (i < 106) {
+        buf = buf + "\0";
+        i = i + 1;
+    }
+
+    // sun_len
+    buf[0] = u8(106);
+    // sun_family
+    buf[1] = u8(AF_UNIX);
+
+    // sun_path
+    i = 0;
+    while (i < 104) {
+        if (path[i] == '\0') {
+            break;
+        }
+        buf[2 + i] = u8(path[i]);
+        i = i + 1;
+    }
+    buf[2 + i] = 0;
+
+    return buf;
+}
+
+fn syscall0(nr: i64) -> i64 {
+    mov(x16, 0x2000000 + nr);
+    syscall();
+    return getreg(x0);
+}
+
+fn syscall3_i32(nr: i64, a0: i32, a1: i32, a2: i32) -> i64 {
+    mov(x0, a0);
+    mov(x1, a1);
+    mov(x2, a2);
+    mov(x16, 0x2000000 + nr);
+    syscall();
+    return getreg(x0);
+}
+fn syscall1(nr: i64, a0: i32) -> i64 {
+    mov(x0, a0);
+    mov(x16, 0x2000000 + nr);
+    syscall();
+    return getreg(x0);
+}
+fn syscall3(nr: i64, a0: i32, a1: u64, a2: i32) -> i64 {
+    mov(x0, a0);
+    mov(x1, a1);
+    mov(x2, a2);
+    mov(x16, 0x2000000 + nr);
+    syscall();
+    return getreg(x0);
+}
+
+fn wm_socket() -> i32 {
+    syscall3_i32(SYS_socket, AF_UNIX, SOCK_STREAM, 0);
+    return u64_to_i32(getreg(x0));
+}
+
+fn wm_connect(sock_path: str) -> i32 {
+    let fd: i32 = wm_socket();
+    if (fd < 0) {
+        return fd;
+    }
+
+    let addr: str = sockaddr_un_make(sock_path);
+
+    mov(x9, addr);
+    let addr_ptr: u64 = getreg(x9);
+
+    // connect(fd, &addr, 106)
+    syscall3(SYS_connect, fd, addr_ptr, 106);
+    let irc: i32 = u64_to_i32(getreg(x0));
+    if (irc < 0) {
+        // close(fd)
+        syscall1(SYS_close, fd);
+        return irc;
+    }
+
+    return fd;
+}
+
+fn wm_close(fd: i32) -> void {
+    syscall1(SYS_close, fd);
+}
+
+fn wm_send_line(fd: i32, line: str) -> i32 {
+    // write(fd, line, len(line))
+    let n: i32 = len(line);
+    mov(x9, line);
+    let p: u64 = getreg(x9);
+    syscall3(SYS_write, fd, p, n);
+    return u64_to_i32(getreg(x0));
+}
+
+fn wm_send_cmd(fd: i32, cmd: str, arg: str = "") -> i32 {
+    let line: str = cmd;
+    if (len(arg) > 0) {
+        line = line + " " + arg;
+    }
+    line = line + "\n";
+    return wm_send_line(fd, line);
+}
+
+// -----------------------------------------------------------------------------
+// Public API
+// -----------------------------------------------------------------------------
+
+fn wm_start(sock_path: str = "") -> i32 {
+    // NOTE: Novus doesn't currently have an exec/spawn wrapper, so start the C server yourself.
+    // This returns a socket fd if the server is already running.
+    if (len(sock_path) == 0) {
+        sock_path = sock_path_default();
+    }
+    return wm_connect(sock_path);
+}
+
+fn wm_title(fd: i32, title: str) -> i32 {
+    return wm_send_cmd(fd, "TITLE", title);
+}
+
+fn wm_text(fd: i32, text: str) -> i32 {
+    return wm_send_cmd(fd, "TEXT", text);
+}
+
+fn wm_show(fd: i32) -> i32 {
+    return wm_send_cmd(fd, "SHOW", "");
+}
+
+fn wm_hide(fd: i32) -> i32 {
+    return wm_send_cmd(fd, "HIDE", "");
+}
+
+fn wm_ping(fd: i32) -> i32 {
+    return wm_send_cmd(fd, "PING", "");
+}
+
+fn wm_quit(fd: i32) -> i32 {
+    return wm_send_cmd(fd, "QUIT", "");
+}

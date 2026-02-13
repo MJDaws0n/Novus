@@ -122,9 +122,15 @@ func (r *Resolver) Resolve(prog *ast.Program, sourceFile string) (*ast.Program, 
 // sub-imports inherit the caller's alias (e.g. import A standard; where A
 // imports B — B's functions also land under the "standard" alias).
 func (r *Resolver) resolveImport(imp *ast.ImportDecl, baseDir string, importerFile string, rootAlias string) {
-	// Resolve the file path: import path maps to path.nov relative to baseDir.
+	// Resolve the file path: import path maps to path.nov (or path.novus) relative to baseDir.
 	relPath := strings.ReplaceAll(imp.Path, "/", string(filepath.Separator))
-	filePath := filepath.Join(baseDir, relPath+".nov")
+	filePathNov := filepath.Join(baseDir, relPath+".nov")
+	filePathNovus := filepath.Join(baseDir, relPath+".novus")
+	filePath := filePathNov
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		// Allow importing .novus library files too.
+		filePath = filePathNovus
+	}
 
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {

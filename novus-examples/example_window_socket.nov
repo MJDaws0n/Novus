@@ -1,0 +1,43 @@
+// Example using the mac_silicon_window_manager helper over a UNIX socket.
+//
+// 1) Build and run the C server in another terminal:
+//    clang -O2 -Wall -Wextra -std=c11 lib/mac_silicon_window_manager/unbuilt/app.c -o lib/mac_silicon_window_manager/window_manager
+//    ./lib/mac_silicon_window_manager/window_manager --socket /tmp/novus_wm.sock
+//
+// 2) Then compile/run this Novus example.
+
+module example_window_socket;
+
+import ../lib/standard_lib_macos_silicon;
+import ../lib/mac_silicon_window_manager;
+
+fn main() -> i32 {
+    let fd: i32 = wm_start("/tmp/novus_wm.sock");
+    if (fd < 0) {
+        print("Failed to connect to window manager socket. Start the C server first.");
+        exit(1);
+        return 1;
+    }
+
+    wm_title(fd, "Novus Window Manager");
+    wm_text(fd, "Hello from Novus via a UNIX socket!\nThis is controlled from Novus.");
+    wm_show(fd);
+
+    print("Window shown. Press enter to update text...");
+    input("", 16);
+
+    wm_text(fd, "Updated content from Novus!\nYou can also HIDE/SHOW.");
+    wm_show(fd);
+
+    print("Press enter to hide...");
+    input("", 16);
+    wm_hide(fd);
+
+    print("Press enter to quit server...");
+    input("", 16);
+    wm_quit(fd);
+    wm_close(fd);
+
+    exit(0);
+    return 0;
+}

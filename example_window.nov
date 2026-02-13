@@ -1,0 +1,60 @@
+// Showcase: mac_silicon_winoe_mannager (.novus) + C helper.
+//
+// This example spawns the C helper (window_manager) and then drives it via a UNIX socket.
+//
+// Build helper first:
+//   clang -O2 -Wall -Wextra -std=c11 lib/mac_silicon_window_manager/unbuilt/app.c -o lib/mac_silicon_window_manager/window_manager
+//
+// Run this with Novus (darwin/arm64):
+//   go run ./cmd/novus --target=darwin/arm64 example_window.nov
+
+module example_window;
+
+import ./lib/standard_lib_macos_silicon;
+import ./lib/mac_silicon_winoe_mannager;
+
+fn main() -> i32 {
+    let exe: str = "./lib/mac_silicon_window_manager/window_manager";
+    let sock: str = "/tmp/novus_wm.sock";
+
+    let pid: i32 = wm_spawn(exe, sock, "Novus", "Spawned from Novus, controlled via socket.", true);
+    if (pid < 0) {
+        print("Failed to fork/exec window manager");
+        exit(1);
+        return 1;
+    }
+
+    // Try to connect a few times (server startup race).
+    let fd: i32 = -1;
+    let i: i32 = 0;
+    while (i < 200) {
+        fd = wm_start(sock);
+        if (fd >= 0) {
+            break;
+        }
+        i = i + 1;
+    }
+
+    if (fd < 0) {
+        print("Failed to connect to window manager socket");
+        exit(1);
+        return 1;
+    }
+
+    wm_title(fd, "Novus Window Manager");
+    wm_text(fd, "Hello from Novus!\nPress OK to close dialogs.");
+    wm_show(fd);
+
+    print("Press enter to change text...");
+    input("", 16);
+    wm_text(fd, "Updated content from Novus over the socket.");
+    wm_show(fd);
+
+    print("Press enter to quit server...");
+    input("", 16);
+    wm_quit(fd);
+    wm_close(fd);
+
+    exit(0);
+    return 0;
+}
