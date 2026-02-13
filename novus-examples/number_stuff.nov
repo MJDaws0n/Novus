@@ -1,0 +1,27 @@
+module parr_starter;
+import ../lib/standard_lib_macos_silicon;
+import ../lib/maths maths;
+
+fn main() -> i32 {
+    let inp: str = input("Enter a number: ");
+    let num: i32 = str_to_i32(inp);
+
+    print("You entered: " + int_to_str(num));
+
+    if(maths.is_even(num)) {
+        print("The number is even.");
+    } else {
+        print("The number is odd.");
+    }
+
+    let n: i32 = 0;
+    while (n <= 500){
+        n = n + 1;
+        if (maths.is_prime(n)) {
+            print(int_to_str(n) + " is prime.");
+        }
+    }
+
+    exit(0);
+    return 0;
+}

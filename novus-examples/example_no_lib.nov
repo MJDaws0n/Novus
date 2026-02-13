@@ -1,6 +1,5 @@
 // Novus example for macOS Apple Silicon (M1/M2)
-module example_app_macos_silicon;
-
+module example_app_macos_silicon_no_lib;
 // ---- String length (walks bytes until null terminator) ----
 fn len(s: str) -> i32 {
     let count: i32 = 0;
