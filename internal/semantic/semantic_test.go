@@ -311,8 +311,8 @@ func TestMismatchedArithmeticTypes(t *testing.T) {
 func TestStringPlusInt(t *testing.T) {
 	src := "fn f() -> void { let x: str = \"hello\" + 1; }"
 	diags := analyze(t, src)
-	expectErrors(t, diags, 1)
-	expectErrorContains(t, diags, "numeric or string operands")
+	// String + byte is allowed (codegen converts the byte to a 1-char string).
+	expectErrors(t, diags, 0)
 }
 
 func TestBoolArithmetic(t *testing.T) {
@@ -859,20 +859,20 @@ func TestRegisterTypeIsRegister(t *testing.T) {
 // ===========================================================================
 
 func TestStringIndexValid(t *testing.T) {
-	src := "fn f(s: str) -> str { let i: i32 = 0; return s[i]; }"
+	src := "fn f(s: str) -> i32 { let i: i32 = 0; return s[i]; }"
 	diags := analyze(t, src)
 	expectErrors(t, diags, 0)
 }
 
 func TestStringIndexWithLiteral(t *testing.T) {
-	src := "fn f(s: str) -> str { return s[0]; }"
+	src := "fn f(s: str) -> i32 { return s[0]; }"
 	diags := analyze(t, src)
 	expectErrors(t, diags, 0)
 }
 
 func TestStringIndexComparison(t *testing.T) {
-	// s[i] returns str, so comparing with a char literal should work.
-	src := "fn f(s: str) -> bool { return s[0] != \"x\"; }"
+	// s[i] returns a byte (i32), so comparing with a char literal should work.
+	src := "fn f(s: str) -> bool { return s[0] != 'x'; }"
 	diags := analyze(t, src)
 	expectErrors(t, diags, 0)
 }
@@ -892,7 +892,7 @@ func TestIndexWithNonIntegerErrors(t *testing.T) {
 }
 
 func TestIndexWithU64Works(t *testing.T) {
-	src := "fn f(s: str) -> str { let i: u64 = 0; return s[i]; }"
+	src := "fn f(s: str) -> i32 { let i: u64 = 0; return s[i]; }"
 	diags := analyze(t, src)
 	expectErrors(t, diags, 0)
 }

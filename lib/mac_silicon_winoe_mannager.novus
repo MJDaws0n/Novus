@@ -7,54 +7,29 @@ import standard_lib;
 import standard_lib_macos_silicon;
 
 // -----------------------------------------------------------------------------
-// Constants
-// -----------------------------------------------------------------------------
-
-let AF_UNIX: i32 = 1;
-let SOCK_STREAM: i32 = 1;
-
-// macOS syscall numbers (SYS_*), invoked with x16=0x2000000+SYS_*
-let SYS_fork: i64 = 2;
-let SYS_write: i64 = 4;
-let SYS_close: i64 = 6;
-let SYS_execve: i64 = 59;
-let SYS_socket: i64 = 97;
-let SYS_connect: i64 = 98;
-
-// -----------------------------------------------------------------------------
 // Small helpers
 // -----------------------------------------------------------------------------
+// NOTE: Novus currently doesn't support top-level constants; use literals inside functions.
+// ptr() and array_data_ptr_u64() are provided by standard_lib_macos_silicon.
 
-fn ptr(s: str) -> u64 {
-    mov(x9, s);
-    return getreg(x9);
+fn to_u8(v: i32) -> i32 {
+    return ((v % 256) + 256) % 256;
 }
 
-fn array_data_ptr_u64(arr: []u64) -> i64 {
-    // Array heap layout: [data_ptr(8 bytes), len(8 bytes), cap(8 bytes)]
-    mov(x9, arr);
-    let hdr: u64 = getreg(x9);
-    return load64(hdr);
-}
-
-fn u8(v: i32) -> i32 {
-    return v & 255;
-}
-
-fn syscall0(nr: i64) -> i64 {
+fn syscall0(nr: i64) -> u64 {
     mov(x16, 0x2000000 + nr);
     syscall();
     return getreg(x0);
 }
 
-fn syscall1_i32(nr: i64, a0: i32) -> i64 {
+fn syscall1_i32(nr: i64, a0: i32) -> u64 {
     mov(x0, a0);
     mov(x16, 0x2000000 + nr);
     syscall();
     return getreg(x0);
 }
 
-fn syscall3_i32(nr: i64, a0: i32, a1: i32, a2: i32) -> i64 {
+fn syscall3_i32(nr: i64, a0: i32, a1: i32, a2: i32) -> u64 {
     mov(x0, a0);
     mov(x1, a1);
     mov(x2, a2);
@@ -63,7 +38,7 @@ fn syscall3_i32(nr: i64, a0: i32, a1: i32, a2: i32) -> i64 {
     return getreg(x0);
 }
 
-fn syscall3(nr: i64, a0: i32, a1: u64, a2: i32) -> i64 {
+fn syscall3(nr: i64, a0: i32, a1: u64, a2: i32) -> u64 {
     mov(x0, a0);
     mov(x1, a1);
     mov(x2, a2);
@@ -85,15 +60,15 @@ fn sockaddr_un_make(path: str) -> str {
         i = i + 1;
     }
 
-    buf[0] = u8(106);
-    buf[1] = u8(AF_UNIX);
+    buf[0] = to_u8(106);
+    buf[1] = to_u8(1);
 
     i = 0;
     while (i < 104) {
         if (path[i] == '\0') {
             break;
         }
-        buf[2 + i] = u8(path[i]);
+        buf[2 + i] = to_u8(path[i]);
         i = i + 1;
     }
     buf[2 + i] = 0;
@@ -106,7 +81,7 @@ fn sockaddr_un_make(path: str) -> str {
 // -----------------------------------------------------------------------------
 
 fn wm_socket() -> i32 {
-    syscall3_i32(SYS_socket, AF_UNIX, SOCK_STREAM, 0);
+    syscall3_i32(97, 1, 1, 0);
     return u64_to_i32(getreg(x0));
 }
 
@@ -120,10 +95,10 @@ fn wm_connect(sock_path: str) -> i32 {
     mov(x9, addr);
     let addr_ptr: u64 = getreg(x9);
 
-    syscall3(SYS_connect, fd, addr_ptr, 106);
+    syscall3(98, fd, addr_ptr, 106);
     let irc: i32 = u64_to_i32(getreg(x0));
     if (irc < 0) {
-        syscall1_i32(SYS_close, fd);
+        syscall1_i32(6, fd);
         return irc;
     }
 
@@ -131,14 +106,14 @@ fn wm_connect(sock_path: str) -> i32 {
 }
 
 fn wm_close(fd: i32) -> void {
-    syscall1_i32(SYS_close, fd);
+    syscall1_i32(6, fd);
 }
 
 fn wm_send_line(fd: i32, line: str) -> i32 {
     let n: i32 = len(line);
     mov(x9, line);
     let p: u64 = getreg(x9);
-    syscall3(SYS_write, fd, p, n);
+    syscall3(4, fd, p, n);
     return u64_to_i32(getreg(x0));
 }
 
@@ -152,7 +127,7 @@ fn wm_send_cmd(fd: i32, cmd: str, arg: str = "") -> i32 {
 }
 
 // -----------------------------------------------------------------------------
-// Server spawn (fork + execve)
+// Server spawn
 // -----------------------------------------------------------------------------
 
 fn wm_spawn(exe_path: str, sock_path: str = "", title: str = "", text: str = "", auto_show: bool = false) -> i32 {
@@ -160,52 +135,32 @@ fn wm_spawn(exe_path: str, sock_path: str = "", title: str = "", text: str = "",
         sock_path = sock_path_default();
     }
 
-    // fork()
-    syscall0(SYS_fork);
-    let pid: i32 = u64_to_i32(getreg(x0));
+    let arg_socket: str = "--socket";
+    let arg_title: str = "--title";
+    let arg_text: str = "--text";
+    let arg_auto: str = "--auto-show";
 
-    if (pid == 0) {
-        // child: execve(exe_path, argv, envp)
-        let arg_socket: str = "--socket";
-        let arg_title: str = "--title";
-        let arg_text: str = "--text";
-        let arg_auto: str = "--auto-show";
+    let argv: []u64 = [
+        ptr(exe_path),
+        ptr(arg_socket), ptr(sock_path),
+        ptr(arg_title), ptr(title),
+        ptr(arg_text), ptr(text),
+        0
+    ];
 
-        let argv: []u64 = [
+    if (auto_show) {
+        argv = [
             ptr(exe_path),
             ptr(arg_socket), ptr(sock_path),
             ptr(arg_title), ptr(title),
             ptr(arg_text), ptr(text),
+            ptr(arg_auto),
             0
         ];
-
-        if (auto_show) {
-            argv = [
-                ptr(exe_path),
-                ptr(arg_socket), ptr(sock_path),
-                ptr(arg_title), ptr(title),
-                ptr(arg_text), ptr(text),
-                ptr(arg_auto),
-                0
-            ];
-        }
-
-        let argv_ptr: i64 = array_data_ptr_u64(argv);
-        let envp: []u64 = [0];
-        let envp_ptr: i64 = array_data_ptr_u64(envp);
-
-        mov(x0, exe_path);
-        mov(x1, argv_ptr);
-        mov(x2, envp_ptr);
-        mov(x16, 0x2000000 + SYS_execve);
-        syscall();
-
-        // If execve failed, just exit (best-effort).
-        exit(1);
-        return 1;
     }
 
-    return pid;
+    // Provided by standard_lib_macos_silicon: fork() + execve().
+    return spawn_execve(exe_path, argv);
 }
 
 fn wm_start(sock_path: str = "") -> i32 {

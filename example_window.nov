@@ -10,8 +10,8 @@
 
 module example_window;
 
-import ./lib/standard_lib_macos_silicon;
-import ./lib/mac_silicon_winoe_mannager;
+import lib/standard_lib_macos_silicon;
+import lib/mac_silicon_winoe_mannager;
 
 fn main() -> i32 {
     let exe: str = "./lib/mac_silicon_window_manager/window_manager";

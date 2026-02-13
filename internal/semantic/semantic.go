@@ -194,6 +194,36 @@ func isComparable(a, b *Type) bool {
 	return isAssignableTo(a, b) || isAssignableTo(b, a)
 }
 
+func unescapeStringLiteral(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case 'n':
+				b.WriteByte('\n')
+			case 'r':
+				b.WriteByte('\r')
+			case 't':
+				b.WriteByte('\t')
+			case '\\':
+				b.WriteByte('\\')
+			case '"':
+				b.WriteByte('"')
+			case '\'':
+				b.WriteByte('\'')
+			case '0':
+				b.WriteByte(0)
+			default:
+				b.WriteByte(s[i+1])
+			}
+			i++
+		} else {
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
+}
+
 // resolveNumericPair determines the concrete result type when two numeric
 // values are combined in a binary operation.  Returns nil on mismatch.
 func resolveNumericPair(a, b *Type) *Type {
@@ -371,11 +401,37 @@ func (s *Scope) lookup(name string) *Symbol {
 // funcMangle returns a mangled name for a function with the given name and
 // parameter type names. Non-overloaded functions keep their original name.
 // Overloaded functions get a suffix: "itoa.i32", "itoa.i64", etc.
+//
+// Note: the mangled name becomes an assembly label, so it must be valid for
+// the system assembler. In particular, array type spellings like "[]i32" must
+// be sanitized ("arr_i32") so we don't emit labels containing '[' or ']'.
 func funcMangle(name string, paramTypeNames []string) string {
 	if len(paramTypeNames) == 0 {
 		return name
 	}
-	return name + "." + strings.Join(paramTypeNames, ".")
+	parts := make([]string, len(paramTypeNames))
+	for i, t := range paramTypeNames {
+		parts[i] = sanitizeTypeName(t)
+	}
+	return name + "." + strings.Join(parts, ".")
+}
+
+func sanitizeTypeName(t string) string {
+	// Array types are encoded as "[]<elem>" in the parser.
+	if strings.HasPrefix(t, "[]") {
+		return "arr_" + sanitizeTypeName(t[2:])
+	}
+	// Keep only [A-Za-z0-9_], replace everything else with '_'.
+	var b strings.Builder
+	b.Grow(len(t))
+	for _, r := range t {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
 }
 
 // ---------------------------------------------------------------------------
@@ -552,10 +608,26 @@ func (a *Analyzer) injectBuiltins() {
 
 func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 	// Register imported functions in scope.
-	// Pre-scan: count imported function names to detect overloads.
-	importNameCount := map[string]int{}
+	// Pre-scan: count imported function signatures to detect overloads.
+	// We must do this by (name, paramTypes) rather than just name, otherwise
+	// non-overloaded imported functions can end up calling a non-existent
+	// unmangled label (e.g. calling "ptr" when only "ptr.str" exists).
+	importSigCount := map[string]int{}
 	for _, imp := range a.importedFuncs {
-		importNameCount[imp.Fn.Name]++
+		fn := imp.Fn
+		key := fn.Name
+		if fn != nil {
+			paramTypeNames := make([]string, len(fn.Params))
+			for i, p := range fn.Params {
+				if p.Type != nil {
+					paramTypeNames[i] = p.Type.Name
+				} else {
+					paramTypeNames[i] = "void"
+				}
+			}
+			key = funcMangle(fn.Name, paramTypeNames)
+		}
+		importSigCount[key]++
 	}
 
 	for _, imp := range a.importedFuncs {
@@ -580,10 +652,13 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 
 		mangledName := fn.MangledName
 		if mangledName == "" {
-			mangledName = fn.Name
+			// Imported functions always need a stable assembly label; default to
+			// the signature-mangled form.
+			mangledName = funcMangle(fn.Name, paramTypeNames)
 		}
-		// Apply overload mangling for imported functions with the same name.
-		if importNameCount[fn.Name] > 1 {
+		// Apply overload mangling for imported functions that have multiple
+		// declarations of the same signature.
+		if importSigCount[mangledName] > 1 {
 			mangledName = funcMangle(fn.Name, paramTypeNames)
 		}
 		fn.MangledName = mangledName
@@ -721,10 +796,8 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 
 	// Second pass — analyse each function body.
 	for _, fn := range prog.Functions {
-		// Skip functions already registered via imports (they're analyzed in their own module context).
-		if a.importedFnSet[fn] {
-			continue
-		}
+		// Analyze imported function bodies too so call sites inside imported code
+		// get their ResolvedCallee set (needed for correct symbol names).
 		// Skip functions that failed registration (reserved names).
 		mangledName := fn.MangledName
 		if mangledName == "" {
@@ -1006,6 +1079,16 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) *Type {
 	case *ast.FloatLitExpr:
 		return TypeUntypedFloat
 	case *ast.StringLitExpr:
+		// Single-quoted literals like '\0' and 'x' are treated as byte/char (i32),
+		// matching codegen which lowers them to immediate byte values.
+		lex := e.Value
+		if len(lex) >= 2 && lex[0] == '\'' {
+			raw := lex[1 : len(lex)-1]
+			raw = unescapeStringLiteral(raw)
+			if len(raw) == 1 {
+				return TypeI32
+			}
+		}
 		return TypeStr
 	case *ast.BoolLitExpr:
 		return TypeBool
@@ -1085,9 +1168,16 @@ func (a *Analyzer) analyzeBinaryExpr(e *ast.BinaryExpr) *Type {
 
 	switch e.Op {
 	case "+":
-		// String concatenation.
-		if leftType == TypeStr && rightType == TypeStr {
-			return TypeStr
+		// String concatenation (including str + charByte).
+		if leftType == TypeStr {
+			if rightType == TypeStr || rightType == TypeI32 || rightType == TypeUntypedInt {
+				return TypeStr
+			}
+		}
+		if rightType == TypeStr {
+			if leftType == TypeI32 || leftType == TypeUntypedInt {
+				return TypeStr
+			}
 		}
 		if !isNumeric(leftType) || !isNumeric(rightType) {
 			a.error(e.Pos, fmt.Sprintf("operator '+' requires numeric or string operands, got %s and %s", leftType.Name, rightType.Name))
@@ -1389,8 +1479,9 @@ func (a *Analyzer) analyzeIndexExpr(e *ast.IndexExpr) *Type {
 	}
 
 	// For now, the only indexable types are str and arrays.
+	// String indexing yields a byte value (represented as i32).
 	if objType == TypeStr {
-		return TypeStr
+		return TypeI32
 	}
 	if objType.IsArray {
 		return objType.ElemType

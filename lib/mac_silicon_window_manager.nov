@@ -9,26 +9,13 @@ import standard_lib;
 import standard_lib_macos_silicon;
 
 // -----------------------------------------------------------------------------
-// Constants
-// -----------------------------------------------------------------------------
-
-let AF_UNIX: i32 = 1;
-let SOCK_STREAM: i32 = 1;
-
-// macOS syscall numbers (SYS_*), invoked with x16=0x2000000+SYS_*
-let SYS_read: i64 = 3;
-let SYS_write: i64 = 4;
-let SYS_close: i64 = 6;
-let SYS_socket: i64 = 97;
-let SYS_connect: i64 = 98;
-
-// -----------------------------------------------------------------------------
 // Raw memory helpers (no store8 builtin; uses str[idx] = byte)
 // -----------------------------------------------------------------------------
+// NOTE: Novus currently doesn't support top-level constants; use literals inside functions.
 
-fn u8(v: i32) -> i32 {
-    // Keep in 0..255
-    return v & 255;
+fn to_u8(v: i32) -> i32 {
+    // Keep in 0..255 without bitwise ops (not supported by Novus parser)
+    return ((v % 256) + 256) % 256;
 }
 
 fn sock_path_default() -> str {
@@ -50,9 +37,9 @@ fn sockaddr_un_make(path: str) -> str {
     }
 
     // sun_len
-    buf[0] = u8(106);
+    buf[0] = to_u8(106);
     // sun_family
-    buf[1] = u8(AF_UNIX);
+    buf[1] = to_u8(1);
 
     // sun_path
     i = 0;
@@ -60,7 +47,7 @@ fn sockaddr_un_make(path: str) -> str {
         if (path[i] == '\0') {
             break;
         }
-        buf[2 + i] = u8(path[i]);
+        buf[2 + i] = to_u8(path[i]);
         i = i + 1;
     }
     buf[2 + i] = 0;
@@ -68,13 +55,13 @@ fn sockaddr_un_make(path: str) -> str {
     return buf;
 }
 
-fn syscall0(nr: i64) -> i64 {
+fn syscall0(nr: i64) -> u64 {
     mov(x16, 0x2000000 + nr);
     syscall();
     return getreg(x0);
 }
 
-fn syscall3_i32(nr: i64, a0: i32, a1: i32, a2: i32) -> i64 {
+fn syscall3_i32(nr: i64, a0: i32, a1: i32, a2: i32) -> u64 {
     mov(x0, a0);
     mov(x1, a1);
     mov(x2, a2);
@@ -82,13 +69,13 @@ fn syscall3_i32(nr: i64, a0: i32, a1: i32, a2: i32) -> i64 {
     syscall();
     return getreg(x0);
 }
-fn syscall1(nr: i64, a0: i32) -> i64 {
+fn syscall1(nr: i64, a0: i32) -> u64 {
     mov(x0, a0);
     mov(x16, 0x2000000 + nr);
     syscall();
     return getreg(x0);
 }
-fn syscall3(nr: i64, a0: i32, a1: u64, a2: i32) -> i64 {
+fn syscall3(nr: i64, a0: i32, a1: u64, a2: i32) -> u64 {
     mov(x0, a0);
     mov(x1, a1);
     mov(x2, a2);
@@ -98,7 +85,7 @@ fn syscall3(nr: i64, a0: i32, a1: u64, a2: i32) -> i64 {
 }
 
 fn wm_socket() -> i32 {
-    syscall3_i32(SYS_socket, AF_UNIX, SOCK_STREAM, 0);
+    syscall3_i32(97, 1, 1, 0);
     return u64_to_i32(getreg(x0));
 }
 
@@ -114,11 +101,11 @@ fn wm_connect(sock_path: str) -> i32 {
     let addr_ptr: u64 = getreg(x9);
 
     // connect(fd, &addr, 106)
-    syscall3(SYS_connect, fd, addr_ptr, 106);
+    syscall3(98, fd, addr_ptr, 106);
     let irc: i32 = u64_to_i32(getreg(x0));
     if (irc < 0) {
         // close(fd)
-        syscall1(SYS_close, fd);
+        syscall1(6, fd);
         return irc;
     }
 
@@ -126,7 +113,7 @@ fn wm_connect(sock_path: str) -> i32 {
 }
 
 fn wm_close(fd: i32) -> void {
-    syscall1(SYS_close, fd);
+    syscall1(6, fd);
 }
 
 fn wm_send_line(fd: i32, line: str) -> i32 {
@@ -134,7 +121,7 @@ fn wm_send_line(fd: i32, line: str) -> i32 {
     let n: i32 = len(line);
     mov(x9, line);
     let p: u64 = getreg(x9);
-    syscall3(SYS_write, fd, p, n);
+    syscall3(4, fd, p, n);
     return u64_to_i32(getreg(x0));
 }
 

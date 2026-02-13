@@ -105,8 +105,15 @@ func (r *Resolver) Resolve(prog *ast.Program, sourceFile string) (*ast.Program, 
 	}
 
 	// Add all imported functions (in import order, depth-first).
+	// De-duplicate by function pointer so importing the same file multiple times
+	// (directly or transitively) doesn't emit duplicate symbols.
+	seen := make(map[*ast.FnDecl]bool)
 	for _, mod := range r.allModules {
 		for _, fn := range mod.Functions {
+			if seen[fn] {
+				continue
+			}
+			seen[fn] = true
 			merged.Functions = append(merged.Functions, fn)
 		}
 	}

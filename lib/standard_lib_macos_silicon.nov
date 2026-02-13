@@ -72,3 +72,55 @@ fn input(prompt: str, buf_len: i32 = 128) -> str {
     }
     return out;
 }
+
+// ---------------------------------------------------------------------------
+// Process execution helpers (darwin/arm64)
+// ---------------------------------------------------------------------------
+
+fn ptr(s: str) -> u64 {
+    mov(x9, s);
+    return getreg(x9);
+}
+
+fn array_data_ptr_u64(arr: []u64) -> i64 {
+    // Array heap layout: [data_ptr(8 bytes), len(8 bytes), cap(8 bytes)]
+    mov(x9, arr);
+    let hdr: u64 = getreg(x9);
+    return load64(hdr);
+}
+
+fn execve_raw(path: str, argv: []u64) -> i32 {
+    let argv_ptr: i64 = array_data_ptr_u64(argv);
+
+    // envp: [NULL]
+    let envp: []u64 = [0];
+    let envp_ptr: i64 = array_data_ptr_u64(envp);
+
+    mov(x0, path);
+    mov(x1, argv_ptr);
+    mov(x2, envp_ptr);
+
+    // SYS_execve = 59
+    mov(x16, 0x2000000 + 59);
+    syscall();
+
+    // If we got here, execve failed.
+    return u64_to_i32(getreg(x0));
+}
+
+fn fork() -> i32 {
+    // SYS_fork = 2
+    mov(x16, 0x2000000 + 2);
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
+
+fn spawn_execve(path: str, argv: []u64) -> i32 {
+    let pid: i32 = fork();
+    if (pid == 0) {
+        execve_raw(path, argv);
+        exit(1);
+        return 1;
+    }
+    return pid;
+}
