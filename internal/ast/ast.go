@@ -47,6 +47,7 @@ type Expr interface {
 type Program struct {
 	Module    *ModuleDecl
 	Imports   []*ImportDecl
+	Globals   []*GlobalVar
 	Functions []*FnDecl
 	Pos       Position
 }
@@ -56,6 +57,16 @@ func (n *Program) GetPos() Position { return n.Pos }
 // ---------------------------------------------------------------------------
 // Top-level declarations
 // ---------------------------------------------------------------------------
+
+// GlobalVar represents a top-level variable: let <name>: <type> = <value>;
+type GlobalVar struct {
+	Name  string
+	Type  *TypeExpr
+	Value Expr
+	Pos   Position
+}
+
+func (n *GlobalVar) GetPos() Position { return n.Pos }
 
 type ModuleDecl struct {
 	Name string
@@ -364,6 +375,14 @@ func debugProgram(b *strings.Builder, prog *Program, level int) {
 			info += " as " + imp.Alias
 		}
 		fmt.Fprintf(b, "Import: %s\n", info)
+	}
+	for _, g := range prog.Globals {
+		writeIndent(b, level+1)
+		typeName := "unknown"
+		if g.Type != nil {
+			typeName = g.Type.Name
+		}
+		fmt.Fprintf(b, "Global: let %s: %s = %s\n", g.Name, typeName, ExprString(g.Value))
 	}
 	for _, fn := range prog.Functions {
 		debugFnDecl(b, fn, level+1)

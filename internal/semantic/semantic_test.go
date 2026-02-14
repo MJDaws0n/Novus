@@ -1,6 +1,7 @@
 package semantic_test
 
 import (
+	"novus/internal/ast"
 	"novus/internal/lexer"
 	"novus/internal/parser"
 	"novus/internal/semantic"
@@ -933,4 +934,57 @@ fn main() -> i32 {
 `
 	diags := analyze(t, src)
 	expectErrors(t, diags, 0)
+}
+
+// ---------------------------------------------------------------------------
+// Duplicate imported functions (should be allowed when identical)
+// ---------------------------------------------------------------------------
+
+func TestDuplicateImportedFunctions_SameSignature(t *testing.T) {
+	// Two imported functions with the same name and signature should not error.
+	src := "fn main() -> void { let x: i32 = helper(1); }"
+	tokens, lexErrs := lexer.Lex(src)
+	if len(lexErrs) > 0 {
+		t.Fatalf("lex errors: %v", lexErrs)
+	}
+	prog, parseErrs := parser.Parse(tokens)
+	if len(parseErrs) > 0 {
+		t.Fatalf("parse errors: %v", parseErrs)
+	}
+
+	// Create two imported function declarations with identical signatures.
+	fn1 := &ast.FnDecl{
+		Name:       "helper",
+		Params:     []*ast.Param{{Name: "x", Type: &ast.TypeExpr{Name: "i32"}}},
+		ReturnType: &ast.TypeExpr{Name: "i32"},
+		Body:       &ast.BlockStmt{Stmts: []ast.Stmt{&ast.ReturnStmt{Value: &ast.IdentExpr{Name: "x"}}}},
+	}
+	fn2 := &ast.FnDecl{
+		Name:       "helper",
+		Params:     []*ast.Param{{Name: "x", Type: &ast.TypeExpr{Name: "i32"}}},
+		ReturnType: &ast.TypeExpr{Name: "i32"},
+		Body:       &ast.BlockStmt{Stmts: []ast.Stmt{&ast.ReturnStmt{Value: &ast.IdentExpr{Name: "x"}}}},
+	}
+
+	// Prepend both to the program's function list (simulating what the resolver does).
+	prog.Functions = append([]*ast.FnDecl{fn1, fn2}, prog.Functions...)
+
+	importedFuncs := []semantic.ImportedFunc{
+		{Fn: fn1, Alias: ""},
+		{Fn: fn2, Alias: ""},
+	}
+
+	diags := semantic.AnalyzeWithImports(prog, importedFuncs)
+	errCount := 0
+	for _, d := range diags {
+		if d.Severity == semantic.Error {
+			errCount++
+		}
+	}
+	if errCount > 0 {
+		t.Errorf("expected no errors for duplicate imports with same signature, got %d", errCount)
+		for _, d := range diags {
+			t.Logf("  %s", d.Error())
+		}
+	}
 }

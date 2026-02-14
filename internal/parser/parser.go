@@ -184,20 +184,42 @@ func (p *Parser) parseProgram() *ast.Program {
 		prog.Imports = append(prog.Imports, p.parseImportDecl())
 	}
 
-	// Zero or more function declarations.
+	// Zero or more top-level declarations (functions or global variables).
 	for !p.check(lexer.EOF) {
 		if p.check(lexer.FN) {
 			fn := p.parseFnDecl()
 			if fn != nil {
 				prog.Functions = append(prog.Functions, fn)
 			}
+		} else if p.check(lexer.LET) {
+			g := p.parseGlobalVar()
+			if g != nil {
+				prog.Globals = append(prog.Globals, g)
+			}
 		} else {
-			p.addError(p.peek(), fmt.Sprintf("expected function declaration, got %s", p.peek().Type))
+			p.addError(p.peek(), fmt.Sprintf("expected function or variable declaration, got %s", p.peek().Type))
 			p.synchronize()
 		}
 	}
 
 	return prog
+}
+
+// parseGlobalVar parses a top-level: let <name>: <type> = <value>;
+func (p *Parser) parseGlobalVar() *ast.GlobalVar {
+	tok := p.advance() // consume LET
+	name := p.expect(lexer.IDENT, "expected variable name")
+	p.expect(lexer.COLON, "expected ':' after variable name")
+	typ := p.parseType()
+	p.expect(lexer.ASSIGN, "expected '=' in global variable declaration")
+	value := p.parseExpression()
+	p.expect(lexer.SEMICOLON, "expected ';' after global variable declaration")
+	return &ast.GlobalVar{
+		Name:  name.Value,
+		Type:  typ,
+		Value: value,
+		Pos:   p.position(tok),
+	}
 }
 
 func (p *Parser) parseModuleDecl() *ast.ModuleDecl {

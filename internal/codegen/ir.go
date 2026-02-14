@@ -157,6 +157,10 @@ const (
 	// Windows API call
 	IRWinCall // call Windows API function (Src1=string ref with function name, Args=arguments)
 
+	// Global variable access
+	IRLoadGlobal  // dst = load from global label (Src1=label)
+	IRStoreGlobal // store src1 to global label (Dst=label)
+
 	// Misc
 	IRComment // emit a comment in the output (src1 = label with comment text)
 	IRData    // emit raw data (used for string constants in data section)
@@ -178,6 +182,7 @@ var irOpNames = map[IROp]string{
 	IRArrayNew: "array_new", IRArrayGet: "array_get", IRArraySet: "array_set",
 	IRArrayAppend: "array_append", IRArrayPop: "array_pop", IRArrayLen: "array_len",
 	IRWinCall: "win_call",
+	IRLoadGlobal: "load_global", IRStoreGlobal: "store_global",
 	IRComment: "comment", IRData: "data",
 }
 
@@ -243,10 +248,19 @@ type IRStringConst struct {
 	Value string // the raw string content (unescaped)
 }
 
+// IRGlobal represents a global variable stored in the data/BSS section.
+type IRGlobal struct {
+	Name    string  // assembly label (e.g. "_g_myvar")
+	Type    string  // type name (e.g. "i32", "str", "u64")
+	InitImm int64   // initial immediate value (for integer types)
+	InitStr int     // index into Strings (for string types, -1 if not a string)
+}
+
 // IRModule is the top-level IR container for an entire compilation unit.
 type IRModule struct {
 	Functions []*IRFunc
 	Strings   []IRStringConst
+	Globals   []IRGlobal
 	EntryFunc string // name of the entry-point function (usually "main")
 }
 

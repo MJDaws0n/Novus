@@ -1,0 +1,456 @@
+// Novus library for macOS Apple Silicon window manager (WebKit).
+// Spawns the C helper automatically and talks over a UNIX domain socket.
+// The C helper renders web pages via WKWebView with a built-in HTTP server.
+
+module mac_silicon_window_manager;
+
+import standard_lib;
+import standard_lib_macos_silicon;
+
+// -----------------------------------------------------------------------------
+// Small helpers
+// -----------------------------------------------------------------------------
+
+fn to_u8(v: i32) -> i32 {
+    return ((v % 256) + 256) % 256;
+}
+
+fn syscall0(nr: i64) -> u64 {
+    mov(x16, 0x2000000 + nr);
+    syscall();
+    return getreg(x0);
+}
+
+fn syscall1_i32(nr: i64, a0: i32) -> u64 {
+    mov(x0, a0);
+    mov(x16, 0x2000000 + nr);
+    syscall();
+    return getreg(x0);
+}
+
+fn syscall3_i32(nr: i64, a0: i32, a1: i32, a2: i32) -> u64 {
+    mov(x0, a0);
+    mov(x1, a1);
+    mov(x2, a2);
+    mov(x16, 0x2000000 + nr);
+    syscall();
+    return getreg(x0);
+}
+
+fn syscall3(nr: i64, a0: i32, a1: u64, a2: i32) -> u64 {
+    mov(x0, a0);
+    mov(x1, a1);
+    mov(x2, a2);
+    mov(x16, 0x2000000 + nr);
+    syscall();
+    return getreg(x0);
+}
+
+fn sock_path_default() -> str {
+    return "/tmp/novus_wm.sock";
+}
+
+fn wm_exe_default() -> str {
+    return "lib/mac_silicon_window_manager/window_manager";
+}
+
+fn wm_unlink(path: str) -> void {
+    // SYS_unlink = 10 on darwin — remove stale socket before spawn
+    mov(x0, path);
+    mov(x16, 0x2000000 + 10);
+    syscall();
+}
+
+fn sockaddr_un_make(path: str) -> str {
+    // struct sockaddr_un { u8 sun_len; u8 sun_family; char sun_path[104]; }
+    let buf: str = "";
+    let i: i32 = 0;
+    while (i < 106) {
+        buf = buf + "\0";
+        i = i + 1;
+    }
+
+    buf[0] = to_u8(106);
+    buf[1] = to_u8(1);
+
+    i = 0;
+    while (i < 104) {
+        if (path[i] == '\0') {
+            break;
+        }
+        buf[2 + i] = to_u8(path[i]);
+        i = i + 1;
+    }
+    buf[2 + i] = 0;
+
+    return buf;
+}
+
+// -----------------------------------------------------------------------------
+// Socket client
+// -----------------------------------------------------------------------------
+
+fn wm_socket() -> i32 {
+    syscall3_i32(97, 1, 1, 0);
+    return u64_to_i32(getreg(x0));
+}
+
+fn wm_connect(sock_path: str) -> i32 {
+    let fd: i32 = wm_socket();
+    if (fd < 0) {
+        return fd;
+    }
+
+    let addr: str = sockaddr_un_make(sock_path);
+    mov(x9, addr);
+    let addr_ptr: u64 = getreg(x9);
+
+    syscall3(98, fd, addr_ptr, 106);
+    let irc: i32 = u64_to_i32(getreg(x0));
+    // On macOS ARM64, connect() returns 0 on success.
+    // On failure, the carry flag is set and x0 = errno (positive).
+    // We must check for irc != 0, not irc < 0.
+    if (irc != 0) {
+        syscall1_i32(6, fd);
+        return -1;
+    }
+
+    return fd;
+}
+
+fn wm_close(fd: i32) -> void {
+    syscall1_i32(6, fd);
+}
+
+fn wm_send_line(fd: i32, line: str) -> i32 {
+    let n: i32 = len(line);
+    mov(x9, line);
+    let p: u64 = getreg(x9);
+    syscall3(4, fd, p, n);
+    return u64_to_i32(getreg(x0));
+}
+
+fn wm_escape_arg(arg: str) -> str {
+    let out: str = "";
+    let i: i32 = 0;
+    while (i < len(arg)) {
+        if (arg[i] == '\\') {
+            out = out + "\\\\";
+        } else if (arg[i] == '\n') {
+            out = out + "\\n";
+        } else if (arg[i] == '\r') {
+            // skip
+        } else {
+            out = out + arg[i];
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+fn wm_unescape_arg(arg: str) -> str {
+    let out: str = "";
+    let i: i32 = 0;
+    while (i < len(arg)) {
+        if (arg[i] == '\\') {
+            if (i + 1 < len(arg)) {
+                if (arg[i + 1] == 'n') {
+                    out = out + "\n";
+                    i = i + 2;
+                } else if (arg[i + 1] == '\\') {
+                    out = out + "\\";
+                    i = i + 2;
+                } else {
+                    out = out + arg[i];
+                    i = i + 1;
+                }
+            } else {
+                out = out + arg[i];
+                i = i + 1;
+            }
+        } else {
+            out = out + arg[i];
+            i = i + 1;
+        }
+    }
+    return out;
+}
+
+fn wm_send_cmd(fd: i32, cmd: str, arg: str = "") -> i32 {
+    let line: str = cmd;
+    if (len(arg) > 0) {
+        line = line + " " + wm_escape_arg(arg);
+    }
+    line = line + "\n";
+    return wm_send_line(fd, line);
+}
+
+// -----------------------------------------------------------------------------
+// Read a line response from the server
+// -----------------------------------------------------------------------------
+
+fn wm_recv_line(fd: i32, buf_len: i32 = 512) -> str {
+    let buf: str = "";
+    let i: i32 = 0;
+    while (i < buf_len) {
+        buf = buf + " ";
+        i = i + 1;
+    }
+
+    let out: str = "";
+    let pos: i32 = 0;
+    while (pos < buf_len) {
+        // SYS_read = 3
+        mov(x9, buf);
+        let bptr: u64 = getreg(x9);
+        syscall3(3, fd, bptr, 1);
+        let nread: i32 = u64_to_i32(getreg(x0));
+        if (nread <= 0) {
+            break;
+        }
+        if (buf[0] == '\n') {
+            break;
+        }
+        if (buf[0] == '\r') {
+            // skip carriage returns
+        } else {
+            out = out + buf[0];
+        }
+        pos = pos + 1;
+    }
+    return out;
+}
+
+fn wm_recv_ok(fd: i32) -> str {
+    return wm_recv_line(fd, 64);
+}
+
+// -----------------------------------------------------------------------------
+// Server spawn + connect with retry
+// -----------------------------------------------------------------------------
+
+fn wm_spawn(exe_path: str, sock_path: str = "", title: str = "", auto_show: bool = false) -> i32 {
+    if (len(sock_path) == 0) {
+        sock_path = sock_path_default();
+    }
+
+    let arg_socket: str = "--socket";
+    let arg_title: str = "--title";
+    let arg_auto: str = "--auto-show";
+
+    let argv: []u64 = [
+        ptr(exe_path),
+        ptr(arg_socket), ptr(sock_path),
+        ptr(arg_title), ptr(title),
+        0
+    ];
+
+    if (auto_show) {
+        argv = [
+            ptr(exe_path),
+            ptr(arg_socket), ptr(sock_path),
+            ptr(arg_title), ptr(title),
+            ptr(arg_auto),
+            0
+        ];
+    }
+
+    return spawn_execve(exe_path, argv);
+}
+
+fn wm_write_i32_le(buf: str, offset: i32, val: i32) -> void {
+    // Write a 32-bit little-endian value into buf at byte offset.
+    let v: i32 = val;
+    let i: i32 = 0;
+    while (i < 4) {
+        buf[offset + i] = to_u8(v % 256);
+        v = v / 256;
+        i = i + 1;
+    }
+}
+
+fn wm_sleep_ms(ms: i32) -> void {
+    // Use poll(NULL, 0, ms) to sleep — SYS_poll = 230 on macOS.
+    // poll with 0 fds and a timeout simply sleeps for ms milliseconds.
+    // (nanosleep does NOT exist as a macOS syscall.)
+    mov(x0, 0);
+    mov(x1, 0);
+    mov(x2, ms);
+    mov(x16, 0x2000000 + 230);
+    syscall();
+}
+
+fn wm_start_auto(exe_path: str = "", sock_path: str = "", title: str = "Novus Window") -> i32 {
+    if (len(exe_path) == 0) {
+        exe_path = wm_exe_default();
+    }
+    if (len(sock_path) == 0) {
+        sock_path = sock_path_default();
+    }
+
+    // Remove any stale socket file from a previous run
+    wm_unlink(sock_path);
+
+    let pid: i32 = wm_spawn(exe_path, sock_path, title, false);
+    if (pid < 0) {
+        print("Failed to spawn window manager process.");
+        return -1;
+    }
+
+    // Retry connecting (server needs a moment to bind)
+    let fd: i32 = -1;
+    let attempts: i32 = 0;
+    while (attempts < 40) {
+        wm_sleep_ms(50);
+        fd = wm_connect(sock_path);
+        if (fd >= 0) {
+            break;
+        }
+        attempts = attempts + 1;
+    }
+
+    if (fd < 0) {
+        print("Failed to connect to window manager after retries.");
+    }
+
+    return fd;
+}
+
+fn wm_start(sock_path: str = "") -> i32 {
+    if (len(sock_path) == 0) {
+        sock_path = sock_path_default();
+    }
+    return wm_connect(sock_path);
+}
+
+// -----------------------------------------------------------------------------
+// High-level entry point
+// -----------------------------------------------------------------------------
+
+fn wm_open(title: str = "Novus Window", exe_path: str = "", sock_path: str = "") -> i32 {
+    let fd: i32 = wm_start_auto(exe_path, sock_path, title);
+    if (fd < 0) {
+        print("ERROR: Could not start window manager.");
+        exit(1);
+        return -1;
+    }
+    return fd;
+}
+
+// -----------------------------------------------------------------------------
+// Public API
+// -----------------------------------------------------------------------------
+
+fn wm_title(fd: i32, title: str) -> i32 {
+    wm_send_cmd(fd, "TITLE", title);
+    wm_recv_ok(fd);
+    return 0;
+}
+
+fn wm_serve(fd: i32, root_dir: str) -> str {
+    wm_send_cmd(fd, "SERVE", root_dir);
+    return wm_recv_line(fd, 128);
+}
+
+fn wm_navigate(fd: i32, url: str) -> i32 {
+    wm_send_cmd(fd, "NAVIGATE", url);
+    wm_recv_ok(fd);
+    return 0;
+}
+
+fn wm_jseval(fd: i32, code: str) -> i32 {
+    wm_send_cmd(fd, "JSEVAL", code);
+    wm_recv_ok(fd);
+    return 0;
+}
+
+fn wm_show(fd: i32) -> i32 {
+    wm_send_cmd(fd, "SHOW", "");
+    wm_recv_ok(fd);
+    return 0;
+}
+
+fn wm_hide(fd: i32) -> i32 {
+    wm_send_cmd(fd, "HIDE", "");
+    wm_recv_ok(fd);
+    return 0;
+}
+
+fn wm_ping(fd: i32) -> i32 {
+    wm_send_cmd(fd, "PING", "");
+    wm_recv_ok(fd);
+    return 0;
+}
+
+fn wm_quit(fd: i32) -> i32 {
+    wm_send_cmd(fd, "QUIT", "");
+    wm_recv_ok(fd);
+    return 0;
+}
+
+// -----------------------------------------------------------------------------
+// JS message helpers
+// -----------------------------------------------------------------------------
+
+fn wm_escape_js(s: str) -> str {
+    let out: str = "";
+    let i: i32 = 0;
+    while (i < len(s)) {
+        if (s[i] == '\'') {
+            out = out + "\\'";
+        } else if (s[i] == '\\') {
+            out = out + "\\\\";
+        } else if (s[i] == '\n') {
+            out = out + "\\n";
+        } else if (s[i] == '\r') {
+            // skip
+        } else {
+            out = out + s[i];
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+fn wm_send_to_js(fd: i32, msg: str) -> i32 {
+    let js: str = "window._novusReceive('" + wm_escape_js(msg) + "');";
+    return wm_jseval(fd, js);
+}
+
+fn wm_recv_js_msg(fd: i32) -> str {
+    let line: str = wm_recv_line(fd, 4096);
+    // Line format: "JSMSG <escaped_body>"
+    if (len(line) < 6) {
+        return "";
+    }
+    let body: str = "";
+    let i: i32 = 6;
+    while (i < len(line)) {
+        body = body + line[i];
+        i = i + 1;
+    }
+    return wm_unescape_arg(body);
+}
+
+// -----------------------------------------------------------------------------
+// Parse PORT response
+// -----------------------------------------------------------------------------
+
+fn wm_parse_port(resp: str) -> i32 {
+    if (len(resp) < 5) {
+        return -1;
+    }
+    if (resp[0] != 'P') { return -1; }
+    if (resp[1] != 'O') { return -1; }
+    if (resp[2] != 'R') { return -1; }
+    if (resp[3] != 'T') { return -1; }
+    if (resp[4] != ' ') { return -1; }
+
+    let num_str: str = "";
+    let i: i32 = 5;
+    while (i < len(resp)) {
+        num_str = num_str + resp[i];
+        i = i + 1;
+    }
+    return str_to_i32(num_str);
+}

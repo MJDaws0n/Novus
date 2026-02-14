@@ -371,11 +371,25 @@ func (s *Scope) lookup(name string) *Symbol {
 // funcMangle returns a mangled name for a function with the given name and
 // parameter type names. Non-overloaded functions keep their original name.
 // Overloaded functions get a suffix: "itoa.i32", "itoa.i64", etc.
+// Array types like []i32 are sanitized to _arr_i32 to produce valid assembly labels.
 func funcMangle(name string, paramTypeNames []string) string {
 	if len(paramTypeNames) == 0 {
 		return name
 	}
-	return name + "." + strings.Join(paramTypeNames, ".")
+	sanitized := make([]string, len(paramTypeNames))
+	for i, t := range paramTypeNames {
+		sanitized[i] = sanitizeTypeName(t)
+	}
+	return name + "." + strings.Join(sanitized, ".")
+}
+
+// sanitizeTypeName converts a type name into a form safe for use in assembly labels.
+// e.g. "[]i32" → "_arr_i32", "[]u64" → "_arr_u64"
+func sanitizeTypeName(name string) string {
+	if strings.HasPrefix(name, "[]") {
+		return "_arr_" + name[2:]
+	}
+	return name
 }
 
 // ---------------------------------------------------------------------------
@@ -552,10 +566,24 @@ func (a *Analyzer) injectBuiltins() {
 
 func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 	// Register imported functions in scope.
-	// Pre-scan: count imported function names to detect overloads.
-	importNameCount := map[string]int{}
+	// Pre-scan: count distinct signatures per imported function name to detect true overloads.
+	// Functions with the same name AND same parameter types (from duplicate imports) are not overloads.
+	importSignatures := map[string]map[string]bool{} // name → set of param signature strings
 	for _, imp := range a.importedFuncs {
-		importNameCount[imp.Fn.Name]++
+		fn := imp.Fn
+		var sigParts []string
+		for _, p := range fn.Params {
+			if p.Type != nil {
+				sigParts = append(sigParts, p.Type.Name)
+			} else {
+				sigParts = append(sigParts, "void")
+			}
+		}
+		sig := strings.Join(sigParts, ",")
+		if importSignatures[fn.Name] == nil {
+			importSignatures[fn.Name] = map[string]bool{}
+		}
+		importSignatures[fn.Name][sig] = true
 	}
 
 	for _, imp := range a.importedFuncs {
@@ -582,8 +610,8 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 		if mangledName == "" {
 			mangledName = fn.Name
 		}
-		// Apply overload mangling for imported functions with the same name.
-		if importNameCount[fn.Name] > 1 {
+		// Apply overload mangling for imported functions with genuinely different signatures.
+		if len(importSignatures[fn.Name]) > 1 {
 			mangledName = funcMangle(fn.Name, paramTypeNames)
 		}
 		fn.MangledName = mangledName
@@ -597,6 +625,13 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 			qualifiedName := imp.Alias + "." + fn.Name
 			// For overloaded functions, also store under the mangled qualified name.
 			qualifiedMangled := imp.Alias + "." + mangledName
+
+			// Check for duplicate import with the same qualified name.
+			if existing := a.scope.lookupLocal(qualifiedMangled); existing != nil && existing.Kind == SymFunc {
+				// Same signature already registered — skip silently.
+				continue
+			}
+
 			sym := &Symbol{
 				Name:         fn.Name,
 				MangledName:  mangledName,
@@ -619,6 +654,12 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 			a.scope.funcOverloads[qualifiedName] = append(a.scope.funcOverloads[qualifiedName], sym)
 		} else {
 			// Direct import: register under the function's own name.
+			// Check for duplicate import with the same mangled name.
+			if existing := a.scope.lookupLocal(mangledName); existing != nil && existing.Kind == SymFunc {
+				// Same signature already registered — skip silently.
+				continue
+			}
+
 			sym := &Symbol{
 				Name:         fn.Name,
 				MangledName:  mangledName,
@@ -717,6 +758,31 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 			ReturnType:   retType,
 		}
 		a.scope.defineFunc(sym)
+	}
+
+	// Register global variables in scope.
+	for _, g := range prog.Globals {
+		gType := a.resolveType(g.Type)
+		if gType == nil {
+			gType = TypeVoid
+		}
+		if existing := a.scope.lookupLocal(g.Name); existing != nil {
+			a.error(g.Pos, fmt.Sprintf("global variable %q already declared at %s", g.Name, existing.Pos))
+			continue
+		}
+		// Type-check the initializer.
+		if g.Value != nil {
+			valType := a.analyzeExpr(g.Value)
+			if valType != nil && gType != nil && !isAssignableTo(gType, valType) {
+				a.error(g.Pos, fmt.Sprintf("cannot use %s value as %s in global variable %q", valType.Name, gType.Name, g.Name))
+			}
+		}
+		a.scope.define(&Symbol{
+			Name: g.Name,
+			Kind: SymVar,
+			Type: gType,
+			Pos:  g.Pos,
+		})
 	}
 
 	// Second pass — analyse each function body.
