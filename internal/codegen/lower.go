@@ -39,6 +39,10 @@ type Lowerer struct {
 
 	// Physical register lookup: which Novus identifiers are physical registers.
 	physRegs map[string]bool
+
+	// Global variables: maps variable name to its global label.
+	globals     map[string]string // name → assembly label
+	globalTypes map[string]string // name → type
 }
 
 // Lower translates an AST Program into an IRModule for the given target.
@@ -61,9 +65,30 @@ func Lower(program *ast.Program, target *Target) *IRModule {
 		target:       target,
 		physRegs:     makePhysRegSet(),
 		funcRetTypes: funcRetTypes,
+		globals:      map[string]string{},
+		globalTypes:  map[string]string{},
 	}
 
+	// Process global variables.
+	for _, g := range program.Globals {
+		if _, exists := l.globals[g.Name]; exists {
+			continue // skip duplicate global (from overlapping imports)
+		}
+		l.lowerGlobal(g)
+	}
+
+	// Track emitted function names to avoid duplicate definitions
+	// (can happen when the same library is imported by multiple modules).
+	emittedFuncs := map[string]bool{}
 	for _, fn := range program.Functions {
+		irName := fn.MangledName
+		if irName == "" {
+			irName = fn.Name
+		}
+		if emittedFuncs[irName] {
+			continue // skip duplicate
+		}
+		emittedFuncs[irName] = true
 		l.lowerFunction(fn)
 	}
 
@@ -169,6 +194,52 @@ func (l *Lowerer) varSlot(name string) int {
 func (l *Lowerer) slotMem(slot int) Operand {
 	offset := -int64((slot + 1) * l.target.PtrSize)
 	return Mem(l.target.BasePointer, offset)
+}
+
+// ---------------------------------------------------------------------------
+// Global variable lowering
+// ---------------------------------------------------------------------------
+
+func (l *Lowerer) lowerGlobal(g *ast.GlobalVar) {
+	label := "_g_" + g.Name
+	typeName := ""
+	if g.Type != nil {
+		typeName = g.Type.Name
+	}
+	l.globals[g.Name] = label
+	l.globalTypes[g.Name] = typeName
+
+	irGlobal := IRGlobal{
+		Name:    label,
+		Type:    typeName,
+		InitImm: 0,
+		InitStr: -1,
+	}
+
+	// Evaluate the initializer if it's a compile-time constant.
+	if g.Value != nil {
+		switch v := g.Value.(type) {
+		case *ast.IntLitExpr:
+			val, err := strconv.ParseInt(v.Value, 0, 64)
+			if err == nil {
+				irGlobal.InitImm = val
+			}
+		case *ast.BoolLitExpr:
+			if v.Value {
+				irGlobal.InitImm = 1
+			}
+		case *ast.StringLitExpr:
+			raw := v.Value
+			if len(raw) >= 2 && (raw[0] == '"' || raw[0] == '\'') {
+				raw = raw[1 : len(raw)-1]
+			}
+			raw = unescapeString(raw)
+			idx := l.module.AddString(raw)
+			irGlobal.InitStr = idx
+		}
+	}
+
+	l.module.Globals = append(l.module.Globals, irGlobal)
 }
 
 // ---------------------------------------------------------------------------
@@ -407,10 +478,16 @@ func (l *Lowerer) lowerAssignStmt(s *ast.AssignStmt) {
 			l.emit(IRInstr{Op: IRMov, Dst: PReg(target.Name), Src1: valOp})
 			return
 		}
-		// Otherwise it's a local variable.
+		// Local variable?
 		slot := l.varSlot(target.Name)
 		if slot >= 0 {
 			l.emit(IRInstr{Op: IRStore, Dst: l.slotMem(slot), Src1: valOp})
+			return
+		}
+		// Global variable?
+		if label, ok := l.globals[target.Name]; ok {
+			l.emit(IRInstr{Op: IRStoreGlobal, Dst: LabelOp(label), Src1: valOp})
+			return
 		}
 	case *ast.IndexExpr:
 		// Check if target is an array or string.
@@ -532,6 +609,15 @@ func (l *Lowerer) lowerIdentExpr(e *ast.IdentExpr) Operand {
 		dst := l.freshVReg()
 		l.emit(IRInstr{Op: IRLoad, Dst: VReg(dst), Src1: l.slotMem(slot)})
 		if l.varTypes[e.Name] == "str" {
+			l.vregIsStr[dst] = true
+		}
+		return VReg(dst)
+	}
+	// Global variable?
+	if label, ok := l.globals[e.Name]; ok {
+		dst := l.freshVReg()
+		l.emit(IRInstr{Op: IRLoadGlobal, Dst: VReg(dst), Src1: LabelOp(label)})
+		if l.globalTypes[e.Name] == "str" {
 			l.vregIsStr[dst] = true
 		}
 		return VReg(dst)

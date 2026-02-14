@@ -290,6 +290,20 @@ func (e *x86Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
 	case IRWinCall:
 		w.WriteString("    ## win_call: Windows API calls not supported on x86-32\n")
+
+	case IRLoadGlobal:
+		if instr.Src1.Kind == OpLabel {
+			globalSym := e.target.Sym(instr.Src1.Label)
+			dst := e.operand(instr.Dst)
+			w.WriteString(fmt.Sprintf("    movl %s, %s\n", globalSym, dst))
+		}
+
+	case IRStoreGlobal:
+		if instr.Dst.Kind == OpLabel {
+			globalSym := e.target.Sym(instr.Dst.Label)
+			src := e.operand(instr.Src1)
+			w.WriteString(fmt.Sprintf("    movl %s, %s\n", src, globalSym))
+		}
 	}
 }
 

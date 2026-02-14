@@ -1,0 +1,166 @@
+/* Novus WebKit App — styles */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+  color: #e0e0e0;
+  min-height: 100vh;
+  padding: 2rem;
+}
+
+.container {
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+header h1 {
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+header .accent {
+  background: linear-gradient(90deg, #7f5af0, #2cb67d);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.subtitle {
+  margin-top: 0.4rem;
+  font-size: 0.95rem;
+  color: #999;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 1.4rem;
+  margin-bottom: 1.2rem;
+  backdrop-filter: blur(8px);
+}
+
+.card h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.8rem;
+  color: #ccc;
+}
+
+.input-row {
+  display: flex;
+  gap: 0.6rem;
+}
+
+#msg-input {
+  flex: 1;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+#msg-input:focus {
+  border-color: #7f5af0;
+}
+
+#send-btn {
+  padding: 0.6rem 1.4rem;
+  border-radius: 8px;
+  border: none;
+  background: linear-gradient(135deg, #7f5af0, #2cb67d);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+#send-btn:hover {
+  opacity: 0.85;
+}
+
+.log {
+  max-height: 220px;
+  overflow-y: auto;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  padding: 0.4rem 0;
+}
+
+.log:empty::after {
+  content: 'No messages yet...';
+  color: #666;
+  font-style: italic;
+}
+
+.log-entry {
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  margin-bottom: 2px;
+}
+
+.log-entry.sent {
+  color: #7f5af0;
+}
+
+.log-entry.received {
+  color: #2cb67d;
+}
+
+.log-entry .label {
+  font-weight: 600;
+  margin-right: 0.4rem;
+}
+
+.info ul {
+  list-style: none;
+  padding: 0;
+}
+
+.info li {
+  padding: 0.3rem 0;
+  font-size: 0.88rem;
+  color: #aaa;
+}
+
+.info li::before {
+  content: '→ ';
+  color: #7f5af0;
+}
+
+.info code {
+  background: rgba(127, 90, 240, 0.15);
+  color: #c4b5fd;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.82rem;
+}
+
+/* Scrollbar */
+.log::-webkit-scrollbar {
+  width: 6px;
+}
+.log::-webkit-scrollbar-track {
+  background: transparent;
+}
+.log::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Novus Web App</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Novus <span class="accent">WebKit</span> App</h1>
+      <p class="subtitle">Two-way communication between JavaScript and Novus</p>
+    </header>
+
+    <section class="card">
+      <h2>Send a message to Novus</h2>
+      <div class="input-row">
+        <input type="text" id="msg-input" placeholder="Type a message..." autocomplete="off">
+        <button id="send-btn" onclick="sendMessage()">Send</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Message Log</h2>
+      <div id="log" class="log"></div>
+    </section>
+
+    <section class="card info">
+      <h2>How it works</h2>
+      <ul>
+        <li><code>novusSend(msg)</code> &mdash; sends a message from JS to Novus</li>
+        <li><code>novusOnMessage(callback)</code> &mdash; receives messages from Novus</li>
+        <li>This page is served by a built-in HTTP server in the window manager</li>
+        <li>The WebView renders via macOS WebKit (WKWebView)</li>
+      </ul>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -97,6 +97,10 @@ func (r *Resolver) Resolve(prog *ast.Program, sourceFile string) (*ast.Program, 
 		return prog, r.errors
 	}
 
+	// Remove duplicate functions/globals that were imported multiple times
+	// (e.g. the same library pulled in transitively from several files).
+	r.deduplicateModules()
+
 	// Build the merged program: imported functions first, then original functions.
 	merged := &ast.Program{
 		Module:  prog.Module,
@@ -108,6 +112,12 @@ func (r *Resolver) Resolve(prog *ast.Program, sourceFile string) (*ast.Program, 
 	for _, mod := range r.allModules {
 		for _, fn := range mod.Functions {
 			merged.Functions = append(merged.Functions, fn)
+		}
+		// Also merge global variables from imported modules.
+		if mod.Program != nil {
+			for _, g := range mod.Program.Globals {
+				merged.Globals = append(merged.Globals, g)
+			}
 		}
 	}
 
@@ -234,6 +244,65 @@ func (r *Resolver) resolveImport(imp *ast.ImportDecl, baseDir string, importerFi
 	r.allModules = append(r.allModules, mod)
 }
 
+// funcSignature returns a deduplication key for a function: "name(paramType1,paramType2):returnType".
+func funcSignature(fn *ast.FnDecl) string {
+	var params []string
+	for _, p := range fn.Params {
+		if p.Type != nil {
+			params = append(params, p.Type.Name)
+		} else {
+			params = append(params, "void")
+		}
+	}
+	ret := "void"
+	if fn.ReturnType != nil {
+		ret = fn.ReturnType.Name
+	}
+	return fn.Name + "(" + strings.Join(params, ",") + "):" + ret
+}
+
+// deduplicateModules removes duplicate function entries across all resolved
+// modules.  Two functions are considered duplicates if they share the same
+// alias and signature (name + parameter types + return type).  Only the first
+// occurrence is kept; subsequent identical imports are silently dropped.
+// This also deduplicates global variables by name within each alias bucket.
+func (r *Resolver) deduplicateModules() {
+	// ---- deduplicate functions ----
+	type fnKey struct {
+		alias string
+		sig   string
+	}
+	seenFns := make(map[fnKey]bool)
+
+	for _, mod := range r.allModules {
+		var deduped []*ast.FnDecl
+		for _, fn := range mod.Functions {
+			key := fnKey{alias: mod.Alias, sig: funcSignature(fn)}
+			if !seenFns[key] {
+				seenFns[key] = true
+				deduped = append(deduped, fn)
+			}
+		}
+		mod.Functions = deduped
+	}
+
+	// ---- deduplicate globals ----
+	seenGlobals := make(map[string]bool)
+	for _, mod := range r.allModules {
+		if mod.Program == nil {
+			continue
+		}
+		var dedupedGlobals []*ast.GlobalVar
+		for _, g := range mod.Program.Globals {
+			if !seenGlobals[g.Name] {
+				seenGlobals[g.Name] = true
+				dedupedGlobals = append(dedupedGlobals, g)
+			}
+		}
+		mod.Program.Globals = dedupedGlobals
+	}
+}
+
 // filterFunctions returns the subset of functions matching the import's selective list.
 // If no selective list is specified, all functions are returned (excluding main).
 func (r *Resolver) filterFunctions(fns []*ast.FnDecl, imp *ast.ImportDecl, absPath string) []*ast.FnDecl {
@@ -288,32 +357,59 @@ func (r *Resolver) GetModules() []*ImportedModule {
 }
 
 // CheckAliasConflicts validates that no two imports with the same alias
-// export overlapping function names.
+// export overlapping function names with *different* signatures from
+// *different* source files.  Functions that share the same name AND the same
+// signature (parameter types + return type) are allowed — this supports the
+// common pattern of the same library being transitively imported from
+// multiple files.  Overloads (same name, different params) from the same
+// source file are also allowed.
 func (r *Resolver) CheckAliasConflicts() []*ResolveError {
-	// Group modules by alias.
-	aliasFuncs := make(map[string]map[string]*ImportedModule) // alias → funcName → first module
+	type sigOrigin struct {
+		filePath string
+		sig      string
+		modPath  string
+	}
+
+	// alias → funcName → list of (sig, filePath) pairs we've seen
+	aliasFuncs := make(map[string]map[string][]sigOrigin)
 
 	for _, mod := range r.allModules {
 		alias := mod.Alias
-		if alias == "" {
-			alias = "" // direct imports go into the "" bucket
-		}
 		if aliasFuncs[alias] == nil {
-			aliasFuncs[alias] = make(map[string]*ImportedModule)
+			aliasFuncs[alias] = make(map[string][]sigOrigin)
 		}
 		for _, fn := range mod.Functions {
-			if existing, ok := aliasFuncs[alias][fn.Name]; ok {
-				// Same function name under the same alias from different files.
-				if existing.FilePath != mod.FilePath {
+			sig := funcSignature(fn)
+			origins := aliasFuncs[alias][fn.Name]
+
+			// Check whether we already have this exact signature from another file.
+			duplicate := false
+			for _, o := range origins {
+				if o.sig == sig {
+					// Same signature — accepted (duplicate import).
+					duplicate = true
+					break
+				}
+				if o.filePath != mod.FilePath {
+					// Different signature from a different file — conflict.
 					r.errors = append(r.errors, &ResolveError{
-						Message: fmt.Sprintf("function %q conflicts: imported from both %q and %q under alias %q",
-							fn.Name, existing.Path, mod.Path, alias),
+						Message: fmt.Sprintf(
+							"function %q conflicts: imported from %q (sig %s) and %q (sig %s) under alias %q",
+							fn.Name, o.modPath, o.sig, mod.Path, sig, alias),
 						Pos:  fn.Pos,
 						File: mod.FilePath,
 					})
+					duplicate = true
+					break
 				}
-			} else {
-				aliasFuncs[alias][fn.Name] = mod
+				// Different signature from the same file — overload, OK.
+			}
+			if !duplicate {
+				aliasFuncs[alias][fn.Name] = append(origins, sigOrigin{
+					filePath: mod.FilePath,
+					sig:      sig,
+					modPath:  mod.Path,
+				})
 			}
 		}
 	}

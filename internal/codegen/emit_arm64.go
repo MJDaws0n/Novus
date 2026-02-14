@@ -81,6 +81,31 @@ func (e *arm64Emitter) emit() {
 		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n\n", heapEndSym))
 	}
 
+	// Global variables in the data section.
+	if len(e.mod.Globals) > 0 {
+		if len(e.mod.Strings) == 0 {
+			// Ensure data section is opened if strings didn't already.
+			if e.target.OS == OS_Darwin {
+				w.WriteString(".section __DATA,__data\n")
+			} else {
+				w.WriteString(".data\n")
+			}
+		}
+		for _, g := range e.mod.Globals {
+			label := e.target.Sym(g.Name)
+			w.WriteString(".p2align 3\n")
+			w.WriteString(fmt.Sprintf("%s:\n", label))
+			if g.InitStr >= 0 {
+				// String global: store a pointer to the string constant.
+				strLabel := e.target.Sym(e.mod.Strings[g.InitStr].Label)
+				w.WriteString(fmt.Sprintf("    .quad %s\n", strLabel))
+			} else {
+				w.WriteString(fmt.Sprintf("    .quad %d\n", g.InitImm))
+			}
+		}
+		w.WriteString("\n")
+	}
+
 	// Text section.
 	if e.target.OS == OS_Darwin {
 		w.WriteString(".section __TEXT,__text\n")
@@ -424,6 +449,35 @@ func (e *arm64Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		e.emitArrayLen(fn, instr)
 	case IRWinCall:
 		w.WriteString("    // win_call: Windows API calls not supported on ARM64\n")
+
+	case IRLoadGlobal:
+		dst := e.dstReg(fn, instr.Dst, "x10")
+		if instr.Src1.Kind == OpLabel {
+			globalSym := e.target.Sym(instr.Src1.Label)
+			if e.target.OS == OS_Darwin {
+				w.WriteString(fmt.Sprintf("    adrp x17, %s@PAGE\n", globalSym))
+				w.WriteString(fmt.Sprintf("    add x17, x17, %s@PAGEOFF\n", globalSym))
+			} else {
+				w.WriteString(fmt.Sprintf("    adrp x17, %s\n", globalSym))
+				w.WriteString(fmt.Sprintf("    add x17, x17, :lo12:%s\n", globalSym))
+			}
+			w.WriteString(fmt.Sprintf("    ldr %s, [x17]\n", dst))
+		}
+		e.spillIfNeeded(fn, instr.Dst, dst)
+
+	case IRStoreGlobal:
+		src := e.loadToReg(fn, instr.Src1, "x10")
+		if instr.Dst.Kind == OpLabel {
+			globalSym := e.target.Sym(instr.Dst.Label)
+			if e.target.OS == OS_Darwin {
+				w.WriteString(fmt.Sprintf("    adrp x17, %s@PAGE\n", globalSym))
+				w.WriteString(fmt.Sprintf("    add x17, x17, %s@PAGEOFF\n", globalSym))
+			} else {
+				w.WriteString(fmt.Sprintf("    adrp x17, %s\n", globalSym))
+				w.WriteString(fmt.Sprintf("    add x17, x17, :lo12:%s\n", globalSym))
+			}
+			w.WriteString(fmt.Sprintf("    str %s, [x17]\n", src))
+		}
 	}
 }
 

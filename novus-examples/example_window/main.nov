@@ -1,0 +1,60 @@
+// Example: Novus WebKit window with a real HTML/CSS/JS site.
+//
+// This automatically:
+//   1. Spawns the window-manager C process (WebKit + HTTP server)
+//   2. Tells it to serve the web/ folder over localhost
+//   3. Navigates the WebView to the served URL
+//   4. Demonstrates JS <-> Novus two-way messaging
+//
+// Build & run:
+//   go run ./cmd/novus/main.go ./novus-examples/example_window/main.nov
+//   ./build/darwin_arm64/example_window
+
+module example_window;
+
+import ../../lib/standard_lib_macos_silicon;
+import ../../lib/mac_silicon_window_manager;
+
+fn main() -> i32 {
+    // 1) Spawn the window manager and connect (handled by the library)
+    let fd: i32 = wm_open("Novus Web App");
+
+    // 2) Tell the WM to serve static files from our web/ folder
+    let serve_resp: str = wm_serve(fd, "novus-examples/example_window/web");
+    let port: i32 = wm_parse_port(serve_resp);
+    if (port < 0) {
+        // print("ERROR: Failed to start HTTP server. Response: " + serve_resp);
+        wm_quit(fd);
+        wm_close(fd);
+        exit(1);
+        return 1;
+    }
+    // print("HTTP server on port " + int_to_str(port));
+
+    // 3) Navigate the WebView to the local server
+    let url: str = "http://127.0.0.1:" + int_to_str(port) + "/";
+    wm_navigate(fd, url);
+
+    // 4) Show the window
+    wm_show(fd);
+    // print("Window shown. Waiting for JS messages...");
+    // print("(The web page can call novusSend() to reach Novus)");
+
+    // 5) Event loop: read JS messages, echo them back
+    let running: bool = true;
+    while (running) {
+        let msg: str = wm_recv_js_msg(fd);
+        if (len(msg) == 0) {
+            // print("Window manager disconnected.");
+            running = false;
+        } else {
+            // print("JS says: " + msg);
+            wm_send_to_js(fd, "Novus received: " + msg);
+        }
+    }
+
+    wm_close(fd);
+    print("Done.");
+    exit(0);
+    return 0;
+}

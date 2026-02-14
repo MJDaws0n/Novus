@@ -463,6 +463,30 @@ func (e *x86_64Emitter) emitGASInstr(fn *IRFunc, instr IRInstr) {
 	case IRWinCall:
 		w.WriteString("    ## win_call: Windows API calls not supported on this target\n")
 
+	case IRLoadGlobal:
+		if instr.Src1.Kind == OpLabel {
+			globalSym := e.target.Sym(instr.Src1.Label)
+			if e.target.OS == OS_Darwin {
+				w.WriteString(fmt.Sprintf("    movq %s@GOTPCREL(%%rip), %%r11\n", globalSym))
+				w.WriteString("    movq (%r11), %r10\n")
+			} else {
+				w.WriteString(fmt.Sprintf("    movq %s(%%rip), %%r10\n", globalSym))
+			}
+			e.gasSpillIfNeeded(fn, instr.Dst, "%r10")
+		}
+
+	case IRStoreGlobal:
+		if instr.Dst.Kind == OpLabel {
+			globalSym := e.target.Sym(instr.Dst.Label)
+			src := e.gasLoadToReg(fn, instr.Src1, "%r10")
+			if e.target.OS == OS_Darwin {
+				w.WriteString(fmt.Sprintf("    movq %s@GOTPCREL(%%rip), %%r11\n", globalSym))
+				w.WriteString(fmt.Sprintf("    movq %s, (%%r11)\n", src))
+			} else {
+				w.WriteString(fmt.Sprintf("    movq %s, %s(%%rip)\n", src, globalSym))
+			}
+		}
+
 	case IRData:
 		// handled in data section
 	}
@@ -1039,6 +1063,20 @@ func (e *x86_64Emitter) emitNASMInstr(fn *IRFunc, instr IRInstr) {
 	// Windows API call
 	case IRWinCall:
 		e.emitNASMWinCall(fn, instr)
+
+	case IRLoadGlobal:
+		if instr.Src1.Kind == OpLabel {
+			globalSym := instr.Src1.Label
+			w.WriteString(fmt.Sprintf("    mov r10, [rel %s]\n", globalSym))
+			e.nasmSpillIfNeeded(fn, instr.Dst, "r10")
+		}
+
+	case IRStoreGlobal:
+		if instr.Dst.Kind == OpLabel {
+			globalSym := instr.Dst.Label
+			src := e.nasmLoadToReg(fn, instr.Src1, "r10")
+			w.WriteString(fmt.Sprintf("    mov [rel %s], %s\n", globalSym, src))
+		}
 	}
 }
 

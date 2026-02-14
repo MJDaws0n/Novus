@@ -72,3 +72,66 @@ fn input(prompt: str, buf_len: i32 = 128) -> str {
     }
     return out;
 }
+
+// ---------------------------------------------------------------------------
+// Process execution helpers (darwin/arm64)
+// ---------------------------------------------------------------------------
+
+fn ptr(s: str) -> u64 {
+    mov(x9, s);
+    return getreg(x9);
+}
+
+fn array_data_ptr_u64(arr: []u64) -> i64 {
+    // Array heap layout: [data_ptr(8 bytes), len(8 bytes), cap(8 bytes)]
+    mov(x9, arr);
+    let hdr: u64 = getreg(x9);
+    return load64(hdr);
+}
+
+fn execve_raw(path: str, argv: []u64) -> i32 {
+    let argv_ptr: i64 = array_data_ptr_u64(argv);
+
+    // envp: [NULL]
+    let envp: []u64 = [0];
+    let envp_ptr: i64 = array_data_ptr_u64(envp);
+
+    mov(x0, path);
+    mov(x1, argv_ptr);
+    mov(x2, envp_ptr);
+
+    // SYS_execve = 59
+    mov(x16, 0x2000000 + 59);
+    syscall();
+
+    // If we got here, execve failed.
+    return u64_to_i32(getreg(x0));
+}
+
+fn fork() -> i32 {
+    // SYS_fork = 2
+    // On macOS ARM64 the raw syscall returns:
+    //   parent: x0 = child_pid, x1 = 0
+    //   child:  x0 = child_pid, x1 = 1
+    // IMPORTANT: save both registers to local vars via getreg() BEFORE
+    // calling any function (like u64_to_i32) — function calls clobber x0/x1.
+    mov(x16, 0x2000000 + 2);
+    syscall();
+    let raw_x0: u64 = getreg(x0);
+    let raw_x1: u64 = getreg(x1);
+    let x1_val: i32 = u64_to_i32(raw_x1);
+    if (x1_val == 1) {
+        return 0;
+    }
+    return u64_to_i32(raw_x0);
+}
+
+fn spawn_execve(path: str, argv: []u64) -> i32 {
+    let pid: i32 = fork();
+    if (pid == 0) {
+        execve_raw(path, argv);
+        exit(1);
+        return 1;
+    }
+    return pid;
+}
