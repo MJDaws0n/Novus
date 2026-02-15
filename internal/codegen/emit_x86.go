@@ -259,6 +259,8 @@ func (e *x86Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		w.WriteString(fmt.Sprintf("    movb %s, (%s)\n", src, stripPercent(addr)))
 	case IRStrConcat:
 		e.emitStrConcat(instr)
+	case IRStrCmpEq:
+		w.WriteString("    ## str_cmp_eq not yet implemented for x86 32-bit\n")
 
 	// Memory load (32-bit stubs)
 	case IRLoad8:

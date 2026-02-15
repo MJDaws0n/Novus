@@ -140,6 +140,7 @@ const (
 	IRStrLen    // dst = len(src1)
 	IRStrIndex  // dst = src1[src2]
 	IRStoreByte // store byte src1 at address [dst] (for string index assignment)
+	IRStrCmpEq  // dst = (src1 == src2) content comparison for strings
 
 	// Memory load (raw address read)
 	IRLoad8  // dst = *(uint8*)src1  (load byte from address, zero-extend)
@@ -177,11 +178,11 @@ var irOpNames = map[IROp]string{
 	IRLabel: "label", IRCall: "call", IRRet: "ret",
 	IRSyscall: "syscall", IRInt: "int", IRNop: "nop",
 	IRSetReg: "setreg", IRGetReg: "getreg", IRSetFlag: "setflag", IRGetFlag: "getflag",
-	IRStrConcat: "str_concat", IRStrLen: "str_len", IRStrIndex: "str_index", IRStoreByte: "store_byte",
+	IRStrConcat: "str_concat", IRStrLen: "str_len", IRStrIndex: "str_index", IRStoreByte: "store_byte", IRStrCmpEq: "str_cmp_eq",
 	IRLoad8: "load8", IRLoad32: "load32", IRLoad64: "load64",
 	IRArrayNew: "array_new", IRArrayGet: "array_get", IRArraySet: "array_set",
 	IRArrayAppend: "array_append", IRArrayPop: "array_pop", IRArrayLen: "array_len",
-	IRWinCall: "win_call",
+	IRWinCall:    "win_call",
 	IRLoadGlobal: "load_global", IRStoreGlobal: "store_global",
 	IRComment: "comment", IRData: "data",
 }
@@ -250,10 +251,10 @@ type IRStringConst struct {
 
 // IRGlobal represents a global variable stored in the data/BSS section.
 type IRGlobal struct {
-	Name    string  // assembly label (e.g. "_g_myvar")
-	Type    string  // type name (e.g. "i32", "str", "u64")
-	InitImm int64   // initial immediate value (for integer types)
-	InitStr int     // index into Strings (for string types, -1 if not a string)
+	Name    string // assembly label (e.g. "_g_myvar")
+	Type    string // type name (e.g. "i32", "str", "u64")
+	InitImm int64  // initial immediate value (for integer types)
+	InitStr int    // index into Strings (for string types, -1 if not a string)
 }
 
 // IRModule is the top-level IR container for an entire compilation unit.

@@ -289,8 +289,9 @@ func (l *Lowerer) lowerFunction(fn *ast.FnDecl) {
 			})
 		} else {
 			// Parameter is on the stack — load from caller's frame.
-			// On x86-64 SysV: first stack arg is at [rbp+16], then +8 each.
-			callerOffset := int64(16 + (i-len(l.target.ArgRegs))*l.target.PtrSize)
+			// Spacing must match the emitter's push style:
+			// x86-64 uses 8-byte pushq, ARM64 uses 16-byte str [sp,#-16]!
+			callerOffset := int64(16 + (i-len(l.target.ArgRegs))*l.target.StackArgSlotSize)
 			tmpReg := l.freshVReg()
 			l.emit(IRInstr{
 				Op:   IRLoad,
@@ -368,6 +369,13 @@ func (l *Lowerer) lowerLetStmt(s *ast.LetStmt) {
 		l.varTypes[s.Name] = s.Type.Name
 	}
 	valOp := l.lowerExpr(s.Value)
+
+	// Bug 1 fix: if the declared type is str but the value is a raw byte
+	// (e.g. from str_index), convert the byte into a 1-char string.
+	if s.Type != nil && s.Type.Name == "str" && !l.operandIsStr(valOp) && valOp.Kind != OpNone {
+		valOp = l.charToStr(valOp)
+	}
+
 	l.emit(IRInstr{
 		Op:   IRStore,
 		Dst:  l.slotMem(slot),
@@ -706,6 +714,21 @@ func (l *Lowerer) lowerBinaryExpr(e *ast.BinaryExpr) Operand {
 	}
 	dst := l.freshVReg()
 
+	// String equality / inequality: compare contents, not pointer addresses.
+	if e.Op == "==" || e.Op == "!=" {
+		leftStr := l.operandIsStr(left)
+		rightStr := l.operandIsStr(right)
+		if leftStr || rightStr {
+			l.emit(IRInstr{Op: IRStrCmpEq, Dst: VReg(dst), Src1: left, Src2: right})
+			if e.Op == "!=" {
+				negDst := l.freshVReg()
+				l.emit(IRInstr{Op: IRNot, Dst: VReg(negDst), Src1: VReg(dst)})
+				return VReg(negDst)
+			}
+			return VReg(dst)
+		}
+	}
+
 	var op IROp
 	switch e.Op {
 	case "+":
@@ -797,6 +820,11 @@ func (l *Lowerer) lowerIndexExpr(e *ast.IndexExpr) Operand {
 		idxOp := l.lowerExpr(e.Index)
 		dst := l.freshVReg()
 		l.emit(IRInstr{Op: IRArrayGet, Dst: VReg(dst), Src1: objOp, Src2: idxOp})
+		// Bug 5 fix: if element type is str, mark result vreg as string.
+		elemType := l.varTypes[ident.Name]
+		if len(elemType) > 2 && elemType[:2] == "[]" && elemType[2:] == "str" {
+			l.vregIsStr[dst] = true
+		}
 		return VReg(dst)
 	}
 	// String indexing: str[i] → IRStrIndex

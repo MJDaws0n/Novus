@@ -99,6 +99,11 @@ type Target struct {
 	// PtrSize is the size of a pointer in bytes (4 or 8).
 	PtrSize int
 
+	// StackArgSlotSize is the byte size of each stack-passed argument slot.
+	// On x86-64 this equals PtrSize (8).  On ARM64, each push is 16 bytes
+	// due to the required 16-byte stack alignment.
+	StackArgSlotSize int
+
 	// Registers by role (mapped to physical register names).
 	ReturnReg    string   // where function return values go
 	StackPointer string   // stack pointer register
@@ -197,6 +202,7 @@ func ResolveTarget(osName, archName string) (*Target, error) {
 
 func (t *Target) fillX86_64() {
 	t.PtrSize = 8
+	t.StackArgSlotSize = 8
 	t.Flavor = GAS // default; Windows build pipeline will handle NASM differently
 	t.ReturnReg = "rax"
 	t.StackPointer = "rsp"
@@ -219,6 +225,7 @@ func (t *Target) fillX86_64() {
 
 func (t *Target) fillX86() {
 	t.PtrSize = 4
+	t.StackArgSlotSize = 4
 	t.Flavor = GAS
 	t.ReturnReg = "eax"
 	t.StackPointer = "esp"
@@ -233,6 +240,7 @@ func (t *Target) fillX86() {
 
 func (t *Target) fillARM64() {
 	t.PtrSize = 8
+	t.StackArgSlotSize = 16
 	t.Flavor = GAS
 	t.ReturnReg = "x0"
 	t.StackPointer = "sp"

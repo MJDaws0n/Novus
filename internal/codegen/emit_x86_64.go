@@ -427,6 +427,8 @@ func (e *x86_64Emitter) emitGASInstr(fn *IRFunc, instr IRInstr) {
 		e.emitGASStrLen(fn, instr)
 	case IRStrIndex:
 		e.emitGASStrIndex(fn, instr)
+	case IRStrCmpEq:
+		e.emitGASStrCmpEq(fn, instr)
 	case IRStoreByte:
 		addr := e.gasLoadToReg(fn, instr.Dst, "%r11")
 		src := e.gasLoadToReg(fn, instr.Src1, "%r10")
@@ -715,6 +717,45 @@ func (e *x86_64Emitter) emitGASStrIndex(fn *IRFunc, instr IRInstr) {
 	}
 	w.WriteString("    xorq %rax, %rax\n")
 	w.WriteString("    movb (%r10,%r11), %al\n")
+	e.gasStoreToOperand(fn, instr.Dst, "%rax")
+}
+
+// emitGASStrCmpEq emits an inline byte-by-byte string comparison (GAS/AT&T).
+// dst = 1 if strings are equal, 0 otherwise.
+func (e *x86_64Emitter) emitGASStrCmpEq(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	src1 := e.gasLoadToReg(fn, instr.Src1, "%r10")
+	src2 := e.gasLoadToReg(fn, instr.Src2, "%r11")
+
+	if src1 != "%r10" {
+		w.WriteString(fmt.Sprintf("    movq %s, %%r10\n", src1))
+	}
+	if src2 != "%r11" {
+		w.WriteString(fmt.Sprintf("    movq %s, %%r11\n", src2))
+	}
+
+	id := e.uniqueID()
+	loopLabel := fmt.Sprintf(".Lstrcmp_loop_%d", id)
+	neLabel := fmt.Sprintf(".Lstrcmp_ne_%d", id)
+	eqLabel := fmt.Sprintf(".Lstrcmp_eq_%d", id)
+	endLabel := fmt.Sprintf(".Lstrcmp_end_%d", id)
+
+	w.WriteString(fmt.Sprintf("%s:\n", loopLabel))
+	w.WriteString("    movzbl (%r10), %eax\n")
+	w.WriteString("    movzbl (%r11), %ecx\n")
+	w.WriteString("    cmpb %cl, %al\n")
+	w.WriteString(fmt.Sprintf("    jne %s\n", neLabel))
+	w.WriteString("    testb %al, %al\n")
+	w.WriteString(fmt.Sprintf("    je %s\n", eqLabel))
+	w.WriteString("    incq %r10\n")
+	w.WriteString("    incq %r11\n")
+	w.WriteString(fmt.Sprintf("    jmp %s\n", loopLabel))
+	w.WriteString(fmt.Sprintf("%s:\n", neLabel))
+	w.WriteString("    xorq %rax, %rax\n")
+	w.WriteString(fmt.Sprintf("    jmp %s\n", endLabel))
+	w.WriteString(fmt.Sprintf("%s:\n", eqLabel))
+	w.WriteString("    movq $1, %rax\n")
+	w.WriteString(fmt.Sprintf("%s:\n", endLabel))
 	e.gasStoreToOperand(fn, instr.Dst, "%rax")
 }
 
@@ -1031,6 +1072,8 @@ func (e *x86_64Emitter) emitNASMInstr(fn *IRFunc, instr IRInstr) {
 		w.WriteString(fmt.Sprintf("    mov byte [%s], %sb\n", addr, src))
 	case IRStrConcat:
 		e.emitNASMStrConcat(fn, instr)
+	case IRStrCmpEq:
+		e.emitNASMStrCmpEq(fn, instr)
 
 	// Memory load (raw address read)
 	case IRLoad8:
@@ -1171,6 +1214,45 @@ func (e *x86_64Emitter) emitNASMStrIndex(fn *IRFunc, instr IRInstr) {
 	w.WriteString(fmt.Sprintf("    mov rsi, %s\n", idx))
 	w.WriteString("    xor rax, rax\n")
 	w.WriteString("    mov al, [rdi+rsi]\n")
+	e.nasmStoreToOperand(fn, instr.Dst, "rax")
+}
+
+// emitNASMStrCmpEq emits an inline byte-by-byte string comparison (NASM/Intel).
+// dst = 1 if strings are equal, 0 otherwise.
+func (e *x86_64Emitter) emitNASMStrCmpEq(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	src1 := e.nasmLoadToReg(fn, instr.Src1, "r10")
+	src2 := e.nasmLoadToReg(fn, instr.Src2, "r11")
+
+	if src1 != "r10" {
+		w.WriteString(fmt.Sprintf("    mov r10, %s\n", src1))
+	}
+	if src2 != "r11" {
+		w.WriteString(fmt.Sprintf("    mov r11, %s\n", src2))
+	}
+
+	id := e.uniqueID()
+	loopLabel := fmt.Sprintf(".strcmp_loop_%d", id)
+	neLabel := fmt.Sprintf(".strcmp_ne_%d", id)
+	eqLabel := fmt.Sprintf(".strcmp_eq_%d", id)
+	endLabel := fmt.Sprintf(".strcmp_end_%d", id)
+
+	w.WriteString(fmt.Sprintf("%s:\n", loopLabel))
+	w.WriteString("    movzx eax, byte [r10]\n")
+	w.WriteString("    movzx ecx, byte [r11]\n")
+	w.WriteString("    cmp al, cl\n")
+	w.WriteString(fmt.Sprintf("    jne %s\n", neLabel))
+	w.WriteString("    test al, al\n")
+	w.WriteString(fmt.Sprintf("    je %s\n", eqLabel))
+	w.WriteString("    inc r10\n")
+	w.WriteString("    inc r11\n")
+	w.WriteString(fmt.Sprintf("    jmp %s\n", loopLabel))
+	w.WriteString(fmt.Sprintf("%s:\n", neLabel))
+	w.WriteString("    xor rax, rax\n")
+	w.WriteString(fmt.Sprintf("    jmp %s\n", endLabel))
+	w.WriteString(fmt.Sprintf("%s:\n", eqLabel))
+	w.WriteString("    mov rax, 1\n")
+	w.WriteString(fmt.Sprintf("%s:\n", endLabel))
 	e.nasmStoreToOperand(fn, instr.Dst, "rax")
 }
 
