@@ -193,7 +193,7 @@ func (e *arm64Emitter) emitFunction(fn *IRFunc) {
 	w.WriteString("    stp x29, x30, [sp, #-16]!\n")
 	w.WriteString("    mov x29, sp\n")
 	if frameSize > 0 {
-		w.WriteString(fmt.Sprintf("    sub sp, sp, #%d\n", frameSize))
+		e.emitSPAdj("sub", frameSize)
 	}
 
 	for i := 0; i < len(fn.Instrs); i++ {
@@ -369,7 +369,7 @@ func (e *arm64Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		}
 		frameSize := e.computeFrameSize(fn)
 		if frameSize > 0 {
-			w.WriteString(fmt.Sprintf("    add sp, sp, #%d\n", frameSize))
+			e.emitSPAdj("add", frameSize)
 		}
 		w.WriteString("    ldp x29, x30, [sp], #16\n")
 		w.WriteString("    ret\n")
@@ -416,6 +416,8 @@ func (e *arm64Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		w.WriteString(fmt.Sprintf("    strb %s, [%s]\n", toW(src), addr))
 	case IRStrConcat:
 		e.emitStrConcat(fn, instr)
+	case IRStrCmpEq:
+		e.emitStrCmpEq(fn, instr)
 
 	// Memory load (raw address read)
 	case IRLoad8:
@@ -599,8 +601,8 @@ func (e *arm64Emitter) emitStrIndex(fn *IRFunc, instr IRInstr) {
 	src := e.loadToReg(fn, instr.Src1, "x13")
 	idx := e.loadToReg(fn, instr.Src2, "x14")
 	dst := e.dstReg(fn, instr.Dst, "x10")
-	w.WriteString(fmt.Sprintf("    ldrb w15, [%s, %s]\n", src, idx))
-	w.WriteString(fmt.Sprintf("    uxtb %s, w15\n", dst))
+	// ldrb into the W-form of dst; writing wN automatically zeros upper 32 bits of xN.
+	w.WriteString(fmt.Sprintf("    ldrb %s, [%s, %s]\n", toW(dst), src, idx))
 	e.spillIfNeeded(fn, instr.Dst, dst)
 }
 
@@ -976,6 +978,67 @@ func (e *arm64Emitter) usesHeap() bool {
 		}
 	}
 	return false
+}
+
+// ---------------------------------------------------------------------------
+// Stack pointer adjustment — handles immediates >4095 (Bug 4 fix)
+// ---------------------------------------------------------------------------
+
+// emitSPAdj emits "add sp, sp, #N" or "sub sp, sp, #N", handling the ARM64
+// immediate limit of 4095 by falling back to a scratch register for larger
+// values.
+func (e *arm64Emitter) emitSPAdj(mnemonic string, size int) {
+	w := e.b
+	if size <= 4095 {
+		w.WriteString(fmt.Sprintf("    %s sp, sp, #%d\n", mnemonic, size))
+	} else {
+		e.loadImm("x17", int64(size))
+		w.WriteString(fmt.Sprintf("    %s sp, sp, x17\n", mnemonic))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// String content comparison (Bug 2 fix)
+// ---------------------------------------------------------------------------
+
+// emitStrCmpEq emits an inline byte-by-byte string comparison.
+// dst = 1 if strings are equal, 0 otherwise.
+func (e *arm64Emitter) emitStrCmpEq(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	src1 := e.loadToReg(fn, instr.Src1, "x13")
+	src2 := e.loadToReg(fn, instr.Src2, "x14")
+	dst := e.dstReg(fn, instr.Dst, "x10")
+
+	id := e.uniqueID()
+	loopLabel := fmt.Sprintf(".Lstrcmp_loop_%d", id)
+	neLabel := fmt.Sprintf(".Lstrcmp_ne_%d", id)
+	eqLabel := fmt.Sprintf(".Lstrcmp_eq_%d", id)
+	endLabel := fmt.Sprintf(".Lstrcmp_end_%d", id)
+
+	if src1 != "x13" {
+		w.WriteString(fmt.Sprintf("    mov x13, %s\n", src1))
+	}
+	if src2 != "x14" {
+		w.WriteString(fmt.Sprintf("    mov x14, %s\n", src2))
+	}
+
+	// Byte-by-byte comparison loop.
+	w.WriteString(fmt.Sprintf("%s:\n", loopLabel))
+	w.WriteString("    ldrb w15, [x13], #1\n")
+	w.WriteString("    ldrb w16, [x14], #1\n")
+	w.WriteString("    cmp w15, w16\n")
+	w.WriteString(fmt.Sprintf("    b.ne %s\n", neLabel))
+	w.WriteString(fmt.Sprintf("    cbz w15, %s\n", eqLabel))
+	w.WriteString(fmt.Sprintf("    b %s\n", loopLabel))
+	// Not equal.
+	w.WriteString(fmt.Sprintf("%s:\n", neLabel))
+	w.WriteString(fmt.Sprintf("    mov %s, #0\n", dst))
+	w.WriteString(fmt.Sprintf("    b %s\n", endLabel))
+	// Equal.
+	w.WriteString(fmt.Sprintf("%s:\n", eqLabel))
+	w.WriteString(fmt.Sprintf("    mov %s, #1\n", dst))
+	w.WriteString(fmt.Sprintf("%s:\n", endLabel))
+	e.spillIfNeeded(fn, instr.Dst, dst)
 }
 
 // ---------------------------------------------------------------------------
