@@ -184,3 +184,26 @@ fn path_basename(path: str) -> str {
     if (last_sep < 0) { return path; }
     return substr(path, last_sep + 1);
 }
+
+// ---------------------------------------------------------------------------
+// Directory & permission helpers
+// ---------------------------------------------------------------------------
+
+// Create a directory. mode: e.g. 493 = 0755.
+// Returns 0 on success, or errno on failure (e.g. EEXIST=17 is OK).
+fn sys_mkdir(path: str, mode: i32) -> i32 {
+    mov(x0, path);
+    mov(x1, mode);
+    mov(x16, 0x2000088);  // SYS_mkdir = 136
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
+
+// Change file permissions. mode: e.g. 493 = 0755.
+fn sys_chmod(path: str, mode: i32) -> i32 {
+    mov(x0, path);
+    mov(x1, mode);
+    mov(x16, 0x200000F);  // SYS_chmod = 15
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
