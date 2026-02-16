@@ -1,0 +1,186 @@
+// ---------------------------------------------------------------------------
+// File I/O library for Novus (macOS Apple Silicon)
+//
+// Provides file open/close/read/write/seek, memory mapping, and path
+// manipulation utilities.
+// ---------------------------------------------------------------------------
+
+module file_io;
+
+import standard_lib;
+import standard_lib_macos_silicon;
+import memory;
+
+// ---------------------------------------------------------------------------
+// File descriptor operations
+// ---------------------------------------------------------------------------
+
+// Open a file. flags: 0=O_RDONLY, 1=O_WRONLY, 2=O_RDWR
+// O_CREAT=0x200, O_TRUNC=0x400.  mode: e.g. 0644 = 420 decimal.
+fn file_open(path: str, flags: i32, mode: i32) -> i32 {
+    mov(x0, path);
+    mov(x1, flags);
+    mov(x2, mode);
+    mov(x16, 0x2000005);
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
+
+fn file_open_read(path: str) -> i32 {
+    return file_open(path, 0, 0);
+}
+
+fn file_open_write(path: str) -> i32 {
+    return file_open(path, 1537, 420);
+}
+
+fn file_close(fd: i32) -> void {
+    mov(x0, fd);
+    mov(x16, 0x2000006);
+    syscall();
+}
+
+fn file_read(fd: i32, buf_addr: u64, count: i32) -> i32 {
+    mov(x0, fd);
+    mov(x1, buf_addr);
+    mov(x2, count);
+    mov(x16, 0x2000003);
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
+
+fn file_write(fd: i32, buf_addr: u64, count: i32) -> i32 {
+    mov(x0, fd);
+    mov(x1, buf_addr);
+    mov(x2, count);
+    mov(x16, 0x2000004);
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
+
+fn file_write_str(fd: i32, s: str) -> i32 {
+    return file_write(fd, ptr(s), len(s));
+}
+
+fn file_seek(fd: i32, offset: u64, whence: i32) -> i64 {
+    mov(x0, fd);
+    mov(x1, offset);
+    mov(x2, whence);
+    mov(x16, 0x20000C7);
+    syscall();
+    return getreg(x0);
+}
+
+fn file_size(fd: i32) -> u64 {
+    let cur: i64 = file_seek(fd, 0, 1);
+    let end: i64 = file_seek(fd, 0, 2);
+    file_seek(fd, i64_to_u64(cur), 0);
+    return i64_to_u64(end);
+}
+
+// ---------------------------------------------------------------------------
+// Memory-mapped file
+// ---------------------------------------------------------------------------
+
+fn file_mmap_read(fd: i32, size: u64) -> u64 {
+    mov(x0, 0);
+    mov(x1, size);
+    mov(x2, 1);
+    mov(x3, 2);
+    mov(x4, fd);
+    mov(x5, 0);
+    mov(x16, 0x20000C5);
+    syscall();
+    return getreg(x0);
+}
+
+fn file_munmap(addr: u64, size: u64) -> void {
+    mov(x0, addr);
+    mov(x1, size);
+    mov(x16, 0x2000049);
+    syscall();
+}
+
+// ---------------------------------------------------------------------------
+// Pipe helpers
+// ---------------------------------------------------------------------------
+
+fn pipe_create(res: []i32) -> void {
+    mov(x16, 0x200002A);
+    syscall();
+    let rfd: i32 = u64_to_i32(getreg(x0));
+    let wfd: i32 = u64_to_i32(getreg(x1));
+    res[0] = rfd;
+    res[1] = wfd;
+}
+
+fn dup2(oldfd: i32, newfd: i32) -> void {
+    mov(x0, oldfd);
+    mov(x1, newfd);
+    mov(x16, 0x200005A);
+    syscall();
+}
+
+// ---------------------------------------------------------------------------
+// Path manipulation (using native s[i] indexing)
+// ---------------------------------------------------------------------------
+
+// Get the file extension including the dot (e.g. ".stl").
+fn path_ext(path: str) -> str {
+    let plen: i32 = len(path);
+    let dot: i32 = -1;
+    let i: i32 = 0;
+    while (i < plen) {
+        if (path[i] == '.') { dot = i; }
+        i = i + 1;
+    }
+    if (dot < 0) { return ""; }
+    return substr(path, dot);
+}
+
+// Get the stem (filename without extension).
+fn path_stem(path: str) -> str {
+    let plen: i32 = len(path);
+    let dot: i32 = -1;
+    let i: i32 = 0;
+    while (i < plen) {
+        if (path[i] == '.') { dot = i; }
+        i = i + 1;
+    }
+    if (dot < 0) { return path; }
+    return substr_len(path, 0, dot);
+}
+
+// Insert a suffix before the file extension.
+// e.g. path_insert_suffix("model.stl", "_FIXED") -> "model_FIXED.stl"
+fn path_insert_suffix(path: str, suffix: str) -> str {
+    let stem: str = path_stem(path);
+    let ext: str = path_ext(path);
+    return stem + suffix + ext;
+}
+
+// Get the directory part of a path (everything up to last '/').
+fn path_dir(path: str) -> str {
+    let plen: i32 = len(path);
+    let last_sep: i32 = -1;
+    let i: i32 = 0;
+    while (i < plen) {
+        if (path[i] == '/') { last_sep = i; }
+        i = i + 1;
+    }
+    if (last_sep < 0) { return ""; }
+    return substr_len(path, 0, last_sep);
+}
+
+// Get the filename part (everything after last '/').
+fn path_basename(path: str) -> str {
+    let plen: i32 = len(path);
+    let last_sep: i32 = -1;
+    let i: i32 = 0;
+    while (i < plen) {
+        if (path[i] == '/') { last_sep = i; }
+        i = i + 1;
+    }
+    if (last_sep < 0) { return path; }
+    return substr(path, last_sep + 1);
+}
