@@ -145,6 +145,30 @@ static NSString *ns_from_utf8(const char *s) {
 }
 @end
 
+// ---------------------------------------------------------------------------
+// Window delegate — detect red close button
+// ---------------------------------------------------------------------------
+
+@interface NovusWindowDelegate : NSObject <NSWindowDelegate>
+@end
+
+@implementation NovusWindowDelegate
+- (BOOL)windowShouldClose:(NSWindow *)sender {
+    (void)sender;
+    // Notify the connected Novus client that the window is closing
+    if (g_client_fd >= 0) {
+        const char *msg = "JSMSG CMD:QUIT\n";
+        (void)write(g_client_fd, msg, strlen(msg));
+    }
+    // Small delay so the message is read before we tear down
+    usleep(50000);
+    [NSApp terminate:nil];
+    return NO; // We handle closing via terminate
+}
+@end
+
+static NovusWindowDelegate *g_win_delegate = nil;
+
 @interface NovusNavDelegate : NSObject <WKNavigationDelegate>
 @end
 
@@ -181,6 +205,10 @@ static void ui_ensure_window(void) {
     [g_window center];
     [g_window setReleasedWhenClosed:NO];
     [g_window setTitle:ns_from_utf8(g_title)];
+
+    // Set window delegate to detect close button
+    g_win_delegate = [[NovusWindowDelegate alloc] init];
+    [g_window setDelegate:g_win_delegate];
 
     // Configure WebView with user content controller for JS bridge
     WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];

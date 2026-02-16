@@ -1,0 +1,242 @@
+// ---------------------------------------------------------------------------
+// Memory, C-string & string utilities for Novus (macOS Apple Silicon)
+// ---------------------------------------------------------------------------
+
+module memory;
+
+import standard_lib;
+import standard_lib_macos_silicon;
+
+// ---------------------------------------------------------------------------
+// Raw byte access (for arbitrary memory addresses, e.g. mmap'd data)
+// ---------------------------------------------------------------------------
+
+// Read a single unsigned byte (0-255) from a raw memory address.
+fn read_byte(addr: u64) -> i32 {
+    let w: i32 = load32(addr);
+    let b: i32 = w % 256;
+    if (b < 0) { b = b + 256; }
+    return b;
+}
+
+// ---------------------------------------------------------------------------
+// C-string helpers (for interfacing with C APIs / raw memory)
+// ---------------------------------------------------------------------------
+
+// Length of a NUL-terminated C string at the given address (max 4096).
+fn cstr_len(addr: u64) -> u64 {
+    let i: u64 = 0;
+    while (i < 4096) {
+        if (read_byte(addr + i) == 0) { return i; }
+        i = i + 1;
+    }
+    return i;
+}
+
+// Allocate a string buffer of `size` bytes quickly using doubling.
+fn make_buffer(size: i32) -> str {
+    if (size <= 0) { return ""; }
+    let buf: str = "        ";  // start with 8 chars
+    while (len(buf) < size) {
+        buf = buf + buf;
+    }
+    // Trim to exact size via copy_bytes if oversized
+    if (len(buf) > size) {
+        let pa: u64 = ptr(buf);
+        return copy_bytes_raw(pa, size);
+    }
+    return buf;
+}
+
+// Low-level pipe copy (used by make_buffer and copy_bytes).
+fn copy_bytes_raw(src: u64, length: i32) -> str {
+    if (length <= 0) { return ""; }
+    let buf: str = "";
+    let j: i32 = 0;
+    while (j < length) { buf = buf + " "; j = j + 1; }
+    let ulen: u64 = i32_to_u64(length);
+    mov(x16, 0x200002A);
+    syscall();
+    let rfd: i32 = u64_to_i32(getreg(x0));
+    let wfd: i32 = u64_to_i32(getreg(x1));
+    mov(x0, wfd);
+    mov(x1, src);
+    mov(x2, ulen);
+    mov(x16, 0x2000004);
+    syscall();
+    mov(x0, wfd);
+    mov(x16, 0x2000006);
+    syscall();
+    mov(x0, rfd);
+    mov(x1, buf);
+    mov(x2, ulen);
+    mov(x16, 0x2000003);
+    syscall();
+    mov(x0, rfd);
+    mov(x16, 0x2000006);
+    syscall();
+    return buf;
+}
+
+// Copy `length` bytes from a raw memory address into a new Novus string.
+// Uses a kernel pipe to transfer raw bytes into a managed string buffer.
+fn copy_bytes(src: u64, length: i32) -> str {
+    if (length <= 0) { return ""; }
+    let buf: str = "";
+    let j: i32 = 0;
+    while (j < length) { buf = buf + " "; j = j + 1; }
+    let ulen: u64 = i32_to_u64(length);
+    mov(x16, 0x200002A);
+    syscall();
+    let rfd: i32 = u64_to_i32(getreg(x0));
+    let wfd: i32 = u64_to_i32(getreg(x1));
+    mov(x0, wfd);
+    mov(x1, src);
+    mov(x2, ulen);
+    mov(x16, 0x2000004);
+    syscall();
+    mov(x0, wfd);
+    mov(x16, 0x2000006);
+    syscall();
+    mov(x0, rfd);
+    mov(x1, buf);
+    mov(x2, ulen);
+    mov(x16, 0x2000003);
+    syscall();
+    mov(x0, rfd);
+    mov(x16, 0x2000006);
+    syscall();
+    return buf;
+}
+
+// Convert a NUL-terminated C string at `addr` into a Novus str.
+fn cstr_to_str(addr: u64) -> str {
+    let slen: u64 = cstr_len(addr);
+    if (slen == 0) { return ""; }
+    return copy_bytes(addr, u64_to_i32(slen));
+}
+
+// ---------------------------------------------------------------------------
+// String operations (using native s[i] indexing)
+// ---------------------------------------------------------------------------
+
+// True if `s` starts with the prefix `p`.
+fn starts_with(s: str, p: str) -> bool {
+    if (len(s) < len(p)) { return false; }
+    let i: i32 = 0;
+    while (i < len(p)) {
+        if (s[i] != p[i]) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+// True if `s` ends with the suffix `p`.
+fn ends_with(s: str, p: str) -> bool {
+    let sl: i32 = len(s);
+    let pl: i32 = len(p);
+    if (sl < pl) { return false; }
+    let off: i32 = sl - pl;
+    let i: i32 = 0;
+    while (i < pl) {
+        let si: i32 = off + i;
+        if (s[si] != p[i]) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+// True if string `s` contains substring `needle`.
+fn str_contains(s: str, needle: str) -> bool {
+    let sl: i32 = len(s);
+    let nl: i32 = len(needle);
+    if (nl == 0) { return true; }
+    if (sl < nl) { return false; }
+    let limit: i32 = sl - nl + 1;
+    let i: i32 = 0;
+    while (i < limit) {
+        let ok: bool = true;
+        let j: i32 = 0;
+        while (j < nl) {
+            let ci: i32 = i + j;
+            if (s[ci] != needle[j]) { ok = false; j = nl; }
+            else { j = j + 1; }
+        }
+        if (ok) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+// Find first occurrence of `needle` in `s`, returns -1 if not found.
+fn str_find(s: str, needle: str) -> i32 {
+    let sl: i32 = len(s);
+    let nl: i32 = len(needle);
+    if (nl == 0) { return 0; }
+    if (sl < nl) { return -1; }
+    let limit: i32 = sl - nl + 1;
+    let i: i32 = 0;
+    while (i < limit) {
+        let ok: bool = true;
+        let j: i32 = 0;
+        while (j < nl) {
+            let ci: i32 = i + j;
+            if (s[ci] != needle[j]) { ok = false; j = nl; }
+            else { j = j + 1; }
+        }
+        if (ok) { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// ---------------------------------------------------------------------------
+// Substrings
+// ---------------------------------------------------------------------------
+
+// Extract substring from `start` to end of string.
+fn substr(s: str, start: i32) -> str {
+    let result: str = "";
+    let i: i32 = start;
+    while (i < len(s)) {
+        result = result + s[i];
+        i = i + 1;
+    }
+    return result;
+}
+
+// Extract substring from `start` with `count` characters.
+fn substr_len(s: str, start: i32, count: i32) -> str {
+    let slen: i32 = len(s);
+    if (start >= slen) { return ""; }
+    if (start + count > slen) { count = slen - start; }
+    if (count <= 0) { return ""; }
+    let result: str = "";
+    let i: i32 = 0;
+    while (i < count) {
+        let ci: i32 = start + i;
+        result = result + s[ci];
+        i = i + 1;
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Byte-level access helpers
+// ---------------------------------------------------------------------------
+
+// Get byte value at index `i` in string `s` (0-255).
+fn byte_at(s: str, i: i32) -> i32 {
+    return read_byte(ptr(s) + i32_to_u64(i));
+}
+
+// ---------------------------------------------------------------------------
+// CLI argument reading
+// ---------------------------------------------------------------------------
+
+// Read argv[index] from the raw argv pointer passed to main.
+fn argv_get(argv: u64, index: i32) -> str {
+    let offset: u64 = i32_to_u64(index) * 8;
+    let addr: u64 = i64_to_u64(load64(argv + offset));
+    return cstr_to_str(addr);
+}

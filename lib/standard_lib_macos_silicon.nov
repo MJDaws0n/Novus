@@ -8,11 +8,33 @@ module standard_lib_macos_silicon;
 
 import standard_lib;
 
+fn i32_to_u64(val: i32) -> u64 {
+    mov(x9, val);
+    return getreg(x9);
+}
+
+fn i64_to_u64(val: i64) -> u64 {
+    mov(x9, val);
+    return getreg(x9);
+}
+
+fn u64_to_i64(val: u64) -> i64 {
+    mov(x9, val);
+    return getreg(x9);
+}
+
 fn array_len(arr: []i32) -> i32 {
     mov(x9, arr);
-    let ptr: u64 = getreg(x9);
-    return load32(ptr + 8);
+    let hdr: u64 = getreg(x9);
+    return load32(hdr + 8);
 }
+
+fn array_len_u64(arr: []u64) -> i32 {
+    mov(x9, arr);
+    let hdr: u64 = getreg(x9);
+    return load32(hdr + 8);
+}
+
 fn print(msg: str) -> void {
     msg = msg + "\n";
     mov(x0, 1);

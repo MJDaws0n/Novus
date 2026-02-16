@@ -50,3 +50,22 @@ fn clamp(val: i32, lo: i32, hi: i32) -> i32 {
     }
     return val;
 }
+
+fn abs64(x: i64) -> i64 {
+    if (x < 0) {
+        return 0 - x;
+    }
+    return x;
+}
+fn max64(a: i64, b: i64) -> i64 {
+    if (a > b) {
+        return a;
+    }
+    return b;
+}
+fn min64(a: i64, b: i64) -> i64 {
+    if (a < b) {
+        return a;
+    }
+    return b;
+}

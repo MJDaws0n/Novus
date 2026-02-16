@@ -1,0 +1,84 @@
+// ---------------------------------------------------------------------------
+// Process & subprocess utilities for Novus (macOS Apple Silicon)
+// ---------------------------------------------------------------------------
+
+module process;
+
+import standard_lib;
+import standard_lib_macos_silicon;
+import memory;
+import file_io;
+
+// ---------------------------------------------------------------------------
+// Wait for child process
+// ---------------------------------------------------------------------------
+
+fn wait_pid(pid: i32) -> i32 {
+    let st: i32 = 0;
+    let sa: u64 = &st;
+    mov(x0, pid);
+    mov(x1, sa);
+    mov(x2, 0);
+    mov(x3, 0);
+    mov(x16, 0x2000007);
+    syscall();
+    return st;
+}
+
+// ---------------------------------------------------------------------------
+// Subprocess with captured output
+// ---------------------------------------------------------------------------
+
+// Run a command and capture its stdout as a string.
+fn capture_output(exe: str, argv: []u64, max_len: i32) -> str {
+    let pfd: []i32 = [0, 0];
+    pipe_create(pfd);
+    let rfd: i32 = pfd[0];
+    let wfd: i32 = pfd[1];
+
+    let pid: i32 = fork();
+    if (pid == 0) {
+        file_close(rfd);
+        dup2(wfd, 1);
+        file_close(wfd);
+        execve_raw(exe, argv);
+        exit(1);
+        return "";
+    }
+
+    file_close(wfd);
+
+    let buf: str = make_buffer(max_len);
+
+    let nr: i32 = file_read(rfd, ptr(buf), max_len);
+    file_close(rfd);
+    wait_pid(pid);
+
+    if (nr <= 0) { return ""; }
+
+    // Build clean result, stripping trailing newlines
+    let result: str = "";
+    let k: i32 = 0;
+    let stop: bool = false;
+    while (k < nr && !stop) {
+        if (buf[k] == '\n' || buf[k] == '\r') {
+            stop = true;
+        } else {
+            result = result + buf[k];
+            k = k + 1;
+        }
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// macOS file picker dialog via osascript
+// ---------------------------------------------------------------------------
+
+fn pick_file_dialog(file_type: str) -> str {
+    let a0: str = "/usr/bin/osascript";
+    let a1: str = "-e";
+    let a2: str = "POSIX path of (choose file of type {\"" + file_type + "\"})";
+    let av: []u64 = [ptr(a0), ptr(a1), ptr(a2), 0];
+    return capture_output(a0, av, 4096);
+}
