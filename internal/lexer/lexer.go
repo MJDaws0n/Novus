@@ -65,6 +65,11 @@ const (
 	PERCENT   = "PERCENT"   // %
 	AMPERSAND = "AMPERSAND" // &
 	BANG      = "BANG"      // !
+	PIPE      = "PIPE"      // |
+	CARET     = "CARET"     // ^
+	TILDE     = "TILDE"     // ~
+	SHL       = "SHL"       // <<
+	SHR       = "SHR"       // >>
 
 	// Comparison operators
 	EQ  = "EQ"  // ==
@@ -438,10 +443,16 @@ func lexOperatorOrDelimiter(input string, i int, line int, col int) (Token, int)
 		if next == '=' {
 			return Token{LTE, "<=", line, col}, 2
 		}
+		if next == '<' {
+			return Token{SHL, "<<", line, col}, 2
+		}
 		return Token{LT, "<", line, col}, 1
 	case '>':
 		if next == '=' {
 			return Token{GTE, ">=", line, col}, 2
+		}
+		if next == '>' {
+			return Token{SHR, ">>", line, col}, 2
 		}
 		return Token{GT, ">", line, col}, 1
 	case '&':
@@ -453,7 +464,7 @@ func lexOperatorOrDelimiter(input string, i int, line int, col int) (Token, int)
 		if next == '|' {
 			return Token{OR, "||", line, col}, 2
 		}
-		// Single | not used yet — fall through to no match
+		return Token{PIPE, "|", line, col}, 1
 	}
 
 	// Single-character tokens
@@ -486,6 +497,10 @@ func lexOperatorOrDelimiter(input string, i int, line int, col int) (Token, int)
 		return Token{SLASH, "/", line, col}, 1
 	case '%':
 		return Token{PERCENT, "%", line, col}, 1
+	case '^':
+		return Token{CARET, "^", line, col}, 1
+	case '~':
+		return Token{TILDE, "~", line, col}, 1
 	}
 
 	return Token{}, 0

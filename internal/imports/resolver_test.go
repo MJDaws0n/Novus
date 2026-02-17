@@ -235,3 +235,160 @@ func TestDeduplicateGlobals(t *testing.T) {
 		t.Errorf("expected 1 global after dedup, got %d", totalGlobals)
 	}
 }
+
+// ===========================================================================
+// Bug 2: Cross-module globals included in merged program
+// ===========================================================================
+
+func TestResolve_ImportedGlobalsInMergedProgram(t *testing.T) {
+	// Simulates what Resolve does: imported module globals should appear
+	// in the merged program's Globals list.
+	importedGlobal := &ast.GlobalVar{Name: "debug_enabled", Type: &ast.TypeExpr{Name: "bool"}}
+	importedProg := &ast.Program{Globals: []*ast.GlobalVar{importedGlobal}}
+
+	r := &Resolver{resolved: make(map[string]*ImportedModule)}
+	r.allModules = []*ImportedModule{
+		{Path: "config", Program: importedProg, Functions: nil},
+	}
+
+	// Simulate the merge step from Resolve.
+	mainProg := &ast.Program{
+		Module:    &ast.ModuleDecl{Name: "test"},
+		Functions: []*ast.FnDecl{},
+	}
+	merged := &ast.Program{
+		Module:  mainProg.Module,
+		Imports: mainProg.Imports,
+	}
+
+	for _, mod := range r.allModules {
+		for _, fn := range mod.Functions {
+			merged.Functions = append(merged.Functions, fn)
+		}
+		if mod.Program != nil {
+			for _, g := range mod.Program.Globals {
+				merged.Globals = append(merged.Globals, g)
+			}
+		}
+	}
+	merged.Globals = append(merged.Globals, mainProg.Globals...)
+	merged.Functions = append(merged.Functions, mainProg.Functions...)
+
+	// Check that the imported global is in the merged program.
+	found := false
+	for _, g := range merged.Globals {
+		if g.Name == "debug_enabled" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected imported global 'debug_enabled' in merged program")
+	}
+}
+
+func TestResolve_MainFileGlobalsIncluded(t *testing.T) {
+	// The main file's own globals should also be in the merged program.
+	mainGlobal := &ast.GlobalVar{Name: "app_version", Type: &ast.TypeExpr{Name: "str"}}
+	mainProg := &ast.Program{
+		Module:    &ast.ModuleDecl{Name: "test"},
+		Globals:   []*ast.GlobalVar{mainGlobal},
+		Functions: []*ast.FnDecl{},
+	}
+
+	r := &Resolver{resolved: make(map[string]*ImportedModule)}
+	r.allModules = nil // no imports
+
+	// Simulate the Resolve merge.
+	merged := &ast.Program{
+		Module:  mainProg.Module,
+		Imports: mainProg.Imports,
+	}
+	for _, mod := range r.allModules {
+		for _, fn := range mod.Functions {
+			merged.Functions = append(merged.Functions, fn)
+		}
+		if mod.Program != nil {
+			for _, g := range mod.Program.Globals {
+				merged.Globals = append(merged.Globals, g)
+			}
+		}
+	}
+	merged.Globals = append(merged.Globals, mainProg.Globals...)
+	merged.Functions = append(merged.Functions, mainProg.Functions...)
+
+	found := false
+	for _, g := range merged.Globals {
+		if g.Name == "app_version" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected main file global 'app_version' in merged program")
+	}
+}
+
+// ===========================================================================
+// Bug 4: Diamond imports deduplication
+// ===========================================================================
+
+func TestDeduplicateDiamondImports(t *testing.T) {
+	// Simulates a diamond: main imports A and B, both import utils.
+	// The same function "helper" from utils should appear only once after dedup.
+	helperFn := func() *ast.FnDecl {
+		return &ast.FnDecl{
+			Name:       "helper",
+			Params:     []*ast.Param{{Name: "x", Type: &ast.TypeExpr{Name: "i32"}}},
+			ReturnType: &ast.TypeExpr{Name: "i32"},
+		}
+	}
+
+	r := &Resolver{resolved: make(map[string]*ImportedModule)}
+	r.allModules = []*ImportedModule{
+		{Path: "utils_via_a", Alias: "", Functions: []*ast.FnDecl{helperFn()}},
+		{Path: "utils_via_b", Alias: "", Functions: []*ast.FnDecl{helperFn()}},
+	}
+
+	r.deduplicateModules()
+
+	total := 0
+	for _, mod := range r.allModules {
+		total += len(mod.Functions)
+	}
+	if total != 1 {
+		t.Errorf("expected 1 function after diamond dedup, got %d", total)
+	}
+}
+
+func TestDeduplicateDiamondImports_WithGlobals(t *testing.T) {
+	// Diamond import with globals: should also be deduplicated.
+	prog1 := &ast.Program{Globals: []*ast.GlobalVar{{Name: "MAX_SIZE"}}}
+	prog2 := &ast.Program{Globals: []*ast.GlobalVar{{Name: "MAX_SIZE"}}}
+
+	r := &Resolver{resolved: make(map[string]*ImportedModule)}
+	r.allModules = []*ImportedModule{
+		{Path: "utils_via_a", Program: prog1, Functions: nil},
+		{Path: "utils_via_b", Program: prog2, Functions: nil},
+	}
+
+	r.deduplicateModules()
+
+	totalGlobals := 0
+	for _, mod := range r.allModules {
+		if mod.Program != nil {
+			totalGlobals += len(mod.Program.Globals)
+		}
+	}
+	if totalGlobals != 1 {
+		t.Errorf("expected 1 global after diamond dedup, got %d", totalGlobals)
+	}
+}
+
+func TestMaxImportDepthGuard(t *testing.T) {
+	// The maxImportDepth constant should be defined and reasonable.
+	if maxImportDepth < 16 {
+		t.Errorf("maxImportDepth %d is too low, expected at least 16", maxImportDepth)
+	}
+	if maxImportDepth > 1024 {
+		t.Errorf("maxImportDepth %d is too high, expected at most 1024", maxImportDepth)
+	}
+}

@@ -14,11 +14,15 @@ const (
 	precNone       = iota
 	precOr         // ||
 	precAnd        // &&
+	precBitOr      // |
+	precBitXor     // ^
+	precBitAnd     // &
 	precEquality   // == !=
 	precComparison // < > <= >=
+	precShift      // << >>
 	precAdditive   // + -
 	precMultiply   // * / %
-	precUnary      // ! - &
+	precUnary      // ! - & ~
 	precCall       // () . []
 )
 
@@ -644,6 +648,11 @@ func (p *Parser) parsePrefix() ast.Expr {
 		operand := p.parsePrecedence(precUnary)
 		return &ast.UnaryExpr{Op: tok.Value, Operand: operand, Pos: p.position(tok)}
 
+	case lexer.TILDE:
+		p.advance()
+		operand := p.parsePrecedence(precUnary)
+		return &ast.UnaryExpr{Op: tok.Value, Operand: operand, Pos: p.position(tok)}
+
 	case lexer.AMPERSAND:
 		p.advance()
 		operand := p.parsePrecedence(precUnary)
@@ -701,10 +710,18 @@ func infixPrecedence(typ string) int {
 		return precOr
 	case lexer.AND:
 		return precAnd
+	case lexer.PIPE:
+		return precBitOr
+	case lexer.CARET:
+		return precBitXor
+	case lexer.AMPERSAND:
+		return precBitAnd
 	case lexer.EQ, lexer.NEQ:
 		return precEquality
 	case lexer.LT, lexer.GT, lexer.LTE, lexer.GTE:
 		return precComparison
+	case lexer.SHL, lexer.SHR:
+		return precShift
 	case lexer.PLUS, lexer.MINUS:
 		return precAdditive
 	case lexer.STAR, lexer.SLASH, lexer.PERCENT:

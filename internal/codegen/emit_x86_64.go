@@ -351,6 +351,43 @@ func (e *x86_64Emitter) emitGASInstr(fn *IRFunc, instr IRInstr) {
 		e.emitGASBinOp(fn, instr, "orq")
 	case IRXor:
 		e.emitGASBinOp(fn, instr, "xorq")
+	case IRShl:
+		src1 := e.gasLoadToReg(fn, instr.Src1, "%r10")
+		if src1 != "%r10" {
+			w.WriteString(fmt.Sprintf("    movq %s, %%r10\n", src1))
+		}
+		if instr.Src2.Kind == OpImmediate {
+			w.WriteString(fmt.Sprintf("    shlq $%d, %%r10\n", instr.Src2.Imm))
+		} else {
+			src2 := e.gasLoadToReg(fn, instr.Src2, "%rcx")
+			if src2 != "%rcx" {
+				w.WriteString(fmt.Sprintf("    movq %s, %%rcx\n", src2))
+			}
+			w.WriteString("    shlq %cl, %r10\n")
+		}
+		e.gasStoreToOperand(fn, instr.Dst, "%r10")
+	case IRShr:
+		src1 := e.gasLoadToReg(fn, instr.Src1, "%r10")
+		if src1 != "%r10" {
+			w.WriteString(fmt.Sprintf("    movq %s, %%r10\n", src1))
+		}
+		if instr.Src2.Kind == OpImmediate {
+			w.WriteString(fmt.Sprintf("    sarq $%d, %%r10\n", instr.Src2.Imm))
+		} else {
+			src2 := e.gasLoadToReg(fn, instr.Src2, "%rcx")
+			if src2 != "%rcx" {
+				w.WriteString(fmt.Sprintf("    movq %s, %%rcx\n", src2))
+			}
+			w.WriteString("    sarq %cl, %r10\n")
+		}
+		e.gasStoreToOperand(fn, instr.Dst, "%r10")
+	case IRBitNot:
+		src := e.gasLoadToReg(fn, instr.Src1, "%r10")
+		if src != "%r10" {
+			w.WriteString(fmt.Sprintf("    movq %s, %%r10\n", src))
+		}
+		w.WriteString("    notq %r10\n")
+		e.gasStoreToOperand(fn, instr.Dst, "%r10")
 
 	case IRCmpEq:
 		e.emitGASCmp(fn, instr, "sete")
@@ -996,6 +1033,43 @@ func (e *x86_64Emitter) emitNASMInstr(fn *IRFunc, instr IRInstr) {
 		e.emitNASMBinOp(fn, instr, "or")
 	case IRXor:
 		e.emitNASMBinOp(fn, instr, "xor")
+	case IRShl:
+		src1 := e.nasmLoadToReg(fn, instr.Src1, "r10")
+		if src1 != "r10" {
+			w.WriteString(fmt.Sprintf("    mov r10, %s\n", src1))
+		}
+		if instr.Src2.Kind == OpImmediate {
+			w.WriteString(fmt.Sprintf("    shl r10, %d\n", instr.Src2.Imm))
+		} else {
+			src2 := e.nasmLoadToReg(fn, instr.Src2, "rcx")
+			if src2 != "rcx" {
+				w.WriteString(fmt.Sprintf("    mov rcx, %s\n", src2))
+			}
+			w.WriteString("    shl r10, cl\n")
+		}
+		e.nasmStoreToOperand(fn, instr.Dst, "r10")
+	case IRShr:
+		src1 := e.nasmLoadToReg(fn, instr.Src1, "r10")
+		if src1 != "r10" {
+			w.WriteString(fmt.Sprintf("    mov r10, %s\n", src1))
+		}
+		if instr.Src2.Kind == OpImmediate {
+			w.WriteString(fmt.Sprintf("    sar r10, %d\n", instr.Src2.Imm))
+		} else {
+			src2 := e.nasmLoadToReg(fn, instr.Src2, "rcx")
+			if src2 != "rcx" {
+				w.WriteString(fmt.Sprintf("    mov rcx, %s\n", src2))
+			}
+			w.WriteString("    sar r10, cl\n")
+		}
+		e.nasmStoreToOperand(fn, instr.Dst, "r10")
+	case IRBitNot:
+		src := e.nasmLoadToReg(fn, instr.Src1, "r10")
+		if src != "r10" {
+			w.WriteString(fmt.Sprintf("    mov r10, %s\n", src))
+		}
+		w.WriteString("    not r10\n")
+		e.nasmStoreToOperand(fn, instr.Dst, "r10")
 
 	case IRCmpEq:
 		e.emitNASMCmp(fn, instr, "sete")
