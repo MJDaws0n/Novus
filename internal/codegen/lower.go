@@ -43,6 +43,16 @@ type Lowerer struct {
 	// Global variables: maps variable name to its global label.
 	globals     map[string]string // name → assembly label
 	globalTypes map[string]string // name → type
+
+	// Function overload resolution: maps plain function name → mangled entries.
+	// Used as a fallback when ResolvedCallee is not set (e.g. calls inside imported function bodies).
+	funcOverloads map[string][]funcOverloadEntry
+}
+
+// funcOverloadEntry records a single overload variant of a function.
+type funcOverloadEntry struct {
+	mangledName string
+	paramCount  int
 }
 
 // Lower translates an AST Program into an IRModule for the given target.
@@ -60,13 +70,27 @@ func Lower(program *ast.Program, target *Target) *IRModule {
 		}
 	}
 
+	// Build overload resolution map: plain name → list of (mangledName, paramCount).
+	funcOverloads := map[string][]funcOverloadEntry{}
+	for _, fn := range program.Functions {
+		irName := fn.MangledName
+		if irName == "" {
+			irName = fn.Name
+		}
+		funcOverloads[fn.Name] = append(funcOverloads[fn.Name], funcOverloadEntry{
+			mangledName: irName,
+			paramCount:  len(fn.Params),
+		})
+	}
+
 	l := &Lowerer{
-		module:       &IRModule{EntryFunc: "main"},
-		target:       target,
-		physRegs:     makePhysRegSet(),
-		funcRetTypes: funcRetTypes,
-		globals:      map[string]string{},
-		globalTypes:  map[string]string{},
+		module:        &IRModule{EntryFunc: "main"},
+		target:        target,
+		physRegs:      makePhysRegSet(),
+		funcRetTypes:  funcRetTypes,
+		globals:       map[string]string{},
+		globalTypes:   map[string]string{},
+		funcOverloads: funcOverloads,
 	}
 
 	// Process global variables.
@@ -142,6 +166,10 @@ func makePhysRegSet() map[string]bool {
 		"w28": true, "w29": true, "w30": true,
 		// ARM64 special registers
 		"sp": true, "xzr": true, "wzr": true, "lr": true,
+
+		// ARM64 / x86 flag names (for getflag / setflag builtins)
+		"carry": true, "zero_flag": true, "negative_flag": true, "overflow_flag": true,
+		"nzcv": true, "cf": true,
 	}
 	return regs
 }
@@ -642,6 +670,8 @@ func (l *Lowerer) lowerUnaryExpr(e *ast.UnaryExpr) Operand {
 		l.emit(IRInstr{Op: IRNeg, Dst: VReg(dst), Src1: operand})
 	case "!":
 		l.emit(IRInstr{Op: IRNot, Dst: VReg(dst), Src1: operand})
+	case "~":
+		l.emit(IRInstr{Op: IRBitNot, Dst: VReg(dst), Src1: operand})
 	default:
 		return operand
 	}
@@ -757,6 +787,16 @@ func (l *Lowerer) lowerBinaryExpr(e *ast.BinaryExpr) Operand {
 		op = IRAnd
 	case "||":
 		op = IROr
+	case "&":
+		op = IRAnd
+	case "|":
+		op = IROr
+	case "^":
+		op = IRXor
+	case "<<":
+		op = IRShl
+	case ">>":
+		op = IRShr
 	default:
 		return left
 	}
@@ -791,6 +831,20 @@ func (l *Lowerer) lowerCallExpr(e *ast.CallExpr) Operand {
 	resolvedName := calleeName
 	if e.ResolvedCallee != "" {
 		resolvedName = e.ResolvedCallee
+	} else if entries, ok := l.funcOverloads[calleeName]; ok {
+		// Fallback: resolve overloaded functions when ResolvedCallee is not set
+		// (e.g. calls inside imported function bodies that weren't semantically analyzed).
+		if len(entries) == 1 {
+			resolvedName = entries[0].mangledName
+		} else if len(entries) > 1 {
+			// Multiple overloads — match by argument count.
+			for _, entry := range entries {
+				if entry.paramCount == len(e.Args) {
+					resolvedName = entry.mangledName
+					break
+				}
+			}
+		}
 	}
 
 	// Regular function call — lower arguments, emit call.

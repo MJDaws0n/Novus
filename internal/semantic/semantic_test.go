@@ -940,6 +940,171 @@ fn main() -> i32 {
 // Duplicate imported functions (should be allowed when identical)
 // ---------------------------------------------------------------------------
 
+// ===========================================================================
+// Bug 3: Main module globals accessible inside functions
+// ===========================================================================
+
+func TestValidGlobalAccessedInFunction(t *testing.T) {
+	// A global variable declared at module top level should be accessible
+	// from functions in the same file.
+	src := `module test;
+let version: i32 = 42;
+fn main() -> i32 { return version; }`
+	diags := analyze(t, src)
+	expectErrors(t, diags, 0)
+}
+
+func TestValidGlobalStringAccessedInFunction(t *testing.T) {
+	src := `module test;
+let greeting: str = "hello";
+fn greet() -> str { return greeting; }`
+	diags := analyze(t, src)
+	expectErrors(t, diags, 0)
+}
+
+func TestValidMultipleGlobals(t *testing.T) {
+	src := `module test;
+let width: i32 = 800;
+let height: i32 = 600;
+fn area() -> i32 { return width * height; }`
+	diags := analyze(t, src)
+	expectErrors(t, diags, 0)
+}
+
+// ===========================================================================
+// Bug 5: getflag(carry) semantic analysis
+// ===========================================================================
+
+func TestGetFlagCarryAccepted(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	syscall();
+	let ok: bool = getflag(carry);
+	return 0;
+}`
+	diags := analyze(t, src)
+	expectErrors(t, diags, 0)
+}
+
+func TestGetFlagZeroAccepted(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let zf: bool = getflag(zero_flag);
+	return 0;
+}`
+	diags := analyze(t, src)
+	expectErrors(t, diags, 0)
+}
+
+func TestGetFlagNegativeAccepted(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let nf: bool = getflag(negative_flag);
+	return 0;
+}`
+	diags := analyze(t, src)
+	expectErrors(t, diags, 0)
+}
+
+func TestGetFlagOverflowAccepted(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let of: bool = getflag(overflow_flag);
+	return 0;
+}`
+	diags := analyze(t, src)
+	expectErrors(t, diags, 0)
+}
+
+// ===========================================================================
+// Bug 6: Bitwise operators semantic analysis
+// ===========================================================================
+
+func TestValidBitwiseAnd(t *testing.T) {
+	src := "fn main() -> i32 { let x: i32 = 0xFF & 0x0F; return x; }"
+	diags := analyze(t, src)
+	expectErrors(t, diags, 0)
+}
+
+func TestValidBitwiseOr(t *testing.T) {
+	src := "fn main() -> i32 { let x: i32 = 0x80 | 0x01; return x; }"
+	diags := analyze(t, src)
+	expectErrors(t, diags, 0)
+}
+
+func TestValidBitwiseXor(t *testing.T) {
+	src := "fn main() -> i32 { let x: i32 = 0xFF ^ 0x0F; return x; }"
+	diags := analyze(t, src)
+	expectErrors(t, diags, 0)
+}
+
+func TestValidBitwiseNot(t *testing.T) {
+	src := "fn main() -> i32 { let x: i32 = ~0xFF; return x; }"
+	diags := analyze(t, src)
+	expectErrors(t, diags, 0)
+}
+
+func TestValidShiftLeft(t *testing.T) {
+	src := "fn main() -> i32 { let x: i32 = 1 << 4; return x; }"
+	diags := analyze(t, src)
+	expectErrors(t, diags, 0)
+}
+
+func TestValidShiftRight(t *testing.T) {
+	src := "fn main() -> i32 { let x: i32 = 256 >> 4; return x; }"
+	diags := analyze(t, src)
+	expectErrors(t, diags, 0)
+}
+
+func TestBitwiseAndRequiresNumeric(t *testing.T) {
+	src := "fn f() -> void { let x: i32 = true & 1; }"
+	diags := analyze(t, src)
+	expectErrors(t, diags, 1)
+	expectErrorContains(t, diags, "numeric operands")
+}
+
+func TestBitwiseOrRequiresNumeric(t *testing.T) {
+	src := "fn f() -> void { let x: i32 = true | 1; }"
+	diags := analyze(t, src)
+	expectErrors(t, diags, 1)
+	expectErrorContains(t, diags, "numeric operands")
+}
+
+func TestBitwiseXorRequiresNumeric(t *testing.T) {
+	src := "fn f() -> void { let x: i32 = true ^ 1; }"
+	diags := analyze(t, src)
+	expectErrors(t, diags, 1)
+	expectErrorContains(t, diags, "numeric operands")
+}
+
+func TestBitwiseNotRequiresNumeric(t *testing.T) {
+	src := "fn f() -> void { let x: bool = ~true; }"
+	diags := analyze(t, src)
+	expectErrors(t, diags, 1)
+	expectErrorContains(t, diags, "requires numeric operand")
+}
+
+func TestShiftRequiresNumeric(t *testing.T) {
+	src := "fn f() -> void { let x: i32 = true << 1; }"
+	diags := analyze(t, src)
+	expectErrors(t, diags, 1)
+	expectErrorContains(t, diags, "numeric operands")
+}
+
+func TestBitwiseOpsWithVariables(t *testing.T) {
+	src := `fn mask(val: i32, m: i32) -> i32 {
+		let result: i32 = val & m;
+		result = result | 0x80;
+		result = result ^ 0x01;
+		result = result << 2;
+		result = result >> 1;
+		result = ~result;
+		return result;
+	}`
+	diags := analyze(t, src)
+	expectErrors(t, diags, 0)
+}
+
 func TestDuplicateImportedFunctions_SameSignature(t *testing.T) {
 	// Two imported functions with the same name and signature should not error.
 	src := "fn main() -> void { let x: i32 = helper(1); }"

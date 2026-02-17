@@ -182,6 +182,33 @@ func (e *x86Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		e.emitBinOp(instr, "orl")
 	case IRXor:
 		e.emitBinOp(instr, "xorl")
+	case IRShl:
+		src1 := e.operand(instr.Src1)
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl %s, %s\n", src1, dst))
+		if instr.Src2.Kind == OpImmediate {
+			w.WriteString(fmt.Sprintf("    shll $%d, %s\n", instr.Src2.Imm, dst))
+		} else {
+			src2 := e.operand(instr.Src2)
+			w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", src2))
+			w.WriteString(fmt.Sprintf("    shll %%cl, %s\n", dst))
+		}
+	case IRShr:
+		src1 := e.operand(instr.Src1)
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl %s, %s\n", src1, dst))
+		if instr.Src2.Kind == OpImmediate {
+			w.WriteString(fmt.Sprintf("    sarl $%d, %s\n", instr.Src2.Imm, dst))
+		} else {
+			src2 := e.operand(instr.Src2)
+			w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", src2))
+			w.WriteString(fmt.Sprintf("    sarl %%cl, %s\n", dst))
+		}
+	case IRBitNot:
+		src := e.operand(instr.Src1)
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl %s, %s\n", src, dst))
+		w.WriteString(fmt.Sprintf("    notl %s\n", dst))
 
 	case IRCmpEq:
 		e.emitCmp(instr, "sete")

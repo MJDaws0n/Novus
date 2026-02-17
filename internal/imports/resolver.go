@@ -48,7 +48,13 @@ type ImportedModule struct {
 //   - Transitive imports (imported files can import other files)
 //   - Selective imports
 //   - Alias merging (same alias from different imports OK if no overlap)
+//
+// A maximum import depth guard prevents runaway recursion or OOM when the
+// same module is reachable through many different import paths (diamond
+// imports).
 // ---------------------------------------------------------------------------
+
+const maxImportDepth = 64
 
 type Resolver struct {
 	// BaseDir is the directory of the root source file.
@@ -71,6 +77,10 @@ type Resolver struct {
 // NewResolver creates a new import resolver rooted at the given source file path.
 func NewResolver(sourceFilePath string) *Resolver {
 	absPath, _ := filepath.Abs(sourceFilePath)
+	// Resolve symlinks to ensure consistent deduplication.
+	if evaled, err := filepath.EvalSymlinks(absPath); err == nil {
+		absPath = evaled
+	}
 	return &Resolver{
 		BaseDir:  filepath.Dir(absPath),
 		resolved: make(map[string]*ImportedModule),
@@ -121,6 +131,9 @@ func (r *Resolver) Resolve(prog *ast.Program, sourceFile string) (*ast.Program, 
 		}
 	}
 
+	// Add the original file's globals.
+	merged.Globals = append(merged.Globals, prog.Globals...)
+
 	// Add the original file's functions.
 	merged.Functions = append(merged.Functions, prog.Functions...)
 
@@ -141,6 +154,11 @@ func (r *Resolver) resolveImport(imp *ast.ImportDecl, baseDir string, importerFi
 		r.addError(imp.Pos, importerFile, fmt.Sprintf("cannot resolve import path %q: %v", imp.Path, err))
 		return
 	}
+	// Resolve symlinks so that the same file accessed via different relative
+	// paths is correctly deduplicated (fixes diamond-import OOM).
+	if evaled, err2 := filepath.EvalSymlinks(absPath); err2 == nil {
+		absPath = evaled
+	}
 
 	// Check file exists.
 	if _, err := os.Stat(absPath); os.IsNotExist(err) {
@@ -155,6 +173,12 @@ func (r *Resolver) resolveImport(imp *ast.ImportDecl, baseDir string, importerFi
 			r.addError(imp.Pos, importerFile, fmt.Sprintf("circular import detected: %s", strings.Join(chain, " → ")))
 			return
 		}
+	}
+
+	// Guard against runaway import depth (diamond/fan-out graphs).
+	if len(r.importStack) >= maxImportDepth {
+		r.addError(imp.Pos, importerFile, fmt.Sprintf("import depth limit (%d) exceeded — possible diamond or recursive import", maxImportDepth))
+		return
 	}
 
 	// Check for duplicate file import.

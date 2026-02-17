@@ -101,10 +101,13 @@ const (
 	IRNeg // dst = -src1
 
 	// Logic / bitwise
-	IRAnd // dst = src1 & src2
-	IROr  // dst = src1 | src2
-	IRXor // dst = src1 ^ src2
-	IRNot // dst = !src1 (logical not)
+	IRAnd    // dst = src1 & src2
+	IROr     // dst = src1 | src2
+	IRXor    // dst = src1 ^ src2
+	IRNot    // dst = !src1 (logical not)
+	IRShl    // dst = src1 << src2
+	IRShr    // dst = src1 >> src2 (arithmetic shift right)
+	IRBitNot // dst = ~src1 (bitwise NOT / ones' complement)
 
 	// Comparison — sets dst to 0 or 1
 	IRCmpEq // dst = (src1 == src2)
@@ -172,6 +175,7 @@ var irOpNames = map[IROp]string{
 	IRPush: "push", IRPop: "pop",
 	IRAdd: "add", IRSub: "sub", IRMul: "mul", IRDiv: "div", IRMod: "mod", IRNeg: "neg",
 	IRAnd: "and", IROr: "or", IRXor: "xor", IRNot: "not",
+	IRShl: "shl", IRShr: "shr", IRBitNot: "bitnot",
 	IRCmpEq: "cmp_eq", IRCmpNe: "cmp_ne", IRCmpLt: "cmp_lt", IRCmpLe: "cmp_le",
 	IRCmpGt: "cmp_gt", IRCmpGe: "cmp_ge",
 	IRJmp: "jmp", IRJmpIf: "jmp_if", IRJmpNot: "jmp_not",

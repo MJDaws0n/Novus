@@ -461,6 +461,10 @@ var reservedRegisters = []string{
 	"w24", "w25", "w26", "w27", "w28", "w29", "w30",
 	// ARM64 special registers
 	"sp", "xzr", "wzr", "lr",
+
+	// ARM64 / x86 flag names (for getflag / setflag builtins)
+	"carry", "zero_flag", "negative_flag", "overflow_flag",
+	"nzcv", "cf",
 }
 
 // ---------------------------------------------------------------------------
@@ -1134,6 +1138,12 @@ func (a *Analyzer) analyzeUnaryExpr(e *ast.UnaryExpr) *Type {
 			return nil
 		}
 		return operandType
+	case "~":
+		if !isNumeric(operandType) {
+			a.error(e.Pos, fmt.Sprintf("operator '~' requires numeric operand, got %s", operandType.Name))
+			return nil
+		}
+		return operandType
 	}
 
 	return nil
@@ -1202,6 +1212,18 @@ func (a *Analyzer) analyzeBinaryExpr(e *ast.BinaryExpr) *Type {
 			a.error(e.Pos, fmt.Sprintf("operator %q requires bool operands, got %s", e.Op, rightType.Name))
 		}
 		return TypeBool
+
+	case "&", "|", "^", "<<", ">>":
+		if !isNumeric(leftType) || !isNumeric(rightType) {
+			a.error(e.Pos, fmt.Sprintf("operator %q requires numeric operands, got %s and %s", e.Op, leftType.Name, rightType.Name))
+			return nil
+		}
+		resolved := resolveNumericPair(leftType, rightType)
+		if resolved == nil {
+			a.error(e.Pos, fmt.Sprintf("mismatched types for %q: %s and %s", e.Op, leftType.Name, rightType.Name))
+			return nil
+		}
+		return resolved
 	}
 
 	return nil

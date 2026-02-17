@@ -584,3 +584,117 @@ func TestExampleNovFile(t *testing.T) {
 		t.Error("did not find RETURN keyword")
 	}
 }
+
+// ===========================================================================
+// Bug 6: Bitwise operator tokens
+// ===========================================================================
+
+func TestBitwiseOperatorTokens(t *testing.T) {
+	tokens, errs := Lex("a | b ^ c ~ d")
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	expected := []struct {
+		typ string
+		val string
+	}{
+		{IDENT, "a"},
+		{PIPE, "|"},
+		{IDENT, "b"},
+		{CARET, "^"},
+		{IDENT, "c"},
+		{TILDE, "~"},
+		{IDENT, "d"},
+		{EOF, ""},
+	}
+	if len(tokens) != len(expected) {
+		t.Fatalf("token count: got %d, want %d", len(tokens), len(expected))
+	}
+	for i, exp := range expected {
+		if tokens[i].Type != exp.typ || tokens[i].Value != exp.val {
+			t.Errorf("token[%d]: got (%s, %q), want (%s, %q)",
+				i, tokens[i].Type, tokens[i].Value, exp.typ, exp.val)
+		}
+	}
+}
+
+func TestShiftOperatorTokens(t *testing.T) {
+	tokens, errs := Lex("x << 4 >> 1")
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	expected := []struct {
+		typ string
+		val string
+	}{
+		{IDENT, "x"},
+		{SHL, "<<"},
+		{INT, "4"},
+		{SHR, ">>"},
+		{INT, "1"},
+		{EOF, ""},
+	}
+	if len(tokens) != len(expected) {
+		t.Fatalf("token count: got %d, want %d", len(tokens), len(expected))
+	}
+	for i, exp := range expected {
+		if tokens[i].Type != exp.typ || tokens[i].Value != exp.val {
+			t.Errorf("token[%d]: got (%s, %q), want (%s, %q)",
+				i, tokens[i].Type, tokens[i].Value, exp.typ, exp.val)
+		}
+	}
+}
+
+func TestShiftVsComparison(t *testing.T) {
+	// Ensure << and >> don't break < and > comparison operators.
+	tokens, errs := Lex("a < b > c << d >> e <= f >= g")
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	types := tokenTypes(tokens)
+	expectedTypes := []string{IDENT, LT, IDENT, GT, IDENT, SHL, IDENT, SHR, IDENT, LTE, IDENT, GTE, IDENT, EOF}
+	if len(types) != len(expectedTypes) {
+		t.Fatalf("token count: got %d, want %d\ngot:  %v\nwant: %v", len(types), len(expectedTypes), types, expectedTypes)
+	}
+	for i, exp := range expectedTypes {
+		if types[i] != exp {
+			t.Errorf("token[%d] type: got %s, want %s", i, types[i], exp)
+		}
+	}
+}
+
+func TestPipeVsLogicalOr(t *testing.T) {
+	// Ensure single | doesn't break || (logical or).
+	tokens, errs := Lex("a | b || c")
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	types := tokenTypes(tokens)
+	expectedTypes := []string{IDENT, PIPE, IDENT, OR, IDENT, EOF}
+	if len(types) != len(expectedTypes) {
+		t.Fatalf("token count: got %d, want %d\ngot:  %v\nwant: %v", len(types), len(expectedTypes), types, expectedTypes)
+	}
+	for i, exp := range expectedTypes {
+		if types[i] != exp {
+			t.Errorf("token[%d] type: got %s, want %s", i, types[i], exp)
+		}
+	}
+}
+
+func TestAmpersandVsLogicalAnd(t *testing.T) {
+	// Single & (bitwise AND) vs && (logical AND).
+	tokens, errs := Lex("a & b && c")
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	types := tokenTypes(tokens)
+	expectedTypes := []string{IDENT, AMPERSAND, IDENT, AND, IDENT, EOF}
+	if len(types) != len(expectedTypes) {
+		t.Fatalf("token count: got %d, want %d\ngot:  %v\nwant: %v", len(types), len(expectedTypes), types, expectedTypes)
+	}
+	for i, exp := range expectedTypes {
+		if types[i] != exp {
+			t.Errorf("token[%d] type: got %s, want %s", i, types[i], exp)
+		}
+	}
+}

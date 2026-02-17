@@ -328,6 +328,16 @@ func (e *arm64Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		e.emitBinOp(fn, instr, "orr")
 	case IRXor:
 		e.emitBinOp(fn, instr, "eor")
+	case IRShl:
+		e.emitBinOp(fn, instr, "lsl")
+	case IRShr:
+		e.emitBinOp(fn, instr, "asr")
+
+	case IRBitNot:
+		dst := e.dstReg(fn, instr.Dst, "x10")
+		src := e.loadToReg(fn, instr.Src1, "x11")
+		w.WriteString(fmt.Sprintf("    mvn %s, %s\n", dst, src))
+		e.spillIfNeeded(fn, instr.Dst, dst)
 
 	case IRCmpEq:
 		e.emitCmp(fn, instr, "eq")
@@ -404,7 +414,7 @@ func (e *arm64Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		e.spillIfNeeded(fn, instr.Dst, dst)
 
 	case IRSetFlag, IRGetFlag:
-		w.WriteString("    // flag manipulation (not yet implemented on ARM64)\n")
+		e.emitFlagOp(fn, instr)
 
 	case IRStrLen:
 		e.emitStrLen(fn, instr)
@@ -995,6 +1005,68 @@ func (e *arm64Emitter) emitSPAdj(mnemonic string, size int) {
 		e.loadImm("x17", int64(size))
 		w.WriteString(fmt.Sprintf("    %s sp, sp, x17\n", mnemonic))
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Flag operations (ARM64) — getflag / setflag
+//
+// On macOS ARM64, after a syscall (svc #0x80), the carry flag (C) in NZCV
+// indicates whether an error occurred:  C=1 → x0 is errno, C=0 → success.
+//
+// Supported flag names: c/carry/cs/cf (carry), z/zero (zero),
+// n/negative (negative), v/overflow (overflow).
+// ---------------------------------------------------------------------------
+
+func (e *arm64Emitter) emitFlagOp(fn *IRFunc, instr IRInstr) {
+	w := e.b
+
+	// Determine the flag name from the operand.
+	flagName := ""
+	if instr.Op == IRGetFlag {
+		if instr.Src1.Kind == OpPhysReg {
+			flagName = instr.Src1.PhysReg
+		} else if instr.Src1.Kind == OpLabel {
+			flagName = instr.Src1.Label
+		}
+	} else { // IRSetFlag
+		if instr.Dst.Kind == OpPhysReg {
+			flagName = instr.Dst.PhysReg
+		} else if instr.Dst.Kind == OpLabel {
+			flagName = instr.Dst.Label
+		}
+	}
+
+	if instr.Op == IRGetFlag {
+		dst := e.dstReg(fn, instr.Dst, "x10")
+		// Map flag name to ARM64 condition code for cset.
+		cond := flagNameToCondition(flagName)
+		if cond != "" {
+			w.WriteString(fmt.Sprintf("    cset %s, %s\n", dst, cond))
+		} else {
+			w.WriteString(fmt.Sprintf("    // getflag: unrecognised flag %q\n", flagName))
+			w.WriteString(fmt.Sprintf("    mov %s, #0\n", dst))
+		}
+		e.spillIfNeeded(fn, instr.Dst, dst)
+	} else {
+		// setflag — limited support. For carry, use `adds xzr, ...` trick.
+		w.WriteString(fmt.Sprintf("    // setflag %q not directly supported on ARM64\n", flagName))
+	}
+}
+
+// flagNameToCondition maps Novus flag names to ARM64 condition suffixes
+// usable with cset. The condition is TRUE when the flag IS set.
+func flagNameToCondition(name string) string {
+	switch name {
+	case "c", "carry", "cs", "cf":
+		return "cs" // carry set
+	case "z", "zero", "zero_flag":
+		return "eq" // zero flag set (Z=1 → eq)
+	case "n", "negative", "negative_flag":
+		return "mi" // negative (N=1 → mi)
+	case "v", "overflow", "overflow_flag":
+		return "vs" // overflow set (V=1 → vs)
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------

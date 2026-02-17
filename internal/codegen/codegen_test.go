@@ -872,3 +872,439 @@ func TestEmitX86_64GAS_MultipleStrings(t *testing.T) {
 		t.Error("expected string 'bar' in data section")
 	}
 }
+
+// ===========================================================================
+// Bug 1: Overloaded function call resolution
+// ===========================================================================
+
+func TestLowerOverloadedFunctionCall(t *testing.T) {
+	// Two functions with the same name but different param counts/types.
+	// The lowerer should resolve the call based on argument count.
+	src := `module test;
+	fn convert(x: i32) -> i32 { return x; }
+	fn convert(x: i64, y: i64) -> i64 { return x + y; }
+	fn main() -> i32 { return convert(42); }`
+	prog := mustParse(t, src)
+	mod := Lower(prog, linuxAMD64Target())
+
+	// Find the call instruction in main.
+	mainFn := mod.Functions[2] // main is the third function
+	hasCall := false
+	for _, instr := range mainFn.Instrs {
+		if instr.Op == IRCall {
+			hasCall = true
+			// The label should be mangled to the correct overload.
+			// The call with 1 arg should resolve to convert(i32).
+			if instr.Src1.Label == "" {
+				t.Fatal("expected non-empty label for overloaded call")
+			}
+		}
+	}
+	if !hasCall {
+		t.Fatal("expected IRCall instruction for overloaded function")
+	}
+}
+
+func TestLowerOverloadedFunctionCall_TwoArg(t *testing.T) {
+	// Call the two-argument overload.
+	src := `module test;
+	fn convert(x: i32) -> i32 { return x; }
+	fn convert(x: i64, y: i64) -> i64 { return x + y; }
+	fn main() -> i64 { return convert(1, 2); }`
+	prog := mustParse(t, src)
+	mod := Lower(prog, linuxAMD64Target())
+
+	mainFn := mod.Functions[2]
+	hasCall := false
+	for _, instr := range mainFn.Instrs {
+		if instr.Op == IRCall {
+			hasCall = true
+			if len(instr.Args) != 2 {
+				t.Fatalf("expected 2 call args for two-arg overload, got %d", len(instr.Args))
+			}
+		}
+	}
+	if !hasCall {
+		t.Fatal("expected IRCall instruction for two-arg overloaded function")
+	}
+}
+
+// ===========================================================================
+// Bug 3: Main module globals accessible in functions
+// ===========================================================================
+
+func TestLowerMainModuleGlobalInFunction(t *testing.T) {
+	// A top-level global should be accessible inside fn main().
+	src := `module test;
+	let version: i32 = 42;
+	fn main() -> i32 { return version; }`
+	prog := mustParse(t, src)
+	mod := Lower(prog, linuxAMD64Target())
+
+	// The global should be in the module's Globals list (with _g_ prefix).
+	foundGlobal := false
+	for _, g := range mod.Globals {
+		if g.Name == "_g_version" {
+			foundGlobal = true
+			if g.InitImm != 42 {
+				t.Errorf("expected global init value 42, got %d", g.InitImm)
+			}
+		}
+	}
+	if !foundGlobal {
+		t.Fatal("expected global '_g_version' in module globals")
+	}
+
+	// main should reference the global via IRLoadGlobal.
+	mainFn := mod.Functions[0]
+	hasGlobalLoad := false
+	for _, instr := range mainFn.Instrs {
+		if instr.Op == IRLoadGlobal {
+			hasGlobalLoad = true
+		}
+	}
+	if !hasGlobalLoad {
+		t.Log("IR dump:", mod.DebugDump())
+		t.Fatal("expected IRLoadGlobal instruction in main for global variable access")
+	}
+}
+
+// ===========================================================================
+// Bug 5: ARM64 getflag(carry) generates cset instruction
+// ===========================================================================
+
+func TestEmitARM64_GetFlagCarry(t *testing.T) {
+	// getflag(carry) should emit a cset instruction with "cs" condition.
+	src := `module test; fn main() -> i32 {
+		syscall();
+		let ok: bool = getflag(carry);
+		return 0;
+	}`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	if !strings.Contains(asm, "cset") {
+		t.Error("expected cset instruction for getflag(carry)")
+	}
+	if !strings.Contains(asm, "cs") {
+		t.Error("expected 'cs' condition code for carry flag")
+	}
+}
+
+func TestEmitARM64_GetFlagZero(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let zf: bool = getflag(zero_flag);
+		return 0;
+	}`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	if !strings.Contains(asm, "cset") {
+		t.Error("expected cset instruction for getflag(zero_flag)")
+	}
+}
+
+func TestEmitARM64_GetFlagNegative(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let nf: bool = getflag(negative_flag);
+		return 0;
+	}`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	if !strings.Contains(asm, "cset") {
+		t.Error("expected cset instruction for getflag(negative_flag)")
+	}
+	if !strings.Contains(asm, "mi") {
+		t.Error("expected 'mi' condition code for negative flag")
+	}
+}
+
+func TestEmitARM64_GetFlagOverflow(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let of: bool = getflag(overflow_flag);
+		return 0;
+	}`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	if !strings.Contains(asm, "cset") {
+		t.Error("expected cset instruction for getflag(overflow_flag)")
+	}
+	if !strings.Contains(asm, "vs") {
+		t.Error("expected 'vs' condition code for overflow flag")
+	}
+}
+
+// ===========================================================================
+// Bug 6: Bitwise operations — IR lowering
+// ===========================================================================
+
+func TestLowerBitwiseAnd(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let a: i32 = 0xFF;
+		let b: i32 = 0x0F;
+		let result: i32 = a & b;
+		return result;
+	}`
+	prog := mustParse(t, src)
+	mod := Lower(prog, linuxAMD64Target())
+	fn := mod.Functions[0]
+
+	hasAnd := false
+	for _, instr := range fn.Instrs {
+		if instr.Op == IRAnd {
+			hasAnd = true
+		}
+	}
+	if !hasAnd {
+		t.Fatal("expected IRAnd instruction for a & b")
+	}
+}
+
+func TestLowerBitwiseOr(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let a: i32 = 0x80;
+		let b: i32 = 0x01;
+		let result: i32 = a | b;
+		return result;
+	}`
+	prog := mustParse(t, src)
+	mod := Lower(prog, linuxAMD64Target())
+	fn := mod.Functions[0]
+
+	hasOr := false
+	for _, instr := range fn.Instrs {
+		if instr.Op == IROr {
+			hasOr = true
+		}
+	}
+	if !hasOr {
+		t.Fatal("expected IROr instruction for a | b")
+	}
+}
+
+func TestLowerBitwiseXor(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let a: i32 = 0xFF;
+		let b: i32 = 0x0F;
+		let result: i32 = a ^ b;
+		return result;
+	}`
+	prog := mustParse(t, src)
+	mod := Lower(prog, linuxAMD64Target())
+	fn := mod.Functions[0]
+
+	hasXor := false
+	for _, instr := range fn.Instrs {
+		if instr.Op == IRXor {
+			hasXor = true
+		}
+	}
+	if !hasXor {
+		t.Fatal("expected IRXor instruction for a ^ b")
+	}
+}
+
+func TestLowerBitwiseShiftLeft(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let a: i32 = 1;
+		let result: i32 = a << 4;
+		return result;
+	}`
+	prog := mustParse(t, src)
+	mod := Lower(prog, linuxAMD64Target())
+	fn := mod.Functions[0]
+
+	hasShl := false
+	for _, instr := range fn.Instrs {
+		if instr.Op == IRShl {
+			hasShl = true
+		}
+	}
+	if !hasShl {
+		t.Fatal("expected IRShl instruction for a << 4")
+	}
+}
+
+func TestLowerBitwiseShiftRight(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let a: i32 = 256;
+		let result: i32 = a >> 4;
+		return result;
+	}`
+	prog := mustParse(t, src)
+	mod := Lower(prog, linuxAMD64Target())
+	fn := mod.Functions[0]
+
+	hasShr := false
+	for _, instr := range fn.Instrs {
+		if instr.Op == IRShr {
+			hasShr = true
+		}
+	}
+	if !hasShr {
+		t.Fatal("expected IRShr instruction for a >> 4")
+	}
+}
+
+func TestLowerBitwiseNot(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let a: i32 = 0xFF;
+		let result: i32 = ~a;
+		return result;
+	}`
+	prog := mustParse(t, src)
+	mod := Lower(prog, linuxAMD64Target())
+	fn := mod.Functions[0]
+
+	hasBitNot := false
+	for _, instr := range fn.Instrs {
+		if instr.Op == IRBitNot {
+			hasBitNot = true
+		}
+	}
+	if !hasBitNot {
+		t.Fatal("expected IRBitNot instruction for ~a")
+	}
+}
+
+// ===========================================================================
+// Bug 6: Bitwise operations — x86-64 assembly emission
+// ===========================================================================
+
+func TestEmitX86_64_BitwiseShiftLeft(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let a: i32 = 1;
+		let result: i32 = a << 4;
+		return result;
+	}`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "shlq") {
+		t.Error("expected shlq instruction for shift left in x86-64 GAS output")
+	}
+}
+
+func TestEmitX86_64_BitwiseShiftRight(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let a: i32 = 256;
+		let result: i32 = a >> 4;
+		return result;
+	}`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "sarq") {
+		t.Error("expected sarq instruction for shift right in x86-64 GAS output")
+	}
+}
+
+func TestEmitX86_64_BitwiseNot(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let a: i32 = 0xFF;
+		let result: i32 = ~a;
+		return result;
+	}`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "notq") {
+		t.Error("expected notq instruction for bitwise NOT in x86-64 GAS output")
+	}
+}
+
+func TestEmitARM64_BitwiseShiftLeft(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let a: i32 = 1;
+		let result: i32 = a << 4;
+		return result;
+	}`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	if !strings.Contains(asm, "lsl") {
+		t.Error("expected lsl instruction for shift left in ARM64 output")
+	}
+}
+
+func TestEmitARM64_BitwiseShiftRight(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let a: i32 = 256;
+		let result: i32 = a >> 4;
+		return result;
+	}`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	if !strings.Contains(asm, "asr") {
+		t.Error("expected asr instruction for shift right in ARM64 output")
+	}
+}
+
+func TestEmitARM64_BitwiseNot(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let a: i32 = 0xFF;
+		let result: i32 = ~a;
+		return result;
+	}`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	if !strings.Contains(asm, "mvn") {
+		t.Error("expected mvn instruction for bitwise NOT in ARM64 output")
+	}
+}
+
+func TestEmitNASM_BitwiseShiftLeft(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let a: i32 = 1;
+		let result: i32 = a << 4;
+		return result;
+	}`
+	prog := mustParse(t, src)
+	target := windowsAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "shl") {
+		t.Error("expected shl instruction for shift left in NASM output")
+	}
+}
+
+func TestEmitNASM_BitwiseNot(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let a: i32 = 0xFF;
+		let result: i32 = ~a;
+		return result;
+	}`
+	prog := mustParse(t, src)
+	target := windowsAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "not") {
+		t.Error("expected not instruction for bitwise NOT in NASM output")
+	}
+}
