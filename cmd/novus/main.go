@@ -129,6 +129,18 @@ func run() int {
 	if len(program.Imports) > 0 {
 		printDebug("Resolving imports...")
 		resolver := imports.NewResolver(filePath)
+
+		// Pass target info to the resolver so #if blocks in imported files
+		// are evaluated correctly (e.g. library loaders selecting platform code).
+		compTimeTarget := resolveTargetFromArgs()
+		if compTimeTarget == nil {
+			compTimeTarget, _ = codegen.HostTarget()
+		}
+		if compTimeTarget != nil {
+			resolver.TargetOS = compTimeTarget.OSName()
+			resolver.TargetArch = compTimeTarget.ArchName()
+		}
+
 		mergedProgram, resolveErrors := resolver.Resolve(program, filePath)
 		if len(resolveErrors) > 0 {
 			fmt.Println("Import errors:")

@@ -15,12 +15,14 @@ import (
 
 // Toolchain represents the external programs used to assemble and link.
 type Toolchain struct {
-	Target   *Target
-	BuildDir string
-	AsmFile  string // path to the assembly file
-	ObjFile  string // path to the object file
-	ExeFile  string // path to the final executable
-	Verbose  bool
+	Target     *Target
+	BuildDir   string
+	AsmFile    string // path to the assembly file
+	ObjFile    string // path to the object file
+	ExeFile    string // path to the final executable
+	Verbose    bool
+	NASMPath   string // custom NASM path (auto-downloaded on Windows)
+	GoLinkPath string // custom GoLink path (auto-downloaded on Windows)
 }
 
 // NewToolchain creates a Toolchain for the given target and build directory.
@@ -113,7 +115,12 @@ func (tc *Toolchain) assembleNASM() error {
 		fmtArg = "win64"
 	}
 
-	cmd := exec.Command("nasm", "-f", fmtArg, "-o", tc.ObjFile, tc.AsmFile)
+	nasmBin := "nasm"
+	if tc.NASMPath != "" {
+		nasmBin = tc.NASMPath
+	}
+
+	cmd := exec.Command(nasmBin, "-f", fmtArg, "-o", tc.ObjFile, tc.AsmFile)
 	return tc.runCmd(cmd, "assemble (nasm)")
 }
 
@@ -169,10 +176,15 @@ func (tc *Toolchain) linkLinux() error {
 
 func (tc *Toolchain) linkWindows() error {
 	// Try GoLink first (common in hobby compiler setups), then MSVC link.
-	// For NASM + GoLink: golink /entry main /console <obj> <dlls>
-	golink, err := exec.LookPath("golink")
-	if err == nil {
-		cmd := exec.Command(golink, "/entry", "main", "/console",
+	golinkBin := ""
+	if tc.GoLinkPath != "" {
+		golinkBin = tc.GoLinkPath
+	} else if p, err := exec.LookPath("golink"); err == nil {
+		golinkBin = p
+	}
+
+	if golinkBin != "" {
+		cmd := exec.Command(golinkBin, "/entry", "main", "/console",
 			tc.ObjFile,
 			"kernel32.dll", "user32.dll", "gdi32.dll", "msvcrt.dll")
 		return tc.runCmd(cmd, "link (golink)")
@@ -229,11 +241,20 @@ func findMacOSSDK() (string, error) {
 // DetectToolchain checks whether the required external tools are available
 // for the given target and returns a list of missing tools.
 func DetectToolchain(target *Target) []string {
+	return DetectToolchainWithPaths(target, "", "")
+}
+
+// DetectToolchainWithPaths checks for tools using custom paths for NASM/GoLink.
+func DetectToolchainWithPaths(target *Target, nasmPath, golinkPath string) []string {
 	var missing []string
 
 	switch {
 	case target.Flavor == NASM:
-		if _, err := exec.LookPath("nasm"); err != nil {
+		if nasmPath != "" {
+			if _, err := os.Stat(nasmPath); err != nil {
+				missing = append(missing, "nasm")
+			}
+		} else if _, err := exec.LookPath("nasm"); err != nil {
 			missing = append(missing, "nasm")
 		}
 	default:
@@ -255,12 +276,18 @@ func DetectToolchain(target *Target) []string {
 			missing = append(missing, "ld (linker)")
 		}
 	case OS_Windows:
-		// Check for any available linker.
 		hasLinker := false
-		for _, l := range []string{"golink", "link"} {
-			if _, err := exec.LookPath(l); err == nil {
+		if golinkPath != "" {
+			if _, err := os.Stat(golinkPath); err == nil {
 				hasLinker = true
-				break
+			}
+		}
+		if !hasLinker {
+			for _, l := range []string{"golink", "link"} {
+				if _, err := exec.LookPath(l); err == nil {
+					hasLinker = true
+					break
+				}
 			}
 		}
 		if !hasLinker {

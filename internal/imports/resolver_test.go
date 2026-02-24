@@ -550,3 +550,118 @@ func TestRelativeDotDotImport(t *testing.T) {
 		t.Error("expected imported function 'help' from ../lib/helper")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// #if blocks in imported files
+// ---------------------------------------------------------------------------
+
+func TestResolver_CompTimeIfInImportedFile(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a library file with #if blocks for platform selection.
+	libContent := `module mylib;
+
+#if(os == "darwin") {
+	fn platform_fn() -> str {
+		return "darwin";
+	}
+}
+
+#if(os == "windows") {
+	fn platform_fn() -> str {
+		return "windows";
+	}
+}
+
+fn common_fn() -> i32 {
+	return 42;
+}
+`
+	os.WriteFile(dir+"/mylib.nov", []byte(libContent), 0644)
+
+	// Create a main file that imports the library.
+	mainContent := `module main;
+import mylib;
+fn main() -> void {}
+`
+	mainFile := dir + "/main.nov"
+	os.WriteFile(mainFile, []byte(mainContent), 0644)
+
+	// Parse the main file.
+	mainSrc, _ := os.ReadFile(mainFile)
+	tokens, _ := lexer.Lex(string(mainSrc))
+	prog, _ := parser.Parse(tokens)
+
+	// Create resolver with target set to "darwin".
+	resolver := NewResolver(mainFile)
+	resolver.TargetOS = "darwin"
+	resolver.TargetArch = "arm64"
+
+	merged, errs := resolver.Resolve(prog, mainFile)
+	if len(errs) > 0 {
+		t.Fatalf("resolver errors: %v", errs)
+	}
+
+	// Should have common_fn + the darwin platform_fn, but NOT the windows one.
+	fnNames := map[string]bool{}
+	for _, fn := range merged.Functions {
+		fnNames[fn.Name] = true
+	}
+
+	if !fnNames["common_fn"] {
+		t.Error("expected common_fn to be imported")
+	}
+	if !fnNames["platform_fn"] {
+		t.Error("expected platform_fn (darwin variant) to be imported")
+	}
+
+	// Count how many platform_fn instances (should be 1, not 2).
+	count := 0
+	for _, fn := range merged.Functions {
+		if fn.Name == "platform_fn" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 platform_fn, got %d", count)
+	}
+}
+
+func TestResolver_ImportedFunctionsMarkedAsImported(t *testing.T) {
+	dir := t.TempDir()
+
+	libContent := `module mylib;
+fn helper() -> i32 { return 1; }
+`
+	os.WriteFile(dir+"/mylib.nov", []byte(libContent), 0644)
+
+	mainContent := `module main;
+import mylib;
+fn main() -> void {}
+`
+	mainFile := dir + "/main.nov"
+	os.WriteFile(mainFile, []byte(mainContent), 0644)
+
+	mainSrc, _ := os.ReadFile(mainFile)
+	tokens, _ := lexer.Lex(string(mainSrc))
+	prog, _ := parser.Parse(tokens)
+
+	resolver := NewResolver(mainFile)
+	merged, errs := resolver.Resolve(prog, mainFile)
+	if len(errs) > 0 {
+		t.Fatalf("resolver errors: %v", errs)
+	}
+
+	for _, fn := range merged.Functions {
+		switch fn.Name {
+		case "helper":
+			if !fn.Imported {
+				t.Error("helper should be marked as Imported=true")
+			}
+		case "main":
+			if fn.Imported {
+				t.Error("main should be marked as Imported=false")
+			}
+		}
+	}
+}

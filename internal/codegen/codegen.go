@@ -155,7 +155,19 @@ func Generate(program *ast.Program, opts *Options) (*Result, error) {
 	}
 
 	// --- Step 4: Assemble ---
-	if missing := DetectToolchain(target); len(missing) > 0 {
+	// On Windows, auto-download NASM and GoLink if not available.
+	if target.OS == OS_Windows {
+		nasmPath, golinkPath, dlErr := EnsureWindowsToolchain(opts.Verbose)
+		if dlErr != nil {
+			fmt.Printf("[codegen] Warning: could not set up Windows toolchain: %v\n", dlErr)
+			fmt.Printf("[codegen] Assembly file was written to %s — you can assemble and link manually.\n", result.AsmFile)
+			return result, nil
+		}
+		tc.NASMPath = nasmPath
+		tc.GoLinkPath = golinkPath
+	}
+
+	if missing := DetectToolchainWithPaths(target, tc.NASMPath, tc.GoLinkPath); len(missing) > 0 {
 		fmt.Printf("[codegen] Warning: missing toolchain components: %s\n", strings.Join(missing, ", "))
 		fmt.Printf("[codegen] Assembly file was written to %s — you can assemble and link manually.\n", result.AsmFile)
 		return result, nil
@@ -238,6 +250,12 @@ var arm64Registers = map[string]bool{
 func checkRegisterWarnings(mod *IRModule, target *Target) []string {
 	usedRegs := map[string]bool{}
 	for _, fn := range mod.Functions {
+		// Skip imported functions — they may contain registers for a different
+		// platform (e.g. ARM64 registers in a darwin_arm64 library when
+		// cross-compiling to x86_64/Windows). This is expected.
+		if fn.Imported {
+			continue
+		}
 		for _, instr := range fn.Instrs {
 			for _, op := range []Operand{instr.Dst, instr.Src1, instr.Src2} {
 				if op.Kind == OpPhysReg {
