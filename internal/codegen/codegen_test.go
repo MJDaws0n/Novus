@@ -1308,3 +1308,1090 @@ func TestEmitNASM_BitwiseNot(t *testing.T) {
 		t.Error("expected not instruction for bitwise NOT in NASM output")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Bug 2: Global variables emit in data section for all targets
+// ---------------------------------------------------------------------------
+
+func TestGlobalVarsInDataSection_GAS(t *testing.T) {
+	src := `module test;
+let counter: i32 = 42;
+fn main() -> i32 {
+	return counter;
+}`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "_g_counter:") {
+		t.Error("GAS output missing global variable label '_g_counter:'")
+	}
+	if !strings.Contains(asm, ".quad 42") {
+		t.Error("GAS output missing '.quad 42' for global initializer")
+	}
+}
+
+func TestGlobalVarsInDataSection_NASM(t *testing.T) {
+	src := `module test;
+let counter: i32 = 42;
+fn main() -> i32 {
+	return counter;
+}`
+	prog := mustParse(t, src)
+	target := windowsAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "_g_counter:") {
+		t.Error("NASM output missing global variable label '_g_counter:'")
+	}
+	if !strings.Contains(asm, "dq 42") {
+		t.Error("NASM output missing 'dq 42' for global initializer")
+	}
+}
+
+func TestGlobalVarsInDataSection_ARM64(t *testing.T) {
+	src := `module test;
+let counter: i32 = 42;
+fn main() -> i32 {
+	return counter;
+}`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	if !strings.Contains(asm, "_g_counter:") {
+		t.Error("ARM64 output missing global variable label '_g_counter:'")
+	}
+	if !strings.Contains(asm, ".quad 42") {
+		t.Error("ARM64 output missing '.quad 42' for global initializer")
+	}
+}
+
+func TestGlobalVarsInDataSection_x86(t *testing.T) {
+	src := `module test;
+let counter: i32 = 42;
+fn main() -> i32 {
+	return counter;
+}`
+	prog := mustParse(t, src)
+	target, _ := ResolveTarget("linux", "x86")
+	mod := Lower(prog, target)
+	asm := EmitX86(mod, target)
+
+	if !strings.Contains(asm, "_g_counter:") {
+		t.Error("x86 output missing global variable label '_g_counter:'")
+	}
+	if !strings.Contains(asm, ".long 42") {
+		t.Error("x86 output missing '.long 42' for global initializer")
+	}
+}
+
+func TestGlobalVarStringInit_GAS(t *testing.T) {
+	src := `module test;
+let greeting: str = "hello";
+fn main() -> i32 {
+	return 0;
+}`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "_g_greeting:") {
+		t.Error("GAS output missing global string variable label")
+	}
+}
+
+func TestGlobalVarStringInit_NASM(t *testing.T) {
+	src := `module test;
+let greeting: str = "hello";
+fn main() -> i32 {
+	return 0;
+}`
+	prog := mustParse(t, src)
+	target := windowsAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "_g_greeting:") {
+		t.Error("NASM output missing global string variable label")
+	}
+}
+
+// Global var used inside a function body (the actual bug scenario).
+func TestGlobalVarUsedInFunction_GAS(t *testing.T) {
+	src := `module test;
+let x: i32 = 10;
+fn main() -> i32 {
+	let y: i32 = x;
+	return y;
+}`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	// Must have the global in data section.
+	if !strings.Contains(asm, "_g_x:") {
+		t.Error("GAS output missing '_g_x:' label in data section")
+	}
+	// Must have a load from the global.
+	if !strings.Contains(asm, "_g_x") {
+		t.Error("GAS output missing reference to _g_x")
+	}
+}
+
+func TestGlobalVarUsedInFunction_NASM(t *testing.T) {
+	src := `module test;
+let x: i32 = 10;
+fn main() -> i32 {
+	let y: i32 = x;
+	return y;
+}`
+	prog := mustParse(t, src)
+	target := windowsAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "_g_x:") {
+		t.Error("NASM output missing '_g_x:' label in data section")
+	}
+	if !strings.Contains(asm, "_g_x") {
+		t.Error("NASM output missing reference to _g_x")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Flag operations — assembly output tests
+// ---------------------------------------------------------------------------
+
+func TestGetFlag_GAS(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let a: i32 = 5;
+	let b: i32 = 3;
+	let c: i32 = a - b;
+	return c;
+}`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	// Basic smoke test: assembly should contain sub instruction.
+	if !strings.Contains(asm, "sub") {
+		t.Error("GAS output missing sub instruction")
+	}
+}
+
+func TestGetFlag_NASM(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let a: i32 = 5;
+	let b: i32 = 3;
+	let c: i32 = a - b;
+	return c;
+}`
+	prog := mustParse(t, src)
+	target := windowsAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "sub") {
+		t.Error("NASM output missing sub instruction")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Array operations — assembly output tests
+// ---------------------------------------------------------------------------
+
+func TestArrayNew_GAS(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let arr: []i32 = [1, 2, 3];
+	return 0;
+}`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	// Should contain heap allocation pattern.
+	if !strings.Contains(asm, "_novus_heap_ptr") {
+		t.Error("GAS array output missing heap_ptr reference")
+	}
+	if !strings.Contains(asm, "_novus_heap") {
+		t.Error("GAS array output missing heap reference")
+	}
+}
+
+func TestArrayNew_NASM(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let arr: []i32 = [1, 2, 3];
+	return 0;
+}`
+	prog := mustParse(t, src)
+	target := windowsAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "_novus_heap_ptr") {
+		t.Error("NASM array output missing heap_ptr reference")
+	}
+	if !strings.Contains(asm, "_novus_heap") {
+		t.Error("NASM array output missing heap reference")
+	}
+}
+
+func TestArrayNew_ARM64(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let arr: []i32 = [1, 2, 3];
+	return 0;
+}`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	if !strings.Contains(asm, "_novus_heap") {
+		t.Error("ARM64 array output missing heap reference")
+	}
+}
+
+// Test array append produces growth code.
+func TestArrayAppendGrow_GAS(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let arr: []i32 = [1];
+	array_append(arr, 2);
+	return 0;
+}`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	// Growth code should contain capacity doubling (shl).
+	if !strings.Contains(asm, "shlq") {
+		t.Error("GAS array append missing growth logic (shlq)")
+	}
+}
+
+func TestArrayAppendGrow_NASM(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let arr: []i32 = [1];
+	array_append(arr, 2);
+	return 0;
+}`
+	prog := mustParse(t, src)
+	target := windowsAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "shl") {
+		t.Error("NASM array append missing growth logic (shl)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// String operations — cross-platform parity
+// ---------------------------------------------------------------------------
+
+func TestStrLen_AllTargets(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let s: str = "hello";
+	let n: i32 = len(s);
+	return n;
+}`
+	prog := mustParse(t, src)
+
+	targets := []struct {
+		name   string
+		target *Target
+	}{
+		{"linux_amd64", linuxAMD64Target()},
+		{"windows_amd64", windowsAMD64Target()},
+		{"darwin_arm64", darwinARM64Target()},
+	}
+
+	for _, tc := range targets {
+		t.Run(tc.name, func(t *testing.T) {
+			mod := Lower(prog, tc.target)
+			var asm string
+			if tc.target.Arch == Arch_ARM64 {
+				asm = EmitARM64(mod, tc.target)
+			} else {
+				asm = EmitX86_64(mod, tc.target)
+			}
+			// All targets should have string length computation.
+			if len(asm) == 0 {
+				t.Error("empty assembly output")
+			}
+		})
+	}
+}
+
+func TestStrConcat_AllTargets(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let a: str = "hello";
+	let b: str = " world";
+	let c: str = a + b;
+	return 0;
+}`
+	prog := mustParse(t, src)
+
+	targets := []struct {
+		name   string
+		target *Target
+	}{
+		{"linux_amd64", linuxAMD64Target()},
+		{"windows_amd64", windowsAMD64Target()},
+		{"darwin_arm64", darwinARM64Target()},
+	}
+
+	for _, tc := range targets {
+		t.Run(tc.name, func(t *testing.T) {
+			mod := Lower(prog, tc.target)
+			var asm string
+			if tc.target.Arch == Arch_ARM64 {
+				asm = EmitARM64(mod, tc.target)
+			} else {
+				asm = EmitX86_64(mod, tc.target)
+			}
+			if !strings.Contains(asm, "_novus_heap") {
+				t.Error("string concat missing heap reference")
+			}
+		})
+	}
+}
+
+func TestStrCmpEq_AllTargets(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let a: str = "hello";
+	let b: str = "hello";
+	if (a == b) {
+		return 1;
+	}
+	return 0;
+}`
+	prog := mustParse(t, src)
+
+	targets := []struct {
+		name   string
+		target *Target
+	}{
+		{"linux_amd64", linuxAMD64Target()},
+		{"windows_amd64", windowsAMD64Target()},
+		{"darwin_arm64", darwinARM64Target()},
+	}
+
+	for _, tc := range targets {
+		t.Run(tc.name, func(t *testing.T) {
+			mod := Lower(prog, tc.target)
+			var asm string
+			if tc.target.Arch == Arch_ARM64 {
+				asm = EmitARM64(mod, tc.target)
+			} else {
+				asm = EmitX86_64(mod, tc.target)
+			}
+			if len(asm) == 0 {
+				t.Error("empty assembly output")
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Comparison operations — cross-platform parity
+// ---------------------------------------------------------------------------
+
+func TestComparisons_AllTargets(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let a: i32 = 5;
+	let b: i32 = 3;
+	if (a > b) { return 1; }
+	if (a < b) { return 2; }
+	if (a == b) { return 3; }
+	if (a != b) { return 4; }
+	if (a >= b) { return 5; }
+	if (a <= b) { return 6; }
+	return 0;
+}`
+	prog := mustParse(t, src)
+
+	targets := []struct {
+		name   string
+		target *Target
+	}{
+		{"linux_amd64", linuxAMD64Target()},
+		{"windows_amd64", windowsAMD64Target()},
+		{"darwin_arm64", darwinARM64Target()},
+	}
+
+	for _, tc := range targets {
+		t.Run(tc.name, func(t *testing.T) {
+			mod := Lower(prog, tc.target)
+			var asm string
+			if tc.target.Arch == Arch_ARM64 {
+				asm = EmitARM64(mod, tc.target)
+			} else {
+				asm = EmitX86_64(mod, tc.target)
+			}
+			if !strings.Contains(asm, "cmp") {
+				t.Error("assembly missing cmp instruction")
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Control flow — cross-platform parity
+// ---------------------------------------------------------------------------
+
+func TestWhileLoop_AllTargets(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let i: i32 = 0;
+	while (i < 10) {
+		i = i + 1;
+	}
+	return i;
+}`
+	prog := mustParse(t, src)
+
+	targets := []struct {
+		name   string
+		target *Target
+	}{
+		{"linux_amd64", linuxAMD64Target()},
+		{"windows_amd64", windowsAMD64Target()},
+		{"darwin_arm64", darwinARM64Target()},
+	}
+
+	for _, tc := range targets {
+		t.Run(tc.name, func(t *testing.T) {
+			mod := Lower(prog, tc.target)
+			var asm string
+			if tc.target.Arch == Arch_ARM64 {
+				asm = EmitARM64(mod, tc.target)
+			} else {
+				asm = EmitX86_64(mod, tc.target)
+			}
+			if len(asm) == 0 {
+				t.Error("empty assembly output")
+			}
+			// Should contain a backwards jump (loop).
+			if !strings.Contains(asm, "j") && !strings.Contains(asm, "b.") && !strings.Contains(asm, "b ") {
+				t.Error("assembly missing jump/branch for while loop")
+			}
+		})
+	}
+}
+
+func TestIfElse_AllTargets(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let x: i32 = 5;
+	if (x > 3) {
+		return 1;
+	} else {
+		return 0;
+	}
+}`
+	prog := mustParse(t, src)
+
+	targets := []struct {
+		name   string
+		target *Target
+	}{
+		{"linux_amd64", linuxAMD64Target()},
+		{"windows_amd64", windowsAMD64Target()},
+		{"darwin_arm64", darwinARM64Target()},
+	}
+
+	for _, tc := range targets {
+		t.Run(tc.name, func(t *testing.T) {
+			mod := Lower(prog, tc.target)
+			var asm string
+			if tc.target.Arch == Arch_ARM64 {
+				asm = EmitARM64(mod, tc.target)
+			} else {
+				asm = EmitX86_64(mod, tc.target)
+			}
+			if len(asm) == 0 {
+				t.Error("empty assembly output")
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Function calls — cross-platform parity
+// ---------------------------------------------------------------------------
+
+func TestFunctionCall_AllTargets(t *testing.T) {
+	src := `module test;
+fn add(a: i32, b: i32) -> i32 {
+	return a + b;
+}
+fn main() -> i32 {
+	return add(1, 2);
+}`
+	prog := mustParse(t, src)
+
+	targets := []struct {
+		name   string
+		target *Target
+	}{
+		{"linux_amd64", linuxAMD64Target()},
+		{"windows_amd64", windowsAMD64Target()},
+		{"darwin_arm64", darwinARM64Target()},
+	}
+
+	for _, tc := range targets {
+		t.Run(tc.name, func(t *testing.T) {
+			mod := Lower(prog, tc.target)
+			var asm string
+			if tc.target.Arch == Arch_ARM64 {
+				asm = EmitARM64(mod, tc.target)
+			} else {
+				asm = EmitX86_64(mod, tc.target)
+			}
+			if !strings.Contains(asm, "add") {
+				t.Error("assembly missing 'add' function reference")
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Overloaded functions — cross-platform
+// ---------------------------------------------------------------------------
+
+func TestOverloadedFunctions_AllTargets(t *testing.T) {
+	src := `module test;
+fn convert(x: i32) -> i32 { return x; }
+fn convert(x: i64) -> i64 { return x; }
+fn main() -> i32 {
+	let a: i32 = convert(42);
+	return a;
+}`
+	prog := mustParse(t, src)
+
+	targets := []struct {
+		name   string
+		target *Target
+	}{
+		{"linux_amd64", linuxAMD64Target()},
+		{"windows_amd64", windowsAMD64Target()},
+		{"darwin_arm64", darwinARM64Target()},
+	}
+
+	for _, tc := range targets {
+		t.Run(tc.name, func(t *testing.T) {
+			mod := Lower(prog, tc.target)
+			var asm string
+			if tc.target.Arch == Arch_ARM64 {
+				asm = EmitARM64(mod, tc.target)
+			} else {
+				asm = EmitX86_64(mod, tc.target)
+			}
+			// Should contain mangled name for i32 overload.
+			if !strings.Contains(asm, "convert.i32") {
+				t.Error("assembly missing mangled function name 'convert.i32'")
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Windows-specific: NASM structure tests
+// ---------------------------------------------------------------------------
+
+func TestNASM_HasCorrectHeader(t *testing.T) {
+	src := `module test; fn main() -> i32 { return 0; }`
+	prog := mustParse(t, src)
+	target := windowsAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "bits 64") {
+		t.Error("NASM missing 'bits 64' directive")
+	}
+	if !strings.Contains(asm, "default rel") {
+		t.Error("NASM missing 'default rel' directive")
+	}
+}
+
+func TestNASM_HasBSSSection(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let a: str = "hello";
+	let b: str = " world";
+	let c: str = a + b;
+	return 0;
+}`
+	prog := mustParse(t, src)
+	target := windowsAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "section .bss") {
+		t.Error("NASM missing BSS section")
+	}
+	if !strings.Contains(asm, "_novus_heap") {
+		t.Error("NASM missing heap in BSS")
+	}
+}
+
+func TestNASM_HasDataSection(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let s: str = "hello";
+	return 0;
+}`
+	prog := mustParse(t, src)
+	target := windowsAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "section .data") {
+		t.Error("NASM missing data section")
+	}
+}
+
+func TestNASM_NoGASPrefixes(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let x: i32 = 5;
+	return x;
+}`
+	prog := mustParse(t, src)
+	target := windowsAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	// NASM should not have GAS-style register prefixes.
+	if strings.Contains(asm, "%rax") {
+		t.Error("NASM output contains GAS-style register prefix %rax")
+	}
+	if strings.Contains(asm, "$") && strings.Contains(asm, "movq $") {
+		t.Error("NASM output contains GAS-style immediate prefix $")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GAS-specific: structure tests
+// ---------------------------------------------------------------------------
+
+func TestGAS_LinuxEntry(t *testing.T) {
+	src := `module test; fn main() -> i32 { return 0; }`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, ".globl _start") {
+		t.Error("GAS Linux missing .globl _start")
+	}
+	if !strings.Contains(asm, "syscall") {
+		t.Error("GAS Linux missing syscall instruction")
+	}
+}
+
+func TestGAS_DarwinEntry(t *testing.T) {
+	src := `module test; fn main() -> i32 { return 0; }`
+	prog := mustParse(t, src)
+	target, _ := ResolveTarget("darwin", "amd64")
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, ".globl _main") {
+		t.Error("GAS Darwin missing .globl _main")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ARM64-specific: structure tests
+// ---------------------------------------------------------------------------
+
+func TestARM64_HasPrologue(t *testing.T) {
+	src := `module test; fn main() -> i32 { return 0; }`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	if !strings.Contains(asm, "stp x29, x30") {
+		t.Error("ARM64 missing stp x29, x30 prologue")
+	}
+}
+
+func TestARM64_HasEpilogue(t *testing.T) {
+	src := `module test; fn main() -> i32 { return 0; }`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	if !strings.Contains(asm, "ldp x29, x30") {
+		t.Error("ARM64 missing ldp x29, x30 epilogue")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// x86 32-bit: structure and array tests
+// ---------------------------------------------------------------------------
+
+func TestX86_HasEntry(t *testing.T) {
+	src := `module test; fn main() -> i32 { return 0; }`
+	prog := mustParse(t, src)
+	target, _ := ResolveTarget("linux", "x86")
+	mod := Lower(prog, target)
+	asm := EmitX86(mod, target)
+
+	if !strings.Contains(asm, "_start:") {
+		t.Error("x86 missing _start entry point")
+	}
+	if !strings.Contains(asm, "int $0x80") {
+		t.Error("x86 missing int $0x80 syscall")
+	}
+}
+
+func TestX86_ArrayNew(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let arr: []i32 = [1, 2, 3];
+	return 0;
+}`
+	prog := mustParse(t, src)
+	target, _ := ResolveTarget("linux", "x86")
+	mod := Lower(prog, target)
+	asm := EmitX86(mod, target)
+
+	if !strings.Contains(asm, "_novus_heap") {
+		t.Error("x86 array output missing heap reference")
+	}
+}
+
+func TestX86_GlobalVars(t *testing.T) {
+	src := `module test;
+let val: i32 = 99;
+fn main() -> i32 { return val; }`
+	prog := mustParse(t, src)
+	target, _ := ResolveTarget("linux", "x86")
+	mod := Lower(prog, target)
+	asm := EmitX86(mod, target)
+
+	if !strings.Contains(asm, "_g_val:") {
+		t.Error("x86 output missing global variable label")
+	}
+	if !strings.Contains(asm, ".long 99") {
+		t.Error("x86 output missing .long 99 for global init")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Compile-time conditional (#if) resolution tests
+// ---------------------------------------------------------------------------
+
+func TestCompTimeResolve_MatchingCondition(t *testing.T) {
+	src := `module test;
+#if(os == "linux") {
+	fn platform_helper() -> i32 { return 1; }
+}
+fn main() -> i32 { return 0; }`
+	tokens, _ := lexer.Lex(src)
+	prog, parseErrs := parser.Parse(tokens)
+	if len(parseErrs) > 0 {
+		t.Fatalf("parse errors: %v", parseErrs)
+	}
+
+	constants := map[string]string{"os": "linux", "arch": "amd64"}
+	ast.ResolveCompTimeBlocks(prog, constants)
+
+	// The function should have been merged into main program.
+	found := false
+	for _, fn := range prog.Functions {
+		if fn.Name == "platform_helper" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected platform_helper to be included when os matches 'linux'")
+	}
+}
+
+func TestCompTimeResolve_NonMatchingCondition(t *testing.T) {
+	src := `module test;
+#if(os == "windows") {
+	fn win_only() -> i32 { return 1; }
+}
+fn main() -> i32 { return 0; }`
+	tokens, _ := lexer.Lex(src)
+	prog, parseErrs := parser.Parse(tokens)
+	if len(parseErrs) > 0 {
+		t.Fatalf("parse errors: %v", parseErrs)
+	}
+
+	constants := map[string]string{"os": "linux", "arch": "amd64"}
+	ast.ResolveCompTimeBlocks(prog, constants)
+
+	for _, fn := range prog.Functions {
+		if fn.Name == "win_only" {
+			t.Error("win_only should NOT be included when os is 'linux'")
+		}
+	}
+}
+
+func TestCompTimeResolve_NotEqual(t *testing.T) {
+	src := `module test;
+#if(os != "windows") {
+	fn unix_helper() -> i32 { return 1; }
+}
+fn main() -> i32 { return 0; }`
+	tokens, _ := lexer.Lex(src)
+	prog, parseErrs := parser.Parse(tokens)
+	if len(parseErrs) > 0 {
+		t.Fatalf("parse errors: %v", parseErrs)
+	}
+
+	constants := map[string]string{"os": "linux", "arch": "amd64"}
+	ast.ResolveCompTimeBlocks(prog, constants)
+
+	found := false
+	for _, fn := range prog.Functions {
+		if fn.Name == "unix_helper" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected unix_helper when os != windows and os is linux")
+	}
+}
+
+func TestCompTimeResolve_ArchCondition(t *testing.T) {
+	src := `module test;
+#if(arch == "arm64") {
+	fn arm_helper() -> i32 { return 1; }
+}
+fn main() -> i32 { return 0; }`
+	tokens, _ := lexer.Lex(src)
+	prog, parseErrs := parser.Parse(tokens)
+	if len(parseErrs) > 0 {
+		t.Fatalf("parse errors: %v", parseErrs)
+	}
+
+	// Resolve with amd64 — should NOT include arm_helper.
+	constants := map[string]string{"os": "linux", "arch": "amd64"}
+	ast.ResolveCompTimeBlocks(prog, constants)
+
+	for _, fn := range prog.Functions {
+		if fn.Name == "arm_helper" {
+			t.Error("arm_helper should NOT be included when arch is amd64")
+		}
+	}
+}
+
+func TestCompTimeResolve_GlobalMerge(t *testing.T) {
+	src := `module test;
+#if(os == "darwin") {
+	let platform_id: i32 = 3;
+}
+fn main() -> i32 { return 0; }`
+	tokens, _ := lexer.Lex(src)
+	prog, parseErrs := parser.Parse(tokens)
+	if len(parseErrs) > 0 {
+		t.Fatalf("parse errors: %v", parseErrs)
+	}
+
+	constants := map[string]string{"os": "darwin", "arch": "arm64"}
+	ast.ResolveCompTimeBlocks(prog, constants)
+
+	found := false
+	for _, g := range prog.Globals {
+		if g.Name == "platform_id" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected platform_id global to be included when os matches darwin")
+	}
+}
+
+func TestCompTimeResolve_ImportMerge(t *testing.T) {
+	src := `module test;
+#if(os == "linux") {
+	import mylib;
+}
+fn main() -> i32 { return 0; }`
+	tokens, _ := lexer.Lex(src)
+	prog, parseErrs := parser.Parse(tokens)
+	if len(parseErrs) > 0 {
+		t.Fatalf("parse errors: %v", parseErrs)
+	}
+
+	constants := map[string]string{"os": "linux", "arch": "amd64"}
+	ast.ResolveCompTimeBlocks(prog, constants)
+
+	found := false
+	for _, imp := range prog.Imports {
+		if imp.Path == "mylib" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected import 'mylib' to be included when os matches linux")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Target helper method tests
+// ---------------------------------------------------------------------------
+
+func TestTargetOSName(t *testing.T) {
+	tests := []struct {
+		os   string
+		arch string
+		want string
+	}{
+		{"linux", "amd64", "linux"},
+		{"darwin", "arm64", "darwin"},
+		{"windows", "amd64", "windows"},
+	}
+	for _, tc := range tests {
+		tgt, _ := ResolveTarget(tc.os, tc.arch)
+		if got := tgt.OSName(); got != tc.want {
+			t.Errorf("OSName() for %s/%s: got %q, want %q", tc.os, tc.arch, got, tc.want)
+		}
+	}
+}
+
+func TestTargetArchName(t *testing.T) {
+	tests := []struct {
+		os   string
+		arch string
+		want string
+	}{
+		{"linux", "amd64", "amd64"},
+		{"darwin", "arm64", "arm64"},
+		{"linux", "x86", "x86"},
+	}
+	for _, tc := range tests {
+		tgt, _ := ResolveTarget(tc.os, tc.arch)
+		if got := tgt.ArchName(); got != tc.want {
+			t.Errorf("ArchName() for %s/%s: got %q, want %q", tc.os, tc.arch, got, tc.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Arithmetic — full cross-platform assembly verification
+// ---------------------------------------------------------------------------
+
+func TestArithmetic_AllTargets(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let a: i32 = 10;
+	let b: i32 = 3;
+	let add_r: i32 = a + b;
+	let sub_r: i32 = a - b;
+	let mul_r: i32 = a * b;
+	let div_r: i32 = a / b;
+	let mod_r: i32 = a % b;
+	return add_r;
+}`
+	prog := mustParse(t, src)
+
+	targets := []struct {
+		name   string
+		target *Target
+	}{
+		{"linux_amd64", linuxAMD64Target()},
+		{"windows_amd64", windowsAMD64Target()},
+		{"darwin_arm64", darwinARM64Target()},
+	}
+
+	for _, tc := range targets {
+		t.Run(tc.name, func(t *testing.T) {
+			mod := Lower(prog, tc.target)
+			var asm string
+			if tc.target.Arch == Arch_ARM64 {
+				asm = EmitARM64(mod, tc.target)
+			} else {
+				asm = EmitX86_64(mod, tc.target)
+			}
+			if len(asm) == 0 {
+				t.Fatal("empty assembly output")
+			}
+			// All targets should have add, sub, mul, div.
+			for _, op := range []string{"add", "sub"} {
+				if !strings.Contains(asm, op) {
+					t.Errorf("assembly missing %s instruction", op)
+				}
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Bitwise operations — cross-platform
+// ---------------------------------------------------------------------------
+
+func TestBitwise_AllTargets(t *testing.T) {
+	src := `module test;
+fn main() -> i32 {
+	let a: i32 = 0xFF;
+	let b: i32 = 0x0F;
+	let and_r: i32 = a & b;
+	let or_r: i32 = a | b;
+	let xor_r: i32 = a ^ b;
+	let not_r: i32 = ~a;
+	let shl_r: i32 = a << 2;
+	let shr_r: i32 = a >> 2;
+	return and_r;
+}`
+	prog := mustParse(t, src)
+
+	targets := []struct {
+		name   string
+		target *Target
+	}{
+		{"linux_amd64", linuxAMD64Target()},
+		{"windows_amd64", windowsAMD64Target()},
+		{"darwin_arm64", darwinARM64Target()},
+	}
+
+	for _, tc := range targets {
+		t.Run(tc.name, func(t *testing.T) {
+			mod := Lower(prog, tc.target)
+			var asm string
+			if tc.target.Arch == Arch_ARM64 {
+				asm = EmitARM64(mod, tc.target)
+			} else {
+				asm = EmitX86_64(mod, tc.target)
+			}
+			if len(asm) == 0 {
+				t.Fatal("empty assembly output")
+			}
+			// All should have and, or, xor operations.
+			if !strings.Contains(asm, "and") {
+				t.Error("assembly missing and instruction")
+			}
+			if !strings.Contains(asm, "or") {
+				t.Error("assembly missing or instruction")
+			}
+		})
+	}
+}

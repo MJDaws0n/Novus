@@ -27,6 +27,13 @@ type x86Emitter struct {
 	mod    *IRModule
 	target *Target
 	b      *strings.Builder
+	nextID int
+}
+
+func (e *x86Emitter) uniqueID() int {
+	id := e.nextID
+	e.nextID++
+	return id
 }
 
 func (e *x86Emitter) emit() {
@@ -51,6 +58,23 @@ func (e *x86Emitter) emit() {
 		w.WriteString("    .space 1048576\n")
 		w.WriteString("_novus_heap_ptr:\n")
 		w.WriteString("    .space 4\n\n")
+	}
+
+	// Global variables in data section.
+	if len(e.mod.Globals) > 0 {
+		if len(e.mod.Strings) == 0 {
+			w.WriteString(".data\n")
+		}
+		for _, g := range e.mod.Globals {
+			w.WriteString(fmt.Sprintf("%s:\n", g.Name))
+			if g.InitStr >= 0 {
+				strLabel := e.mod.Strings[g.InitStr].Label
+				w.WriteString(fmt.Sprintf("    .long %s\n", strLabel))
+			} else {
+				w.WriteString(fmt.Sprintf("    .long %d\n", int32(g.InitImm)))
+			}
+		}
+		w.WriteString("\n")
 	}
 
 	// Text section.
@@ -274,7 +298,7 @@ func (e *x86Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		w.WriteString(fmt.Sprintf("    movl %s, %s\n", src, dst))
 
 	case IRSetFlag, IRGetFlag:
-		w.WriteString("    ## flag manipulation (not yet implemented)\n")
+		e.emitFlagOp(instr)
 
 	case IRStrLen:
 		e.emitStrLen(instr)
@@ -287,36 +311,42 @@ func (e *x86Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 	case IRStrConcat:
 		e.emitStrConcat(instr)
 	case IRStrCmpEq:
-		w.WriteString("    ## str_cmp_eq not yet implemented for x86 32-bit\n")
+		e.emitStrCmpEq(instr)
 
-	// Memory load (32-bit stubs)
+	// Memory load (32-bit).
 	case IRLoad8:
+		src := e.operand(instr.Src1)
 		dst := e.operand(instr.Dst)
-		w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
+		w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src))
+		w.WriteString("    movzbl (%eax), %eax\n")
+		w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
 	case IRLoad32:
+		src := e.operand(instr.Src1)
 		dst := e.operand(instr.Dst)
-		w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
+		w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src))
+		w.WriteString("    movl (%eax), %eax\n")
+		w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
 	case IRLoad64:
+		// 32-bit can only handle lower 32 bits of a 64-bit value.
+		src := e.operand(instr.Src1)
 		dst := e.operand(instr.Dst)
-		w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
+		w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src))
+		w.WriteString("    movl (%eax), %eax\n")
+		w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
 
-	// Array operations (32-bit stubs — return 0 / no-op for now).
+	// Array operations (32-bit, 4-byte elements).
 	case IRArrayNew:
-		dst := e.operand(instr.Dst)
-		w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
+		e.emitArrayNew(instr)
 	case IRArrayGet:
-		dst := e.operand(instr.Dst)
-		w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
+		e.emitArrayGet(instr)
 	case IRArraySet:
-		w.WriteString("    // array_set (32-bit stub)\n")
+		e.emitArraySet(instr)
 	case IRArrayAppend:
-		w.WriteString("    // array_append (32-bit stub)\n")
+		e.emitArrayAppend(instr)
 	case IRArrayPop:
-		dst := e.operand(instr.Dst)
-		w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
+		e.emitArrayPop(instr)
 	case IRArrayLen:
-		dst := e.operand(instr.Dst)
-		w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
+		e.emitArrayLen(instr)
 	case IRWinCall:
 		w.WriteString("    ## win_call: Windows API calls not supported on x86-32\n")
 
@@ -524,4 +554,254 @@ func (e *x86Emitter) leaOperand(op Operand) string {
 	default:
 		return e.operand(op)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// x86 (32-bit) flag operations
+// ---------------------------------------------------------------------------
+
+func (e *x86Emitter) emitFlagOp(instr IRInstr) {
+	w := e.b
+
+	flagName := ""
+	if instr.Op == IRGetFlag {
+		if instr.Src1.Kind == OpPhysReg {
+			flagName = instr.Src1.PhysReg
+		} else if instr.Src1.Kind == OpLabel {
+			flagName = instr.Src1.Label
+		}
+	} else {
+		if instr.Dst.Kind == OpPhysReg {
+			flagName = instr.Dst.PhysReg
+		} else if instr.Dst.Kind == OpLabel {
+			flagName = instr.Dst.Label
+		}
+	}
+
+	if instr.Op == IRGetFlag {
+		setcc := flagNameToX86Setcc(flagName)
+		dst := e.operand(instr.Dst)
+		if setcc != "" {
+			w.WriteString("    xorl %eax, %eax\n")
+			w.WriteString(fmt.Sprintf("    %s %%al\n", setcc))
+			w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+		} else {
+			w.WriteString(fmt.Sprintf("    ## getflag: unrecognised flag %q\n", flagName))
+			w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
+		}
+	} else {
+		w.WriteString(fmt.Sprintf("    ## setflag %q not directly supported on x86\n", flagName))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// x86 (32-bit) string comparison
+// ---------------------------------------------------------------------------
+
+func (e *x86Emitter) emitStrCmpEq(instr IRInstr) {
+	w := e.b
+	src1 := e.operand(instr.Src1)
+	src2 := e.operand(instr.Src2)
+	dst := e.operand(instr.Dst)
+
+	id := e.uniqueID()
+	loopLabel := fmt.Sprintf(".Lsce32_l_%d", id)
+	neqLabel := fmt.Sprintf(".Lsce32_n_%d", id)
+	doneLabel := fmt.Sprintf(".Lsce32_d_%d", id)
+
+	w.WriteString(fmt.Sprintf("    movl %s, %%esi\n", src1))
+	w.WriteString(fmt.Sprintf("    movl %s, %%edi\n", src2))
+	w.WriteString(fmt.Sprintf("%s:\n", loopLabel))
+	w.WriteString("    movb (%esi), %al\n")
+	w.WriteString("    movb (%edi), %cl\n")
+	w.WriteString("    cmpb %cl, %al\n")
+	w.WriteString(fmt.Sprintf("    jne %s\n", neqLabel))
+	w.WriteString("    testb %al, %al\n")
+	w.WriteString(fmt.Sprintf("    je %s\n", doneLabel)) // both null → equal
+	w.WriteString("    incl %esi\n")
+	w.WriteString("    incl %edi\n")
+	w.WriteString(fmt.Sprintf("    jmp %s\n", loopLabel))
+	w.WriteString(fmt.Sprintf("%s:\n", neqLabel))
+	w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
+	doneLabel2 := fmt.Sprintf(".Lsce32_e_%d", id)
+	w.WriteString(fmt.Sprintf("    jmp %s\n", doneLabel2))
+	w.WriteString(fmt.Sprintf("%s:\n", doneLabel))
+	w.WriteString(fmt.Sprintf("    movl $1, %s\n", dst))
+	w.WriteString(fmt.Sprintf("%s:\n", doneLabel2))
+}
+
+// ---------------------------------------------------------------------------
+// x86 (32-bit) array operations (4-byte elements, 12-byte header)
+// Header layout: [data_ptr(4)][len(4)][cap(4)]
+// ---------------------------------------------------------------------------
+
+func (e *x86Emitter) emitArrayNew(instr IRInstr) {
+	w := e.b
+	cap := instr.Src2.Imm
+	if cap < 4 {
+		cap = 4
+	}
+	id := e.uniqueID()
+	readyLabel := fmt.Sprintf(".Lan32_%d", id)
+
+	w.WriteString("    pushl %edi\n")
+	w.WriteString("    pushl %ecx\n")
+	// Load heap ptr (lazy init).
+	w.WriteString("    movl _novus_heap_ptr, %ecx\n")
+	w.WriteString("    testl %ecx, %ecx\n")
+	w.WriteString(fmt.Sprintf("    jnz %s\n", readyLabel))
+	w.WriteString("    movl $_novus_heap, %ecx\n")
+	w.WriteString(fmt.Sprintf("%s:\n", readyLabel))
+	w.WriteString("    pushl %ecx\n")                                 // save header start
+	w.WriteString("    leal 12(%ecx), %edi\n")                       // edi = data start (header is 12 bytes)
+	w.WriteString(fmt.Sprintf("    leal %d(%%edi), %%ecx\n", cap*4)) // ecx = new heap ptr
+	w.WriteString("    movl %ecx, _novus_heap_ptr\n")
+	w.WriteString("    popl %ecx\n") // ecx = header start
+	// Init header.
+	w.WriteString("    movl %edi, (%ecx)\n")                      // data_ptr
+	w.WriteString("    movl $0, 4(%ecx)\n")                       // len = 0
+	w.WriteString(fmt.Sprintf("    movl $%d, 8(%%ecx)\n", cap))   // cap
+	dst := e.operand(instr.Dst)
+	w.WriteString(fmt.Sprintf("    movl %%ecx, %s\n", dst))
+	w.WriteString("    popl %ecx\n")
+	w.WriteString("    popl %edi\n")
+}
+
+func (e *x86Emitter) emitArrayGet(instr IRInstr) {
+	w := e.b
+	arrPtr := e.operand(instr.Src1)
+	idx := e.operand(instr.Src2)
+	dst := e.operand(instr.Dst)
+	w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", arrPtr))
+	w.WriteString("    movl (%eax), %eax\n") // data_ptr
+	w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", idx))
+	w.WriteString("    movl (%eax,%ecx,4), %eax\n")
+	w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+}
+
+func (e *x86Emitter) emitArraySet(instr IRInstr) {
+	w := e.b
+	arrPtr := e.operand(instr.Dst)
+	idx := e.operand(instr.Src1)
+	val := e.operand(instr.Src2)
+	w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", arrPtr))
+	w.WriteString("    movl (%eax), %eax\n") // data_ptr
+	w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", idx))
+	w.WriteString(fmt.Sprintf("    movl %s, %%edx\n", val))
+	w.WriteString("    movl %edx, (%eax,%ecx,4)\n")
+}
+
+func (e *x86Emitter) emitArrayAppend(instr IRInstr) {
+	w := e.b
+	arrPtr := e.operand(instr.Dst)
+	val := e.operand(instr.Src1)
+
+	id := e.uniqueID()
+	noGrowLabel := fmt.Sprintf(".Laang32_%d", id)
+	capOkLabel := fmt.Sprintf(".Laaco32_%d", id)
+	copyLabel := fmt.Sprintf(".Laacp32_%d", id)
+	copyDoneLabel := fmt.Sprintf(".Laacd32_%d", id)
+	readyLabel := fmt.Sprintf(".Laahr32_%d", id)
+
+	w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", arrPtr)) // eax = arrPtr
+	w.WriteString(fmt.Sprintf("    movl %s, %%edx\n", val))    // edx = val
+	w.WriteString("    pushl %edi\n")
+	w.WriteString("    pushl %esi\n")
+	// Load len and cap.
+	w.WriteString("    movl 4(%eax), %ecx\n") // ecx = len
+	w.WriteString("    movl 8(%eax), %edi\n") // edi = cap
+	w.WriteString("    cmpl %edi, %ecx\n")
+	w.WriteString(fmt.Sprintf("    jl %s\n", noGrowLabel))
+
+	// --- GROW ---
+	w.WriteString("    shll $1, %edi\n")
+	w.WriteString("    cmpl $4, %edi\n")
+	w.WriteString(fmt.Sprintf("    jge %s\n", capOkLabel))
+	w.WriteString("    movl $4, %edi\n")
+	w.WriteString(fmt.Sprintf("%s:\n", capOkLabel))
+
+	// Save eax(arrPtr), edx(val), ecx(len), edi(new_cap).
+	w.WriteString("    pushl %eax\n")
+	w.WriteString("    pushl %edx\n")
+	w.WriteString("    pushl %ecx\n")
+	w.WriteString("    pushl %edi\n")
+
+	// Inline heap alloc: new_cap * 4 bytes.
+	w.WriteString("    movl _novus_heap_ptr, %eax\n")
+	w.WriteString("    testl %eax, %eax\n")
+	w.WriteString(fmt.Sprintf("    jnz %s\n", readyLabel))
+	w.WriteString("    movl $_novus_heap, %eax\n")
+	w.WriteString(fmt.Sprintf("%s:\n", readyLabel))
+	// eax = alloc start.
+	w.WriteString("    movl %edi, %esi\n")
+	w.WriteString("    shll $2, %esi\n")          // esi = new_cap * 4
+	w.WriteString("    leal (%eax,%esi), %esi\n") // esi = new heap ptr
+	w.WriteString("    movl %esi, _novus_heap_ptr\n")
+	// eax = new data block.
+
+	// Restore saved values.
+	w.WriteString("    popl %edi\n") // new_cap
+	w.WriteString("    popl %ecx\n") // len
+	w.WriteString("    popl %edx\n") // val
+	w.WriteString("    movl %eax, %esi\n") // esi = new data
+	w.WriteString("    popl %eax\n") // arrPtr
+
+	// Copy old data. esi=new_data, ecx=len, eax=arrPtr.
+	w.WriteString("    pushl %ebx\n")
+	w.WriteString("    movl (%eax), %ebx\n") // ebx = old data_ptr
+	w.WriteString("    pushl %ecx\n")        // save len
+	w.WriteString("    xorl %ecx, %ecx\n")   // i = 0 (reuse ecx)
+	// We need to save len separately.
+	w.WriteString("    movl (%esp), %ecx\n")  // reload len from stack
+	w.WriteString("    pushl %ecx\n")         // counter
+	w.WriteString("    xorl %ecx, %ecx\n")
+	w.WriteString(fmt.Sprintf("%s:\n", copyLabel))
+	w.WriteString("    cmpl (%esp), %ecx\n") // compare i with saved len
+	w.WriteString(fmt.Sprintf("    jge %s\n", copyDoneLabel))
+	w.WriteString("    movl (%ebx,%ecx,4), %eax\n") // load old[i] (clobbers arrPtr)
+	w.WriteString("    movl %eax, (%esi,%ecx,4)\n") // store new[i]
+	w.WriteString("    incl %ecx\n")
+	w.WriteString(fmt.Sprintf("    jmp %s\n", copyLabel))
+	w.WriteString(fmt.Sprintf("%s:\n", copyDoneLabel))
+	w.WriteString("    addl $4, %esp\n") // pop saved len counter
+	w.WriteString("    popl %ecx\n")     // restore len
+	w.WriteString("    popl %ebx\n")     // restore ebx
+	// Reload arrPtr from original operand.
+	w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", arrPtr))
+
+	// Update header.
+	w.WriteString("    movl %esi, (%eax)\n")   // data_ptr = new_data
+	w.WriteString("    movl %edi, 8(%eax)\n")  // cap = new_cap
+
+	// --- NO GROW ---
+	w.WriteString(fmt.Sprintf("%s:\n", noGrowLabel))
+	w.WriteString("    movl (%eax), %esi\n")       // data_ptr
+	w.WriteString("    movl 4(%eax), %ecx\n")      // len (reload)
+	w.WriteString("    movl %edx, (%esi,%ecx,4)\n") // data[len] = val
+	w.WriteString("    incl %ecx\n")
+	w.WriteString("    movl %ecx, 4(%eax)\n") // len++
+	w.WriteString("    popl %esi\n")
+	w.WriteString("    popl %edi\n")
+}
+
+func (e *x86Emitter) emitArrayPop(instr IRInstr) {
+	w := e.b
+	arrPtr := e.operand(instr.Src1)
+	dst := e.operand(instr.Dst)
+	w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", arrPtr))
+	w.WriteString("    movl 4(%eax), %ecx\n") // len
+	w.WriteString("    decl %ecx\n")
+	w.WriteString("    movl %ecx, 4(%eax)\n") // save len
+	w.WriteString("    movl (%eax), %eax\n")  // data_ptr
+	w.WriteString("    movl (%eax,%ecx,4), %eax\n")
+	w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+}
+
+func (e *x86Emitter) emitArrayLen(instr IRInstr) {
+	w := e.b
+	arrPtr := e.operand(instr.Src1)
+	dst := e.operand(instr.Dst)
+	w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", arrPtr))
+	w.WriteString("    movl 4(%eax), %eax\n")
+	w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
 }

@@ -29,7 +29,6 @@ fn wait_pid(pid: i32) -> i32 {
 // Subprocess with captured output
 // ---------------------------------------------------------------------------
 
-// Run a command and capture its stdout as a string.
 fn capture_output(exe: str, argv: []u64, max_len: i32) -> str {
     let pfd: []i32 = [0, 0];
     pipe_create(pfd);
@@ -56,7 +55,6 @@ fn capture_output(exe: str, argv: []u64, max_len: i32) -> str {
 
     if (nr <= 0) { return ""; }
 
-    // Build clean result, stripping trailing newlines
     let result: str = "";
     let k: i32 = 0;
     let stop: bool = false;
@@ -72,13 +70,13 @@ fn capture_output(exe: str, argv: []u64, max_len: i32) -> str {
 }
 
 // ---------------------------------------------------------------------------
-// macOS file picker dialog via osascript
+// Run a command synchronously and return the wait status (0 = success)
 // ---------------------------------------------------------------------------
 
-fn pick_file_dialog(file_type: str) -> str {
-    let a0: str = "/usr/bin/osascript";
-    let a1: str = "-e";
-    let a2: str = "POSIX path of (choose file of type {\"" + file_type + "\"})";
-    let av: []u64 = [ptr(a0), ptr(a1), ptr(a2), 0];
-    return capture_output(a0, av, 4096);
+fn run_cmd(exe: str, argv: []u64) -> i32 {
+    let pid: i32 = spawn_execve(exe, argv);
+    if (pid < 0) {
+        return -1;
+    }
+    return wait_pid(pid);
 }

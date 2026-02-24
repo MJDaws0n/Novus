@@ -309,3 +309,23 @@ func (t *Target) Is64Bit() bool {
 func (t *Target) IsX86Family() bool {
 	return t.Arch == Arch_x86_64 || t.Arch == Arch_x86
 }
+
+// OSName returns the OS as a lowercase string matching the #if constant values.
+func (t *Target) OSName() string {
+	return t.OS.String()
+}
+
+// ArchName returns the architecture as a string matching the #if constant values.
+// Uses Go-style names: "amd64", "arm64", "x86".
+func (t *Target) ArchName() string {
+	switch t.Arch {
+	case Arch_x86_64:
+		return "amd64"
+	case Arch_x86:
+		return "x86"
+	case Arch_ARM64:
+		return "arm64"
+	default:
+		return "unknown"
+	}
+}

@@ -54,6 +54,7 @@ const (
 	COLON     = "COLON"     // :
 	COMMA     = "COMMA"     // ,
 	DOT       = "DOT"       // .
+	HASH      = "HASH"      // #
 
 	// Operators
 	ARROW     = "ARROW"     // ->
@@ -501,6 +502,8 @@ func lexOperatorOrDelimiter(input string, i int, line int, col int) (Token, int)
 		return Token{CARET, "^", line, col}, 1
 	case '~':
 		return Token{TILDE, "~", line, col}, 1
+	case '#':
+		return Token{HASH, "#", line, col}, 1
 	}
 
 	return Token{}, 0

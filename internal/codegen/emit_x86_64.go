@@ -110,6 +110,29 @@ func (e *x86_64Emitter) emitGAS() {
 		w.WriteString("\n")
 	}
 
+	// --- Global variables in data section ---
+	if len(e.mod.Globals) > 0 {
+		if len(e.mod.Strings) == 0 {
+			if e.target.OS == OS_Linux {
+				w.WriteString(".data\n")
+			} else {
+				w.WriteString(".section __DATA,__data\n")
+			}
+		}
+		for _, g := range e.mod.Globals {
+			label := e.target.Sym(g.Name)
+			w.WriteString(fmt.Sprintf(".p2align 3\n"))
+			w.WriteString(fmt.Sprintf("%s:\n", label))
+			if g.InitStr >= 0 {
+				strLabel := e.target.Sym(e.mod.Strings[g.InitStr].Label)
+				w.WriteString(fmt.Sprintf("    .quad %s\n", strLabel))
+			} else {
+				w.WriteString(fmt.Sprintf("    .quad %d\n", g.InitImm))
+			}
+		}
+		w.WriteString("\n")
+	}
+
 	// --- BSS: bump-allocator heap ---
 	if e.usesHeap() {
 		heapSym := e.target.Sym("_novus_heap")
@@ -456,7 +479,7 @@ func (e *x86_64Emitter) emitGASInstr(fn *IRFunc, instr IRInstr) {
 		e.gasStoreToOperand(fn, instr.Dst, src)
 
 	case IRSetFlag, IRGetFlag:
-		w.WriteString("    ## flag manipulation (not yet implemented)\n")
+		e.emitGASFlagOp(fn, instr)
 
 	case IRStrConcat:
 		e.emitGASStrConcat(fn, instr)
@@ -822,6 +845,22 @@ func (e *x86_64Emitter) emitNASM() {
 		w.WriteString("    _novus_heap_ptr: resq 1\n\n")
 	}
 
+	// Global variables in data section.
+	if len(e.mod.Globals) > 0 {
+		if len(e.mod.Strings) == 0 {
+			w.WriteString("section .data\n")
+		}
+		for _, g := range e.mod.Globals {
+			if g.InitStr >= 0 {
+				strLabel := e.mod.Strings[g.InitStr].Label
+				w.WriteString(fmt.Sprintf("    %s: dq %s\n", g.Name, strLabel))
+			} else {
+				w.WriteString(fmt.Sprintf("    %s: dq %d\n", g.Name, g.InitImm))
+			}
+		}
+		w.WriteString("\n")
+	}
+
 	// Collect all Windows API functions used by win_call and emit extern declarations.
 	winExterns := e.collectWinCallExterns()
 	if len(winExterns) > 0 {
@@ -1134,7 +1173,7 @@ func (e *x86_64Emitter) emitNASMInstr(fn *IRFunc, instr IRInstr) {
 		e.nasmStoreToOperand(fn, instr.Dst, src)
 
 	case IRSetFlag, IRGetFlag:
-		w.WriteString("    ; flag manipulation (not yet implemented)\n")
+		e.emitNASMFlagOp(fn, instr)
 
 	case IRStrLen:
 		e.emitNASMStrLen(fn, instr)
@@ -1459,6 +1498,14 @@ func (e *x86_64Emitter) emitGASArrayAppend(fn *IRFunc, instr IRInstr) {
 	arrPtr := e.gasLoadToReg(fn, instr.Dst, "%r10")
 	val := e.gasLoadToReg(fn, instr.Src1, "%r11")
 
+	id := e.uniqueID()
+	noGrowLabel := fmt.Sprintf(".Laang_%d", id)
+	capOkLabel := fmt.Sprintf(".Laaco_%d", id)
+	copyLabel := fmt.Sprintf(".Laacp_%d", id)
+	copyDoneLabel := fmt.Sprintf(".Laacd_%d", id)
+	heapPtrSym := e.target.Sym("_novus_heap_ptr")
+	heapSym := e.target.Sym("_novus_heap")
+
 	if arrPtr != "%r10" {
 		w.WriteString(fmt.Sprintf("    movq %s, %%r10\n", arrPtr))
 	}
@@ -1467,12 +1514,77 @@ func (e *x86_64Emitter) emitGASArrayAppend(fn *IRFunc, instr IRInstr) {
 	}
 	w.WriteString("    pushq %rdi\n")
 	w.WriteString("    pushq %rcx\n")
-	// Simple append (no grow — rely on initial capacity).
-	w.WriteString("    movq 8(%r10), %rcx\n")       // len
-	w.WriteString("    movq (%r10), %rdi\n")        // data_ptr
-	w.WriteString("    movq %r11, (%rdi,%rcx,8)\n") // data[len] = val
+	// Load len and cap.
+	w.WriteString("    movq 8(%r10), %rcx\n")  // rcx = len
+	w.WriteString("    movq 16(%r10), %rdi\n") // rdi = cap
+	w.WriteString("    cmpq %rdi, %rcx\n")
+	w.WriteString(fmt.Sprintf("    jl %s\n", noGrowLabel))
+
+	// --- GROW ---
+	// new_cap = cap * 2 (min 4).
+	w.WriteString("    shlq $1, %rdi\n")
+	w.WriteString("    cmpq $4, %rdi\n")
+	w.WriteString(fmt.Sprintf("    jge %s\n", capOkLabel))
+	w.WriteString("    movq $4, %rdi\n")
+	w.WriteString(fmt.Sprintf("%s:\n", capOkLabel))
+
+	// Save r10(arrPtr), r11(val), rcx(len), rdi(new_cap).
+	w.WriteString("    pushq %r10\n")
+	w.WriteString("    pushq %r11\n")
+	w.WriteString("    pushq %rcx\n")
+	w.WriteString("    pushq %rdi\n")
+
+	// Inline heap alloc: new_cap * 8 bytes.
+	readyLabel := fmt.Sprintf(".Laahr_%d", id)
+	w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %%rcx\n", heapPtrSym))
+	w.WriteString("    movq (%rcx), %r10\n")
+	w.WriteString("    testq %r10, %r10\n")
+	w.WriteString(fmt.Sprintf("    jnz %s\n", readyLabel))
+	w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %%r10\n", heapSym))
+	w.WriteString(fmt.Sprintf("%s:\n", readyLabel))
+	// r10 = alloc start, rdi = new_cap.
+	w.WriteString("    movq %rdi, %r11\n")
+	w.WriteString("    shlq $3, %r11\n")                         // r11 = new_cap * 8
+	w.WriteString("    leaq (%r10,%r11,1), %r11\n")              // r11 = new heap ptr
+	w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %%rcx\n", heapPtrSym))
+	w.WriteString("    movq %r11, (%rcx)\n") // update heap ptr
+	// r10 = new data block address.
+
+	// Restore saved values.
+	w.WriteString("    popq %rdi\n")  // new_cap
+	w.WriteString("    popq %rcx\n")  // len
+	w.WriteString("    popq %r11\n")  // val
+	w.WriteString("    movq %r10, %r8\n") // r8 = new data
+	w.WriteString("    popq %r10\n")  // arrPtr
+
+	// Copy old data to new data. r8=new_data, rcx=len.
+	w.WriteString("    pushq %rsi\n")
+	w.WriteString("    movq (%r10), %rsi\n") // rsi = old data_ptr
+	w.WriteString("    pushq %rdx\n")
+	w.WriteString("    xorq %rdx, %rdx\n") // i = 0
+	w.WriteString(fmt.Sprintf("%s:\n", copyLabel))
+	w.WriteString("    cmpq %rcx, %rdx\n")
+	w.WriteString(fmt.Sprintf("    jge %s\n", copyDoneLabel))
+	w.WriteString("    movq (%rsi,%rdx,8), %r9\n")
+	w.WriteString("    movq %r9, (%r8,%rdx,8)\n")
+	w.WriteString("    incq %rdx\n")
+	w.WriteString(fmt.Sprintf("    jmp %s\n", copyLabel))
+	w.WriteString(fmt.Sprintf("%s:\n", copyDoneLabel))
+	w.WriteString("    popq %rdx\n")
+	w.WriteString("    popq %rsi\n")
+
+	// Update header: data_ptr = new_data, cap = new_cap.
+	w.WriteString("    movq %r8, (%r10)\n")
+	w.WriteString("    movq %rdi, 16(%r10)\n")
+
+	// --- NO GROW ---
+	w.WriteString(fmt.Sprintf("%s:\n", noGrowLabel))
+	// Append value: data[len] = val.
+	w.WriteString("    movq (%r10), %rdi\n")          // rdi = data_ptr
+	w.WriteString("    movq 8(%r10), %rcx\n")         // rcx = len (reload after possible grow)
+	w.WriteString("    movq %r11, (%rdi,%rcx,8)\n")   // data[len] = val
 	w.WriteString("    incq %rcx\n")
-	w.WriteString("    movq %rcx, 8(%r10)\n") // len++
+	w.WriteString("    movq %rcx, 8(%r10)\n")         // len++
 	w.WriteString("    popq %rcx\n")
 	w.WriteString("    popq %rdi\n")
 }
@@ -1555,6 +1667,10 @@ func (e *x86_64Emitter) emitNASMArrayAppend(fn *IRFunc, instr IRInstr) {
 
 	id := e.uniqueID()
 	noGrowLabel := fmt.Sprintf(".aang_%d", id)
+	capOkLabel := fmt.Sprintf(".aaco_%d", id)
+	copyLabel := fmt.Sprintf(".aacp_%d", id)
+	copyDoneLabel := fmt.Sprintf(".aacd_%d", id)
+	readyLabel := fmt.Sprintf(".aahr_%d", id)
 
 	if arrPtr != "r10" {
 		w.WriteString(fmt.Sprintf("    mov r10, %s\n", arrPtr))
@@ -1564,15 +1680,75 @@ func (e *x86_64Emitter) emitNASMArrayAppend(fn *IRFunc, instr IRInstr) {
 	}
 	w.WriteString("    push rdi\n")
 	w.WriteString("    push rcx\n")
-	// Simple append without grow for NASM (grow same as GAS — simplified).
-	w.WriteString("    mov rcx, [r10+8]\n")     // len
-	w.WriteString("    mov rdi, [r10]\n")       // data_ptr
-	w.WriteString("    mov [rdi+rcx*8], r11\n") // data[len] = val
+	// Load len and cap.
+	w.WriteString("    mov rcx, [r10+8]\n")  // rcx = len
+	w.WriteString("    mov rdi, [r10+16]\n") // rdi = cap
+	w.WriteString("    cmp rcx, rdi\n")
+	w.WriteString(fmt.Sprintf("    jl %s\n", noGrowLabel))
+
+	// --- GROW ---
+	w.WriteString("    shl rdi, 1\n")
+	w.WriteString("    cmp rdi, 4\n")
+	w.WriteString(fmt.Sprintf("    jge %s\n", capOkLabel))
+	w.WriteString("    mov rdi, 4\n")
+	w.WriteString(fmt.Sprintf("%s:\n", capOkLabel))
+
+	// Save r10(arrPtr), r11(val), rcx(len), rdi(new_cap).
+	w.WriteString("    push r10\n")
+	w.WriteString("    push r11\n")
+	w.WriteString("    push rcx\n")
+	w.WriteString("    push rdi\n")
+
+	// Inline heap alloc: new_cap * 8 bytes.
+	w.WriteString("    lea rcx, [rel _novus_heap_ptr]\n")
+	w.WriteString("    mov r10, [rcx]\n")
+	w.WriteString("    test r10, r10\n")
+	w.WriteString(fmt.Sprintf("    jnz %s\n", readyLabel))
+	w.WriteString("    lea r10, [rel _novus_heap]\n")
+	w.WriteString(fmt.Sprintf("%s:\n", readyLabel))
+	w.WriteString("    mov r8, rdi\n")
+	w.WriteString("    shl r8, 3\n")           // r8 = new_cap * 8
+	w.WriteString("    lea r8, [r10+r8]\n")    // r8 = new heap ptr
+	w.WriteString("    lea rcx, [rel _novus_heap_ptr]\n")
+	w.WriteString("    mov [rcx], r8\n")       // update heap ptr
+	// r10 = new data block address.
+
+	// Restore saved values.
+	w.WriteString("    pop rdi\n")  // new_cap
+	w.WriteString("    pop rcx\n")  // len
+	w.WriteString("    pop r11\n")  // val
+	w.WriteString("    mov r8, r10\n") // r8 = new data
+	w.WriteString("    pop r10\n")  // arrPtr
+
+	// Copy old data to new data.
+	w.WriteString("    push rsi\n")
+	w.WriteString("    mov rsi, [r10]\n") // rsi = old data_ptr
+	w.WriteString("    push rdx\n")
+	w.WriteString("    xor rdx, rdx\n") // i = 0
+	w.WriteString(fmt.Sprintf("%s:\n", copyLabel))
+	w.WriteString("    cmp rdx, rcx\n")
+	w.WriteString(fmt.Sprintf("    jge %s\n", copyDoneLabel))
+	w.WriteString("    mov r9, [rsi+rdx*8]\n")
+	w.WriteString("    mov [r8+rdx*8], r9\n")
+	w.WriteString("    inc rdx\n")
+	w.WriteString(fmt.Sprintf("    jmp %s\n", copyLabel))
+	w.WriteString(fmt.Sprintf("%s:\n", copyDoneLabel))
+	w.WriteString("    pop rdx\n")
+	w.WriteString("    pop rsi\n")
+
+	// Update header.
+	w.WriteString("    mov [r10], r8\n")
+	w.WriteString("    mov [r10+16], rdi\n")
+
+	// --- NO GROW ---
+	w.WriteString(fmt.Sprintf("%s:\n", noGrowLabel))
+	w.WriteString("    mov rdi, [r10]\n")        // data_ptr
+	w.WriteString("    mov rcx, [r10+8]\n")      // len (reload)
+	w.WriteString("    mov [rdi+rcx*8], r11\n")  // data[len] = val
 	w.WriteString("    inc rcx\n")
-	w.WriteString("    mov [r10+8], rcx\n") // len++
+	w.WriteString("    mov [r10+8], rcx\n")      // len++
 	w.WriteString("    pop rcx\n")
 	w.WriteString("    pop rdi\n")
-	_ = noGrowLabel
 }
 
 func (e *x86_64Emitter) emitNASMArrayPop(fn *IRFunc, instr IRInstr) {
@@ -1750,4 +1926,89 @@ func nasmQuoteString(s string) string {
 	flush()
 
 	return strings.Join(parts, ", ")
+}
+
+// ---------------------------------------------------------------------------
+// x86_64 Flag operations
+// ---------------------------------------------------------------------------
+
+// flagNameToX86Setcc maps flag names to x86 SETcc instruction suffixes.
+func flagNameToX86Setcc(name string) string {
+	switch name {
+	case "c", "carry", "cs", "cf":
+		return "setc" // carry flag
+	case "z", "zero", "zero_flag":
+		return "setz" // zero flag
+	case "n", "negative", "negative_flag":
+		return "sets" // sign flag
+	case "v", "overflow", "overflow_flag":
+		return "seto" // overflow flag
+	}
+	return ""
+}
+
+func (e *x86_64Emitter) emitGASFlagOp(fn *IRFunc, instr IRInstr) {
+	w := e.b
+
+	flagName := ""
+	if instr.Op == IRGetFlag {
+		if instr.Src1.Kind == OpPhysReg {
+			flagName = instr.Src1.PhysReg
+		} else if instr.Src1.Kind == OpLabel {
+			flagName = instr.Src1.Label
+		}
+	} else {
+		if instr.Dst.Kind == OpPhysReg {
+			flagName = instr.Dst.PhysReg
+		} else if instr.Dst.Kind == OpLabel {
+			flagName = instr.Dst.Label
+		}
+	}
+
+	if instr.Op == IRGetFlag {
+		setcc := flagNameToX86Setcc(flagName)
+		if setcc != "" {
+			w.WriteString("    xorq %r10, %r10\n")
+			w.WriteString(fmt.Sprintf("    %s %%r10b\n", setcc))
+		} else {
+			w.WriteString(fmt.Sprintf("    ## getflag: unrecognised flag %q\n", flagName))
+			w.WriteString("    xorq %r10, %r10\n")
+		}
+		e.gasStoreToOperand(fn, instr.Dst, "%r10")
+	} else {
+		w.WriteString(fmt.Sprintf("    ## setflag %q not directly supported on x86\n", flagName))
+	}
+}
+
+func (e *x86_64Emitter) emitNASMFlagOp(fn *IRFunc, instr IRInstr) {
+	w := e.b
+
+	flagName := ""
+	if instr.Op == IRGetFlag {
+		if instr.Src1.Kind == OpPhysReg {
+			flagName = instr.Src1.PhysReg
+		} else if instr.Src1.Kind == OpLabel {
+			flagName = instr.Src1.Label
+		}
+	} else {
+		if instr.Dst.Kind == OpPhysReg {
+			flagName = instr.Dst.PhysReg
+		} else if instr.Dst.Kind == OpLabel {
+			flagName = instr.Dst.Label
+		}
+	}
+
+	if instr.Op == IRGetFlag {
+		setcc := flagNameToX86Setcc(flagName)
+		if setcc != "" {
+			w.WriteString("    xor r10, r10\n")
+			w.WriteString(fmt.Sprintf("    %s r10b\n", setcc))
+		} else {
+			w.WriteString(fmt.Sprintf("    ; getflag: unrecognised flag %q\n", flagName))
+			w.WriteString("    xor r10, r10\n")
+		}
+		e.nasmStoreToOperand(fn, instr.Dst, "r10")
+	} else {
+		w.WriteString(fmt.Sprintf("    ; setflag %q not directly supported on x86\n", flagName))
+	}
 }

@@ -183,9 +183,16 @@ func (p *Parser) parseProgram() *ast.Program {
 		prog.Module = p.parseModuleDecl()
 	}
 
-	// Zero or more import declarations.
-	for p.check(lexer.IMPORT) {
-		prog.Imports = append(prog.Imports, p.parseImportDecl())
+	// Zero or more import declarations (and possible #if blocks before functions).
+	for p.check(lexer.IMPORT) || p.check(lexer.HASH) {
+		if p.check(lexer.HASH) {
+			ct := p.parseCompTimeIf()
+			if ct != nil {
+				prog.CompTimeBlocks = append(prog.CompTimeBlocks, ct)
+			}
+		} else {
+			prog.Imports = append(prog.Imports, p.parseImportDecl())
+		}
 	}
 
 	// Zero or more top-level declarations (functions or global variables).
@@ -199,6 +206,11 @@ func (p *Parser) parseProgram() *ast.Program {
 			g := p.parseGlobalVar()
 			if g != nil {
 				prog.Globals = append(prog.Globals, g)
+			}
+		} else if p.check(lexer.HASH) {
+			ct := p.parseCompTimeIf()
+			if ct != nil {
+				prog.CompTimeBlocks = append(prog.CompTimeBlocks, ct)
 			}
 		} else {
 			p.addError(p.peek(), fmt.Sprintf("expected function or variable declaration, got %s", p.peek().Type))
@@ -255,6 +267,11 @@ func (p *Parser) parseImportDecl() *ast.ImportDecl {
 	} else {
 		first := p.expect(lexer.IDENT, "expected import path")
 		path = first.Value
+		// Support hyphens in path segments: my-lib → "my-lib"
+		for p.check(lexer.MINUS) && p.peekAt(1).Type == lexer.IDENT {
+			p.advance() // consume '-'
+			path += "-" + p.advance().Value
+		}
 	}
 
 	// Consume additional path segments: /ident or /.. sequences.
@@ -267,6 +284,11 @@ func (p *Parser) parseImportDecl() *ast.ImportDecl {
 		} else {
 			seg := p.expect(lexer.IDENT, "expected path segment after '/'")
 			path += "/" + seg.Value
+			// Support hyphens in path segments.
+			for p.check(lexer.MINUS) && p.peekAt(1).Type == lexer.IDENT {
+				p.advance() // consume '-'
+				path += "-" + p.advance().Value
+			}
 		}
 	}
 
@@ -298,6 +320,85 @@ func (p *Parser) parseImportDecl() *ast.ImportDecl {
 		Alias:     alias,
 		Pos:       p.position(tok),
 	}
+}
+
+// parseCompTimeIf parses a compile-time conditional block:
+//
+//	#if(variable == "value") { ... }
+//	#if(variable != "value") { ... }
+//
+// The body may contain import, fn, and let declarations.
+// Available variables: os, arch.
+func (p *Parser) parseCompTimeIf() *ast.CompTimeIf {
+	tok := p.advance() // consume '#'
+	// Expect 'if' keyword after '#'.
+	ifTok := p.peek()
+	if ifTok.Type != lexer.IF {
+		p.addError(ifTok, "expected 'if' after '#'")
+		p.synchronize()
+		return nil
+	}
+	p.advance() // consume 'if'
+
+	p.expect(lexer.LPAREN, "expected '(' after '#if'")
+
+	// Parse condition: variable == "value" or variable != "value".
+	varTok := p.expect(lexer.IDENT, "expected variable name (os, arch)")
+	variable := varTok.Value
+
+	opTok := p.peek()
+	var operator string
+	if opTok.Type == lexer.EQ {
+		operator = "=="
+		p.advance()
+	} else if opTok.Type == lexer.NEQ {
+		operator = "!="
+		p.advance()
+	} else {
+		p.addError(opTok, "expected '==' or '!=' in #if condition")
+		p.synchronize()
+		return nil
+	}
+
+	valueTok := p.expect(lexer.STRING, "expected string value in #if condition")
+	// Strip quotes from the value.
+	value := valueTok.Value
+	if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') {
+		value = value[1 : len(value)-1]
+	}
+
+	p.expect(lexer.RPAREN, "expected ')' after #if condition")
+	p.expect(lexer.LBRACE, "expected '{' after #if condition")
+
+	ct := &ast.CompTimeIf{
+		Variable: variable,
+		Operator: operator,
+		Value:    value,
+		Pos:      p.position(tok),
+	}
+
+	// Parse body: imports, functions, and global variables until '}'.
+	for !p.check(lexer.RBRACE) && !p.check(lexer.EOF) {
+		if p.check(lexer.IMPORT) {
+			ct.Imports = append(ct.Imports, p.parseImportDecl())
+		} else if p.check(lexer.FN) {
+			fn := p.parseFnDecl()
+			if fn != nil {
+				ct.Functions = append(ct.Functions, fn)
+			}
+		} else if p.check(lexer.LET) {
+			g := p.parseGlobalVar()
+			if g != nil {
+				ct.Globals = append(ct.Globals, g)
+			}
+		} else {
+			p.addError(p.peek(), fmt.Sprintf("expected import, fn, or let inside #if block, got %s", p.peek().Type))
+			p.synchronize()
+		}
+	}
+
+	p.expect(lexer.RBRACE, "expected '}' to close #if block")
+	return ct
 }
 
 func (p *Parser) parseFnDecl() *ast.FnDecl {

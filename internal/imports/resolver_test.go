@@ -2,6 +2,9 @@ package imports
 
 import (
 	"novus/internal/ast"
+	"novus/internal/lexer"
+	"novus/internal/parser"
+	"os"
 	"testing"
 )
 
@@ -390,5 +393,160 @@ func TestMaxImportDepthGuard(t *testing.T) {
 	}
 	if maxImportDepth > 1024 {
 		t.Errorf("maxImportDepth %d is too high, expected at most 1024", maxImportDepth)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Directory import resolution tests
+// ---------------------------------------------------------------------------
+
+func TestDirectoryImportResolvesToMainNov(t *testing.T) {
+	// Create a temporary directory structure: lib/mymod/main.nov
+	dir := t.TempDir()
+	modDir := dir + "/lib/mymod"
+	if err := os.MkdirAll(modDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mainNov := modDir + "/main.nov"
+	if err := os.WriteFile(mainNov, []byte("module mymod;\nfn helper() -> i32 { return 42; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Create root source file.
+	rootFile := dir + "/main.nov"
+	if err := os.WriteFile(rootFile, []byte("module main;\nimport lib/mymod;\nfn main() -> i32 { return helper(); }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Parse and resolve.
+	content, _ := os.ReadFile(rootFile)
+	tokens, _ := lexer.Lex(string(content))
+	prog, parseErrs := parser.Parse(tokens)
+	if len(parseErrs) > 0 {
+		t.Fatalf("parse errors: %v", parseErrs)
+	}
+
+	resolver := NewResolver(rootFile)
+	merged, resolveErrs := resolver.Resolve(prog, rootFile)
+	if len(resolveErrs) > 0 {
+		t.Fatalf("resolve errors: %v", resolveErrs)
+	}
+
+	// Should have the imported function.
+	found := false
+	for _, fn := range merged.Functions {
+		if fn.Name == "helper" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected imported function 'helper' from lib/mymod/main.nov")
+	}
+}
+
+func TestDirectoryImportFallbackWhenNoFile(t *testing.T) {
+	// Create structure where lib/mymod.nov does NOT exist, but lib/mymod/main.nov does.
+	dir := t.TempDir()
+	modDir := dir + "/mymod"
+	if err := os.MkdirAll(modDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mainNov := modDir + "/main.nov"
+	if err := os.WriteFile(mainNov, []byte("module mymod;\nfn greet() -> i32 { return 1; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rootFile := dir + "/main.nov"
+	if err := os.WriteFile(rootFile, []byte("module main;\nimport mymod;\nfn main() -> i32 { return greet(); }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	content, _ := os.ReadFile(rootFile)
+	tokens, _ := lexer.Lex(string(content))
+	prog, _ := parser.Parse(tokens)
+
+	resolver := NewResolver(rootFile)
+	merged, resolveErrs := resolver.Resolve(prog, rootFile)
+	if len(resolveErrs) > 0 {
+		t.Fatalf("resolve errors: %v", resolveErrs)
+	}
+
+	found := false
+	for _, fn := range merged.Functions {
+		if fn.Name == "greet" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected imported function 'greet' from mymod/main.nov")
+	}
+}
+
+func TestHyphenatedPathImport(t *testing.T) {
+	// Create lib with hyphen in name: my-lib/main.nov
+	dir := t.TempDir()
+	modDir := dir + "/my-lib"
+	if err := os.MkdirAll(modDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(modDir+"/main.nov", []byte("module mylib;\nfn util() -> i32 { return 7; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rootFile := dir + "/main.nov"
+	if err := os.WriteFile(rootFile, []byte("module main;\nimport my-lib;\nfn main() -> i32 { return util(); }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	content, _ := os.ReadFile(rootFile)
+	tokens, _ := lexer.Lex(string(content))
+	prog, parseErrs := parser.Parse(tokens)
+	if len(parseErrs) > 0 {
+		t.Fatalf("parse errors: %v", parseErrs)
+	}
+
+	resolver := NewResolver(rootFile)
+	_, resolveErrs := resolver.Resolve(prog, rootFile)
+	if len(resolveErrs) > 0 {
+		t.Fatalf("resolve errors: %v", resolveErrs)
+	}
+}
+
+func TestRelativeDotDotImport(t *testing.T) {
+	// Create dir/lib/helper.nov and dir/src/main.nov where main imports ../lib/helper.
+	dir := t.TempDir()
+	if err := os.MkdirAll(dir+"/lib", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir+"/src", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+"/lib/helper.nov", []byte("module helper;\nfn help() -> i32 { return 5; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rootFile := dir + "/src/main.nov"
+	if err := os.WriteFile(rootFile, []byte("module main;\nimport ../lib/helper;\nfn main() -> i32 { return help(); }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	content, _ := os.ReadFile(rootFile)
+	tokens, _ := lexer.Lex(string(content))
+	prog, parseErrs := parser.Parse(tokens)
+	if len(parseErrs) > 0 {
+		t.Fatalf("parse errors: %v", parseErrs)
+	}
+
+	resolver := NewResolver(rootFile)
+	merged, resolveErrs := resolver.Resolve(prog, rootFile)
+	if len(resolveErrs) > 0 {
+		t.Fatalf("resolve errors: %v", resolveErrs)
+	}
+
+	found := false
+	for _, fn := range merged.Functions {
+		if fn.Name == "help" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected imported function 'help' from ../lib/helper")
 	}
 }

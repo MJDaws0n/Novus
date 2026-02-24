@@ -11,7 +11,6 @@ import standard_lib_macos_silicon;
 // Raw byte access (for arbitrary memory addresses, e.g. mmap'd data)
 // ---------------------------------------------------------------------------
 
-// Read a single unsigned byte (0-255) from a raw memory address.
 fn read_byte(addr: u64) -> i32 {
     let w: i32 = load32(addr);
     let b: i32 = w % 256;
@@ -23,7 +22,6 @@ fn read_byte(addr: u64) -> i32 {
 // C-string helpers (for interfacing with C APIs / raw memory)
 // ---------------------------------------------------------------------------
 
-// Length of a NUL-terminated C string at the given address (max 4096).
 fn cstr_len(addr: u64) -> u64 {
     let i: u64 = 0;
     while (i < 4096) {
@@ -33,14 +31,12 @@ fn cstr_len(addr: u64) -> u64 {
     return i;
 }
 
-// Allocate a string buffer of `size` bytes quickly using doubling.
 fn make_buffer(size: i32) -> str {
     if (size <= 0) { return ""; }
-    let buf: str = "        ";  // start with 8 chars
+    let buf: str = "        ";
     while (len(buf) < size) {
         buf = buf + buf;
     }
-    // Trim to exact size via copy_bytes if oversized
     if (len(buf) > size) {
         let pa: u64 = ptr(buf);
         return copy_bytes_raw(pa, size);
@@ -48,7 +44,6 @@ fn make_buffer(size: i32) -> str {
     return buf;
 }
 
-// Low-level pipe copy (used by make_buffer and copy_bytes).
 fn copy_bytes_raw(src: u64, length: i32) -> str {
     if (length <= 0) { return ""; }
     let buf: str = "";
@@ -78,8 +73,6 @@ fn copy_bytes_raw(src: u64, length: i32) -> str {
     return buf;
 }
 
-// Copy `length` bytes from a raw memory address into a new Novus string.
-// Uses a kernel pipe to transfer raw bytes into a managed string buffer.
 fn copy_bytes(src: u64, length: i32) -> str {
     if (length <= 0) { return ""; }
     let buf: str = "";
@@ -109,7 +102,6 @@ fn copy_bytes(src: u64, length: i32) -> str {
     return buf;
 }
 
-// Convert a NUL-terminated C string at `addr` into a Novus str.
 fn cstr_to_str(addr: u64) -> str {
     let slen: u64 = cstr_len(addr);
     if (slen == 0) { return ""; }
@@ -120,7 +112,6 @@ fn cstr_to_str(addr: u64) -> str {
 // String operations (using native s[i] indexing)
 // ---------------------------------------------------------------------------
 
-// True if `s` starts with the prefix `p`.
 fn starts_with(s: str, p: str) -> bool {
     if (len(s) < len(p)) { return false; }
     let i: i32 = 0;
@@ -131,7 +122,6 @@ fn starts_with(s: str, p: str) -> bool {
     return true;
 }
 
-// True if `s` ends with the suffix `p`.
 fn ends_with(s: str, p: str) -> bool {
     let sl: i32 = len(s);
     let pl: i32 = len(p);
@@ -146,7 +136,6 @@ fn ends_with(s: str, p: str) -> bool {
     return true;
 }
 
-// True if string `s` contains substring `needle`.
 fn str_contains(s: str, needle: str) -> bool {
     let sl: i32 = len(s);
     let nl: i32 = len(needle);
@@ -168,7 +157,6 @@ fn str_contains(s: str, needle: str) -> bool {
     return false;
 }
 
-// Find first occurrence of `needle` in `s`, returns -1 if not found.
 fn str_find(s: str, needle: str) -> i32 {
     let sl: i32 = len(s);
     let nl: i32 = len(needle);
@@ -194,7 +182,6 @@ fn str_find(s: str, needle: str) -> i32 {
 // Substrings
 // ---------------------------------------------------------------------------
 
-// Extract substring from `start` to end of string.
 fn substr(s: str, start: i32) -> str {
     let result: str = "";
     let i: i32 = start;
@@ -205,7 +192,6 @@ fn substr(s: str, start: i32) -> str {
     return result;
 }
 
-// Extract substring from `start` with `count` characters.
 fn substr_len(s: str, start: i32, count: i32) -> str {
     let slen: i32 = len(s);
     if (start >= slen) { return ""; }
@@ -225,7 +211,6 @@ fn substr_len(s: str, start: i32, count: i32) -> str {
 // Byte-level access helpers
 // ---------------------------------------------------------------------------
 
-// Get byte value at index `i` in string `s` (0-255).
 fn byte_at(s: str, i: i32) -> i32 {
     return read_byte(ptr(s) + i32_to_u64(i));
 }
@@ -234,7 +219,6 @@ fn byte_at(s: str, i: i32) -> i32 {
 // CLI argument reading
 // ---------------------------------------------------------------------------
 
-// Read argv[index] from the raw argv pointer passed to main.
 fn argv_get(argv: u64, index: i32) -> str {
     let offset: u64 = i32_to_u64(index) * 8;
     let addr: u64 = i64_to_u64(load64(argv + offset));
