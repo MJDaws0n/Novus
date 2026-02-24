@@ -72,6 +72,10 @@ type Resolver struct {
 
 	// allModules is the ordered list of all resolved modules (depth-first).
 	allModules []*ImportedModule
+
+	// TargetOS and TargetArch are used to resolve #if blocks in imported files.
+	TargetOS   string
+	TargetArch string
 }
 
 // NewResolver creates a new import resolver rooted at the given source file path.
@@ -121,6 +125,7 @@ func (r *Resolver) Resolve(prog *ast.Program, sourceFile string) (*ast.Program, 
 	// Add all imported functions (in import order, depth-first).
 	for _, mod := range r.allModules {
 		for _, fn := range mod.Functions {
+			fn.Imported = true
 			merged.Functions = append(merged.Functions, fn)
 		}
 		// Also merge global variables from imported modules.
@@ -245,6 +250,15 @@ func (r *Resolver) resolveImport(imp *ast.ImportDecl, baseDir string, importerFi
 			r.addError(imp.Pos, absPath, fmt.Sprintf("parse error in imported file: %s", e.Error()))
 		}
 		return
+	}
+
+	// Resolve #if blocks in the imported file using the target OS/arch.
+	if r.TargetOS != "" || r.TargetArch != "" {
+		constants := map[string]string{
+			"os":   r.TargetOS,
+			"arch": r.TargetArch,
+		}
+		ast.ResolveCompTimeBlocks(prog, constants)
 	}
 
 	// Compute the effective alias: if this import has its own alias use it,

@@ -126,6 +126,7 @@ type FnDecl struct {
 	ReturnType  *TypeExpr
 	Body        *BlockStmt
 	Pos         Position
+	Imported    bool // true if this function came from an imported module
 }
 
 func (n *FnDecl) GetPos() Position { return n.Pos }

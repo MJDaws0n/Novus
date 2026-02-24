@@ -285,6 +285,7 @@ func (l *Lowerer) lowerFunction(fn *ast.FnDecl) {
 		Name:       irName,
 		ParamCount: len(fn.Params),
 		ParamNames: make([]string, len(fn.Params)),
+		Imported:   fn.Imported,
 	}
 	l.fn = irFn
 	l.nextVReg = 0

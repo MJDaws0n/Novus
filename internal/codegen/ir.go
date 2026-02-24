@@ -238,8 +238,9 @@ type IRFunc struct {
 	ParamNames []string // parameter names (in order)
 	ParamCount int
 	Instrs     []IRInstr
-	Locals     int // number of local variable stack slots used
-	FrameSize  int // total frame size in bytes (aligned)
+	Locals     int  // number of local variable stack slots used
+	FrameSize  int  // total frame size in bytes (aligned)
+	Imported   bool // true if this function came from an imported module
 }
 
 // Emit appends an instruction to the function.

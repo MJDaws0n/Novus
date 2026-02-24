@@ -2395,3 +2395,114 @@ fn main() -> i32 {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Register warnings: imported functions should NOT generate warnings
+// ---------------------------------------------------------------------------
+
+func TestRegisterWarnings_ImportedFunctionsSkipped(t *testing.T) {
+	arm64Target := &Target{OS: OS_Linux, Arch: Arch_x86_64}
+
+	mod := &IRModule{
+		EntryFunc: "main",
+		Functions: []*IRFunc{
+			{
+				Name:     "imported_fn",
+				Imported: true,
+				Instrs: []IRInstr{
+					{Op: IRMov, Dst: PReg("x0"), Src1: Imm(1)},
+					{Op: IRMov, Dst: PReg("x16"), Src1: Imm(42)},
+				},
+			},
+			{
+				Name:     "main",
+				Imported: false,
+				Instrs: []IRInstr{
+					{Op: IRMov, Dst: PReg("rax"), Src1: Imm(1)},
+				},
+			},
+		},
+	}
+
+	warnings := checkRegisterWarnings(mod, arm64Target)
+	if len(warnings) > 0 {
+		t.Errorf("expected no warnings (imported fn regs should be skipped), got %d: %v", len(warnings), warnings)
+	}
+}
+
+func TestRegisterWarnings_UserCodeWarns(t *testing.T) {
+	arm64Target := &Target{OS: OS_Linux, Arch: Arch_x86_64}
+
+	mod := &IRModule{
+		EntryFunc: "main",
+		Functions: []*IRFunc{
+			{
+				Name:     "main",
+				Imported: false,
+				Instrs: []IRInstr{
+					{Op: IRMov, Dst: PReg("x0"), Src1: Imm(1)},
+				},
+			},
+		},
+	}
+
+	warnings := checkRegisterWarnings(mod, arm64Target)
+	if len(warnings) == 0 {
+		t.Error("expected warnings for ARM64 register in user's x86_64 code, got none")
+	}
+}
+
+func TestLower_ImportedFlagPropagated(t *testing.T) {
+	prog := &ast.Program{
+		Functions: []*ast.FnDecl{
+			{
+				Name:     "imported_fn",
+				Imported: true,
+				Params:   []*ast.Param{},
+				ReturnType: &ast.TypeExpr{Name: "void"},
+				Body:     &ast.BlockStmt{},
+			},
+			{
+				Name:     "main",
+				Imported: false,
+				Params:   []*ast.Param{},
+				ReturnType: &ast.TypeExpr{Name: "void"},
+				Body:     &ast.BlockStmt{},
+			},
+		},
+	}
+
+	target := &Target{OS: OS_Linux, Arch: Arch_x86_64}
+	mod := Lower(prog, target)
+
+	for _, fn := range mod.Functions {
+		switch fn.Name {
+		case "imported_fn":
+			if !fn.Imported {
+				t.Error("imported_fn should have Imported=true in IR")
+			}
+		case "main":
+			if fn.Imported {
+				t.Error("main should have Imported=false in IR")
+			}
+		}
+	}
+}
+
+func TestNovusToolsDir(t *testing.T) {
+	dir := novusToolsDir()
+	if dir == "" {
+		t.Error("novusToolsDir returned empty string")
+	}
+	if !strings.Contains(dir, ".novus") {
+		t.Errorf("expected .novus in tools dir path, got %s", dir)
+	}
+}
+
+func TestDetectToolchainWithPaths(t *testing.T) {
+	target := &Target{OS: OS_Windows, Arch: Arch_x86_64, Flavor: NASM}
+	missing := DetectToolchainWithPaths(target, "/nonexistent/nasm.exe", "/nonexistent/golink.exe")
+	if len(missing) == 0 {
+		t.Error("expected missing tools with nonexistent paths")
+	}
+}
