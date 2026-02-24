@@ -464,12 +464,12 @@ func TestInvalidEscapeSequence(t *testing.T) {
 }
 
 func TestUnknownCharacter(t *testing.T) {
-	tokens, errs := Lex("let # x")
+	tokens, errs := Lex("let $ x")
 	if len(errs) == 0 {
-		t.Fatal("expected error for unknown character '#'")
+		t.Fatal("expected error for unknown character '$'")
 	}
-	if errs[0].Lexeme != "#" {
-		t.Errorf("error lexeme: got %q, want %q", errs[0].Lexeme, "#")
+	if errs[0].Lexeme != "$" {
+		t.Errorf("error lexeme: got %q, want %q", errs[0].Lexeme, "$")
 	}
 	types := tokenTypes(tokens)
 	if len(types) != 3 {

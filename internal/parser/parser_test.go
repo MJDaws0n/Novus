@@ -715,3 +715,172 @@ func TestParseExampleNovFile(t *testing.T) {
 
 	t.Logf("AST:\n%s", ast.DebugString(prog))
 }
+
+// ---------------------------------------------------------------------------
+// Import path parsing: hyphens
+// ---------------------------------------------------------------------------
+
+func TestImportHyphenatedPath(t *testing.T) {
+	prog := parseInput(t, `module test; import my-lib; fn main() -> void {}`)
+	if len(prog.Imports) != 1 {
+		t.Fatalf("expected 1 import, got %d", len(prog.Imports))
+	}
+	if prog.Imports[0].Path != "my-lib" {
+		t.Errorf("import path: got %q, want %q", prog.Imports[0].Path, "my-lib")
+	}
+}
+
+func TestImportHyphenatedPathSegment(t *testing.T) {
+	prog := parseInput(t, `module test; import lib/my-math; fn main() -> void {}`)
+	if len(prog.Imports) != 1 {
+		t.Fatalf("expected 1 import, got %d", len(prog.Imports))
+	}
+	if prog.Imports[0].Path != "lib/my-math" {
+		t.Errorf("import path: got %q, want %q", prog.Imports[0].Path, "lib/my-math")
+	}
+}
+
+func TestImportMultipleHyphens(t *testing.T) {
+	prog := parseInput(t, `module test; import my-cool-lib; fn main() -> void {}`)
+	if len(prog.Imports) != 1 {
+		t.Fatalf("expected 1 import, got %d", len(prog.Imports))
+	}
+	if prog.Imports[0].Path != "my-cool-lib" {
+		t.Errorf("import path: got %q, want %q", prog.Imports[0].Path, "my-cool-lib")
+	}
+}
+
+func TestImportHyphenatedWithAlias(t *testing.T) {
+	prog := parseInput(t, `module test; import my-lib ml; fn main() -> void {}`)
+	if len(prog.Imports) != 1 {
+		t.Fatalf("expected 1 import, got %d", len(prog.Imports))
+	}
+	if prog.Imports[0].Path != "my-lib" {
+		t.Errorf("import path: got %q, want %q", prog.Imports[0].Path, "my-lib")
+	}
+	if prog.Imports[0].Alias != "ml" {
+		t.Errorf("alias: got %q, want %q", prog.Imports[0].Alias, "ml")
+	}
+}
+
+func TestImportRelativeHyphenated(t *testing.T) {
+	prog := parseInput(t, `module test; import ../my-lib/sub-mod; fn main() -> void {}`)
+	if len(prog.Imports) != 1 {
+		t.Fatalf("expected 1 import, got %d", len(prog.Imports))
+	}
+	if prog.Imports[0].Path != "../my-lib/sub-mod" {
+		t.Errorf("import path: got %q, want %q", prog.Imports[0].Path, "../my-lib/sub-mod")
+	}
+}
+
+func TestImportRelativeDotDot(t *testing.T) {
+	prog := parseInput(t, `module test; import ../lib/foo; fn main() -> void {}`)
+	if len(prog.Imports) != 1 {
+		t.Fatalf("expected 1 import, got %d", len(prog.Imports))
+	}
+	if prog.Imports[0].Path != "../lib/foo" {
+		t.Errorf("import path: got %q, want %q", prog.Imports[0].Path, "../lib/foo")
+	}
+}
+
+func TestImportDoubleDotDot(t *testing.T) {
+	prog := parseInput(t, `module test; import ../../foo; fn main() -> void {}`)
+	if len(prog.Imports) != 1 {
+		t.Fatalf("expected 1 import, got %d", len(prog.Imports))
+	}
+	if prog.Imports[0].Path != "../../foo" {
+		t.Errorf("import path: got %q, want %q", prog.Imports[0].Path, "../../foo")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Compile-time conditional (#if) parsing
+// ---------------------------------------------------------------------------
+
+func TestCompTimeIfBlock(t *testing.T) {
+	src := `module test;
+#if(os == "windows") {
+	fn helper() -> i32 { return 1; }
+}
+fn main() -> void {}`
+	prog := parseInput(t, src)
+	if len(prog.CompTimeBlocks) != 1 {
+		t.Fatalf("expected 1 #if block, got %d", len(prog.CompTimeBlocks))
+	}
+	ct := prog.CompTimeBlocks[0]
+	if ct.Variable != "os" {
+		t.Errorf("variable: got %q, want %q", ct.Variable, "os")
+	}
+	if ct.Operator != "==" {
+		t.Errorf("operator: got %q, want %q", ct.Operator, "==")
+	}
+	if ct.Value != "windows" {
+		t.Errorf("value: got %q, want %q", ct.Value, "windows")
+	}
+	if len(ct.Functions) != 1 {
+		t.Errorf("expected 1 function in #if block, got %d", len(ct.Functions))
+	}
+}
+
+func TestCompTimeIfNotEqual(t *testing.T) {
+	src := `module test;
+#if(arch != "x86") {
+	fn helper() -> i32 { return 42; }
+}
+fn main() -> void {}`
+	prog := parseInput(t, src)
+	if len(prog.CompTimeBlocks) != 1 {
+		t.Fatalf("expected 1 #if block, got %d", len(prog.CompTimeBlocks))
+	}
+	ct := prog.CompTimeBlocks[0]
+	if ct.Operator != "!=" {
+		t.Errorf("operator: got %q, want %q", ct.Operator, "!=")
+	}
+}
+
+func TestCompTimeIfWithImport(t *testing.T) {
+	src := `module test;
+#if(os == "linux") {
+	import mylib;
+}
+fn main() -> void {}`
+	prog := parseInput(t, src)
+	if len(prog.CompTimeBlocks) != 1 {
+		t.Fatalf("expected 1 #if block, got %d", len(prog.CompTimeBlocks))
+	}
+	ct := prog.CompTimeBlocks[0]
+	if len(ct.Imports) != 1 {
+		t.Errorf("expected 1 import in #if block, got %d", len(ct.Imports))
+	}
+}
+
+func TestCompTimeIfWithGlobal(t *testing.T) {
+	src := `module test;
+#if(os == "darwin") {
+	let version: i32 = 10;
+}
+fn main() -> void {}`
+	prog := parseInput(t, src)
+	if len(prog.CompTimeBlocks) != 1 {
+		t.Fatalf("expected 1 #if block, got %d", len(prog.CompTimeBlocks))
+	}
+	ct := prog.CompTimeBlocks[0]
+	if len(ct.Globals) != 1 {
+		t.Errorf("expected 1 global in #if block, got %d", len(ct.Globals))
+	}
+}
+
+func TestMultipleCompTimeIfBlocks(t *testing.T) {
+	src := `module test;
+#if(os == "windows") {
+	fn win_helper() -> i32 { return 1; }
+}
+#if(os == "linux") {
+	fn linux_helper() -> i32 { return 2; }
+}
+fn main() -> void {}`
+	prog := parseInput(t, src)
+	if len(prog.CompTimeBlocks) != 2 {
+		t.Fatalf("expected 2 #if blocks, got %d", len(prog.CompTimeBlocks))
+	}
+}

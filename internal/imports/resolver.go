@@ -160,10 +160,33 @@ func (r *Resolver) resolveImport(imp *ast.ImportDecl, baseDir string, importerFi
 		absPath = evaled
 	}
 
-	// Check file exists.
-	if _, err := os.Stat(absPath); os.IsNotExist(err) {
-		r.addError(imp.Pos, importerFile, fmt.Sprintf("imported file not found: %s (resolved from %q)", absPath, imp.Path))
-		return
+	// Check file exists. If not, try directory import: path/main.nov.
+	if info, err := os.Stat(absPath); os.IsNotExist(err) {
+		// Try resolving as a directory with main.nov inside.
+		dirPath := filepath.Join(baseDir, relPath)
+		absDirPath, _ := filepath.Abs(dirPath)
+		mainPath := filepath.Join(absDirPath, "main.nov")
+		if _, err2 := os.Stat(mainPath); err2 == nil {
+			absPath = mainPath
+			if evaled, err3 := filepath.EvalSymlinks(absPath); err3 == nil {
+				absPath = evaled
+			}
+		} else {
+			r.addError(imp.Pos, importerFile, fmt.Sprintf("imported file not found: %s (resolved from %q)", absPath, imp.Path))
+			return
+		}
+	} else if err == nil && info.IsDir() {
+		// The path itself is a directory — look for main.nov inside.
+		mainPath := filepath.Join(absPath, "main.nov")
+		if _, err2 := os.Stat(mainPath); err2 == nil {
+			absPath = mainPath
+			if evaled, err3 := filepath.EvalSymlinks(absPath); err3 == nil {
+				absPath = evaled
+			}
+		} else {
+			r.addError(imp.Pos, importerFile, fmt.Sprintf("imported directory %s has no main.nov (resolved from %q)", absPath, imp.Path))
+			return
+		}
 	}
 
 	// Check for circular imports.

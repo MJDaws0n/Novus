@@ -791,10 +791,6 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 
 	// Second pass — analyse each function body.
 	for _, fn := range prog.Functions {
-		// Skip functions already registered via imports (they're analyzed in their own module context).
-		if a.importedFnSet[fn] {
-			continue
-		}
 		// Skip functions that failed registration (reserved names).
 		mangledName := fn.MangledName
 		if mangledName == "" {
@@ -803,7 +799,14 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 		if sym := a.scope.lookupLocal(mangledName); sym == nil || (sym.Kind != SymFunc) {
 			continue
 		}
-		a.analyzeFunction(fn)
+		if a.importedFnSet[fn] {
+			// Imported function bodies: analyze to resolve calls (sets
+			// ResolvedCallee for overloaded calls), but suppress errors
+			// since the function was type-checked in its own module context.
+			a.analyzeImportedFunctionBody(fn)
+		} else {
+			a.analyzeFunction(fn)
+		}
 	}
 }
 
@@ -859,6 +862,36 @@ func (a *Analyzer) analyzeFunction(fn *ast.FnDecl) {
 
 	a.popScope()
 	a.currentFunc = nil
+}
+
+// analyzeImportedFunctionBody resolves calls inside an imported function body
+// so that ResolvedCallee is set for overloaded function calls.  Diagnostics
+// are suppressed because the function was already type-checked in its own
+// module context; we only care about setting ResolvedCallee here.
+func (a *Analyzer) analyzeImportedFunctionBody(fn *ast.FnDecl) {
+	saved := a.diagnostics
+	a.currentFunc = fn
+	a.pushScope()
+
+	// Register parameters.
+	for _, param := range fn.Params {
+		pType := a.resolveType(param.Type)
+		a.scope.define(&Symbol{
+			Name: param.Name,
+			Kind: SymVar,
+			Type: pType,
+			Pos:  param.Pos,
+		})
+	}
+
+	a.pushScope()
+	a.analyzeBlock(fn.Body)
+	a.popScope()
+	a.popScope()
+	a.currentFunc = nil
+
+	// Discard any diagnostics produced while analyzing the imported body.
+	a.diagnostics = saved
 }
 
 func (a *Analyzer) analyzeBlock(block *ast.BlockStmt) {

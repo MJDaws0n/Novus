@@ -1,0 +1,352 @@
+// ---------------------------------------------------------------------------
+// net.nov - networking library for novus (macOS Apple Silicon)
+// ---------------------------------------------------------------------------
+
+module net;
+
+import standard_lib;
+import standard_lib_macos_silicon;
+import memory;
+
+// ---------------------------------------------------------------------------
+// sockaddr_in struct builder
+// we gotta manually build the struct cos novus doesnt have structs fr
+// struct sockaddr_in {
+//   u8  sin_len;      (1 byte)
+//   u8  sin_family;   (1 byte) = AF_INET = 2
+//   u16 sin_port;     (2 bytes, big-endian)
+//   u32 sin_addr;     (4 bytes, big-endian) = INADDR_ANY = 0
+//   u8  sin_zero[8];  (8 bytes padding)
+// } = 16 bytes total
+// ---------------------------------------------------------------------------
+
+fn to_u8_net(v: i32) -> i32 {
+    return ((v % 256) + 256) % 256;
+}
+
+fn make_sockaddr_in(port: i32) -> str {
+    // build a 16-byte sockaddr_in struct for INADDR_ANY
+    let buf: str = "";
+    let i: i32 = 0;
+    while (i < 16) {
+        buf = buf + "\0";
+        i = i + 1;
+    }
+
+    // sin_len = 16
+    buf[0] = to_u8_net(16);
+    // sin_family = AF_INET = 2
+    buf[1] = to_u8_net(2);
+    // sin_port (big-endian) - high byte first
+    buf[2] = to_u8_net(port / 256);
+    buf[3] = to_u8_net(port % 256);
+    // sin_addr = 0.0.0.0 (INADDR_ANY) - already zeroed
+    // sin_zero[8] - already zeroed
+
+    return buf;
+}
+
+// ---------------------------------------------------------------------------
+// socket creation - AF_INET=2, SOCK_STREAM=1, protocol=0
+// returns file descriptor or negative on error
+// ---------------------------------------------------------------------------
+
+fn net_socket() -> i32 {
+    // SYS_socket = 97 on macOS
+    mov(x0, 2);    // AF_INET
+    mov(x1, 1);    // SOCK_STREAM
+    mov(x2, 0);    // protocol
+    mov(x16, 0x2000000 + 97);
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
+
+// ---------------------------------------------------------------------------
+// setsockopt SO_REUSEADDR so we can restart without waiting
+// ---------------------------------------------------------------------------
+
+fn net_set_reuse(fd: i32) -> i32 {
+    // we need to pass a pointer to an i32 with value 1
+    let one: i32 = 1;
+    let one_addr: u64 = &one;
+
+    // SYS_setsockopt = 105
+    // setsockopt(fd, SOL_SOCKET=0xFFFF, SO_REUSEADDR=0x0004, &one, 4)
+    mov(x0, fd);
+    mov(x1, 0xFFFF);    // SOL_SOCKET
+    mov(x2, 0x0004);    // SO_REUSEADDR
+    mov(x3, one_addr);
+    mov(x4, 4);
+    mov(x16, 0x2000000 + 105);
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
+
+// ---------------------------------------------------------------------------
+// bind a socket to a port
+// ---------------------------------------------------------------------------
+
+fn net_bind(fd: i32, port: i32) -> i32 {
+    let addr: str = make_sockaddr_in(port);
+    mov(x9, addr);
+    let addr_ptr: u64 = getreg(x9);
+
+    // SYS_bind = 104
+    mov(x0, fd);
+    mov(x1, addr_ptr);
+    mov(x2, 16);    // sizeof(sockaddr_in)
+    mov(x16, 0x2000000 + 104);
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
+
+// ---------------------------------------------------------------------------
+// listen on a socket with a backlog
+// ---------------------------------------------------------------------------
+
+fn net_listen(fd: i32, backlog: i32) -> i32 {
+    // SYS_listen = 106
+    mov(x0, fd);
+    mov(x1, backlog);
+    mov(x16, 0x2000000 + 106);
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
+
+// ---------------------------------------------------------------------------
+// accept an incoming connection
+// returns the new client fd, or negative on error
+// ---------------------------------------------------------------------------
+
+fn net_accept(fd: i32) -> i32 {
+    // SYS_accept = 30
+    // accept(fd, NULL, NULL) - we dont care about the client address rn
+    mov(x0, fd);
+    mov(x1, 0);
+    mov(x2, 0);
+    mov(x16, 0x2000000 + 30);
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
+
+// ---------------------------------------------------------------------------
+// read from a socket into a buffer string, returns bytes read
+// ---------------------------------------------------------------------------
+
+fn net_read(fd: i32, buf: str, max_len: i32) -> i32 {
+    mov(x0, fd);
+    mov(x1, buf);
+    mov(x2, max_len);
+    mov(x16, 0x2000003);  // SYS_read = 3
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
+
+// ---------------------------------------------------------------------------
+// write raw bytes from a string to a socket
+// ---------------------------------------------------------------------------
+
+fn net_write(fd: i32, data: str, length: i32) -> i32 {
+    mov(x0, fd);
+    mov(x1, data);
+    mov(x2, length);
+    mov(x16, 0x2000004);  // SYS_write = 4
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
+
+// ---------------------------------------------------------------------------
+// close a socket fd
+// ---------------------------------------------------------------------------
+
+fn net_close(fd: i32) -> void {
+    mov(x0, fd);
+    mov(x16, 0x2000006);  // SYS_close = 6
+    syscall();
+}
+
+// ---------------------------------------------------------------------------
+// set socket to non-blocking mode using fcntl
+// ---------------------------------------------------------------------------
+
+fn net_set_nonblock(fd: i32) -> i32 {
+    // SYS_fcntl = 92
+    // first get current flags: fcntl(fd, F_GETFL=3, 0)
+    mov(x0, fd);
+    mov(x1, 3);  // F_GETFL
+    mov(x2, 0);
+    mov(x16, 0x2000000 + 92);
+    syscall();
+    let flags: i32 = u64_to_i32(getreg(x0));
+
+    // set O_NONBLOCK=0x0004: fcntl(fd, F_SETFL=4, flags | O_NONBLOCK)
+    let new_flags: i32 = flags + 4;  // O_NONBLOCK = 0x0004
+    mov(x0, fd);
+    mov(x1, 4);  // F_SETFL
+    mov(x2, new_flags);
+    mov(x16, 0x2000000 + 92);
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
+
+// ---------------------------------------------------------------------------
+// poll a single fd for readability, timeout in ms
+// returns 1 if readable, 0 if timeout, negative on error
+// ---------------------------------------------------------------------------
+
+fn net_poll_read(fd: i32, timeout_ms: i32) -> i32 {
+    // struct pollfd { int fd; short events; short revents; } = 8 bytes
+    let pfd: str = "\0\0\0\0\0\0\0\0";
+
+    // write fd (4 bytes little-endian)
+    pfd[0] = to_u8_net(fd % 256);
+    pfd[1] = to_u8_net((fd / 256) % 256);
+    pfd[2] = to_u8_net((fd / 65536) % 256);
+    pfd[3] = to_u8_net((fd / 16777216) % 256);
+
+    // events = POLLIN = 0x0001 (2 bytes little-endian)
+    pfd[4] = to_u8_net(1);
+    pfd[5] = to_u8_net(0);
+
+    // revents = 0 (already zeroed)
+
+    // SYS_poll = 230
+    mov(x0, pfd);
+    mov(x1, 1);          // nfds = 1
+    mov(x2, timeout_ms);
+    mov(x16, 0x2000000 + 230);
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
+
+// ---------------------------------------------------------------------------
+// make a pre-allocated read buffer for network i/o
+// ---------------------------------------------------------------------------
+
+fn net_make_buf(size: i32) -> str {
+    let buf: str = "";
+    let i: i32 = 0;
+    while (i < size) {
+        buf = buf + "\0";
+        i = i + 1;
+    }
+    return buf;
+}
+
+// ---------------------------------------------------------------------------
+// ignore SIGPIPE so writing to a closed socket doesnt kill the whole server
+// SIGPIPE = 13, SIG_IGN = 1
+// uses the sigaction syscall on macOS
+// ---------------------------------------------------------------------------
+
+fn net_ignore_sigpipe() -> void {
+    // on macOS, we can use signal(SIGPIPE, SIG_IGN)
+    // SYS_signal doesn't exist on macOS ARM64, but we can use
+    // a simpler approach: set SO_NOSIGPIPE on each socket
+    // actually the easiest way is to just call sigaction
+    // but that requires building a struct...
+    //
+    // simplest approach: use the __sigaction syscall
+    // or just set SO_NOSIGPIPE socket option on each socket
+    //
+    // lets go with the proc approach: write to /dev/null to test
+    // actually lets just do: signal(13, 1) via syscall
+    // macOS doesn't have SYS_signal, it has SYS_sigaction = 46
+    //
+    // but building a sigaction struct is pain without structs
+    // lets try the BSD-style approach: use sigaction with handler=SIG_IGN=1
+    //
+    // struct sigaction { void(*handler)(int); sigset_t mask; int flags; }
+    // on macOS ARM64: handler=8 bytes, mask=4 bytes, flags=4 bytes = 16 bytes
+    //
+    // actually on macOS, struct __sigaction is more complex
+    // lets just set SO_NOSIGPIPE on sockets when we create them
+    // that's simpler and more reliable
+    //
+    // NOPE even simpler: macOS has SYS_sigaction = 46
+    // void signal(int sig, void (*func)(int))
+    // we can fake it by writing a minimal sigaction struct
+    let sa: str = net_make_buf(128);
+    // sa_handler = SIG_IGN = 1
+    sa[0] = 1;
+    sa[1] = 0;
+    sa[2] = 0;
+    sa[3] = 0;
+    sa[4] = 0;
+    sa[5] = 0;
+    sa[6] = 0;
+    sa[7] = 0;
+    // rest is zeros (mask, flags)
+
+    mov(x0, 13);  // SIGPIPE
+    mov(x1, sa);  // new action
+    mov(x2, 0);   // old action (NULL)
+    mov(x16, 0x200002E);  // SYS_sigaction = 46
+    syscall();
+}
+
+// ---------------------------------------------------------------------------
+// set SO_NOSIGPIPE on a socket (macOS-specific)
+// prevents SIGPIPE when writing to a closed connection
+// ---------------------------------------------------------------------------
+
+fn net_set_nosigpipe(fd: i32) -> i32 {
+    let one: i32 = 1;
+    let one_addr: u64 = &one;
+
+    // setsockopt(fd, SOL_SOCKET=0xFFFF, SO_NOSIGPIPE=0x1022, &one, 4)
+    mov(x0, fd);
+    mov(x1, 0xFFFF);     // SOL_SOCKET
+    mov(x2, 0x1022);     // SO_NOSIGPIPE
+    mov(x3, one_addr);
+    mov(x4, 4);
+    mov(x16, 0x2000000 + 105);  // SYS_setsockopt
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
+
+// ---------------------------------------------------------------------------
+// store8 - write a single byte to a raw memory address
+// uses a pipe trick to write one byte
+// ---------------------------------------------------------------------------
+
+fn store8(addr: u64, val: i32) -> void {
+    // create a tiny 1-byte string with the value we want
+    let tmp: str = "\0";
+    tmp[0] = to_u8_net(val);
+
+    // use direct memory write via pipe trick
+    // write the byte from tmp to addr using memcpy-like approach
+    // actually, since we have the address, we can write directly
+    // using pipe: pipe -> write tmp to pipe -> read from pipe into addr
+
+    // SYS_pipe = 42
+    mov(x16, 0x200002A);
+    syscall();
+    let rfd: i32 = u64_to_i32(getreg(x0));
+    let wfd: i32 = u64_to_i32(getreg(x1));
+
+    // write our byte to the pipe
+    mov(x0, wfd);
+    mov(x1, tmp);
+    mov(x2, 1);
+    mov(x16, 0x2000004);
+    syscall();
+
+    // close write end
+    mov(x0, wfd);
+    mov(x16, 0x2000006);
+    syscall();
+
+    // read from pipe into target address
+    mov(x0, rfd);
+    mov(x1, addr);
+    mov(x2, 1);
+    mov(x16, 0x2000003);
+    syscall();
+
+    // close read end
+    mov(x0, rfd);
+    mov(x16, 0x2000006);
+    syscall();
+}

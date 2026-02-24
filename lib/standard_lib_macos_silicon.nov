@@ -49,22 +49,15 @@ fn exit(code: i32) -> void {
     syscall();
 }
 fn get_time_ns() -> i64 {
-    // Allocate a 16-byte buffer for the timeval struct
     let buf: str = "0123456789abcdef";
-
-    // gettimeofday(timeval *tp, timezone *tzp)
     mov(x0, buf);
     mov(x1, 0);
     mov(x16, 0x2000074);
     syscall();
-
-    // Read back the struct fields using raw memory loads
     mov(x9, buf);
     let base: u64 = getreg(x9);
     let tv_sec: i64 = load64(base);
     let tv_usec: i64 = load64(base + 8);
-
-    // Convert to nanoseconds: tv_sec * 1_000_000_000 + tv_usec * 1000
     return tv_sec * 1000000000 + tv_usec * 1000;
 }
 fn input(prompt: str, buf_len: i32 = 128) -> str {
@@ -105,7 +98,6 @@ fn ptr(s: str) -> u64 {
 }
 
 fn array_data_ptr_u64(arr: []u64) -> i64 {
-    // Array heap layout: [data_ptr(8 bytes), len(8 bytes), cap(8 bytes)]
     mov(x9, arr);
     let hdr: u64 = getreg(x9);
     return load64(hdr);
@@ -114,7 +106,6 @@ fn array_data_ptr_u64(arr: []u64) -> i64 {
 fn execve_raw(path: str, argv: []u64) -> i32 {
     let argv_ptr: i64 = array_data_ptr_u64(argv);
 
-    // envp: [NULL]
     let envp: []u64 = [0];
     let envp_ptr: i64 = array_data_ptr_u64(envp);
 
@@ -122,21 +113,13 @@ fn execve_raw(path: str, argv: []u64) -> i32 {
     mov(x1, argv_ptr);
     mov(x2, envp_ptr);
 
-    // SYS_execve = 59
     mov(x16, 0x2000000 + 59);
     syscall();
 
-    // If we got here, execve failed.
     return u64_to_i32(getreg(x0));
 }
 
 fn fork() -> i32 {
-    // SYS_fork = 2
-    // On macOS ARM64 the raw syscall returns:
-    //   parent: x0 = child_pid, x1 = 0
-    //   child:  x0 = child_pid, x1 = 1
-    // IMPORTANT: save both registers to local vars via getreg() BEFORE
-    // calling any function (like u64_to_i32) — function calls clobber x0/x1.
     mov(x16, 0x2000000 + 2);
     syscall();
     let raw_x0: u64 = getreg(x0);
@@ -156,4 +139,16 @@ fn spawn_execve(path: str, argv: []u64) -> i32 {
         return 1;
     }
     return pid;
+}
+
+// ---------------------------------------------------------------------------
+// Print raw to stdout without newline (for inline output)
+// ---------------------------------------------------------------------------
+
+fn print_raw(msg: str) -> void {
+    mov(x0, 1);
+    mov(x1, msg);
+    mov(x2, len(msg));
+    mov(x16, 0x2000004);
+    syscall();
 }

@@ -45,11 +45,12 @@ type Expr interface {
 // ---------------------------------------------------------------------------
 
 type Program struct {
-	Module    *ModuleDecl
-	Imports   []*ImportDecl
-	Globals   []*GlobalVar
-	Functions []*FnDecl
-	Pos       Position
+	Module         *ModuleDecl
+	Imports        []*ImportDecl
+	Globals        []*GlobalVar
+	Functions      []*FnDecl
+	CompTimeBlocks []*CompTimeIf
+	Pos            Position
 }
 
 func (n *Program) GetPos() Position { return n.Pos }
@@ -83,6 +84,24 @@ type ImportDecl struct {
 }
 
 func (n *ImportDecl) GetPos() Position { return n.Pos }
+
+// CompTimeIf represents a compile-time conditional block:
+//   #if(os == "windows") { ... }
+// The condition is a simple variable == "value" or variable != "value" check.
+// Available variables: os ("windows", "linux", "darwin"), arch ("amd64", "arm64", "x86").
+// When the condition is true, the body (imports, functions, globals) is merged
+// into the program; otherwise the block is discarded before semantic analysis.
+type CompTimeIf struct {
+	Variable  string       // "os" or "arch"
+	Operator  string       // "==" or "!="
+	Value     string       // e.g. "windows", "amd64"
+	Imports   []*ImportDecl
+	Functions []*FnDecl
+	Globals   []*GlobalVar
+	Pos       Position
+}
+
+func (n *CompTimeIf) GetPos() Position { return n.Pos }
 
 // Param represents a single function parameter (name: type) or (name: type = default).
 type Param struct {
@@ -341,6 +360,41 @@ func (n *ArrayLitExpr) GetPos() Position { return n.Pos }
 func (n *ArrayLitExpr) exprNode()        {}
 
 // ---------------------------------------------------------------------------
+// Compile-time conditional resolution
+// ---------------------------------------------------------------------------
+
+// ResolveCompTimeBlocks evaluates all #if blocks in the program and merges
+// the contents of matching blocks into the program's imports, functions, and
+// globals.  Non-matching blocks are discarded.
+//
+// Constants is a map of compile-time variable values, e.g.:
+//
+//	{"os": "windows", "arch": "amd64"}
+func ResolveCompTimeBlocks(prog *Program, constants map[string]string) {
+	for _, ct := range prog.CompTimeBlocks {
+		actual, ok := constants[ct.Variable]
+		if !ok {
+			continue // unknown variable — skip block
+		}
+		match := false
+		switch ct.Operator {
+		case "==":
+			match = actual == ct.Value
+		case "!=":
+			match = actual != ct.Value
+		}
+		if !match {
+			continue
+		}
+		// Merge matching block contents into the program.
+		prog.Imports = append(prog.Imports, ct.Imports...)
+		prog.Functions = append(prog.Functions, ct.Functions...)
+		prog.Globals = append(prog.Globals, ct.Globals...)
+	}
+	prog.CompTimeBlocks = nil // resolved; no longer needed
+}
+
+// ---------------------------------------------------------------------------
 // Debug printer – produces a human-readable tree representation
 // ---------------------------------------------------------------------------
 
@@ -383,6 +437,10 @@ func debugProgram(b *strings.Builder, prog *Program, level int) {
 			typeName = g.Type.Name
 		}
 		fmt.Fprintf(b, "Global: let %s: %s = %s\n", g.Name, typeName, ExprString(g.Value))
+	}
+	for _, ct := range prog.CompTimeBlocks {
+		writeIndent(b, level+1)
+		fmt.Fprintf(b, "#if(%s %s %q)\n", ct.Variable, ct.Operator, ct.Value)
 	}
 	for _, fn := range prog.Functions {
 		debugFnDecl(b, fn, level+1)

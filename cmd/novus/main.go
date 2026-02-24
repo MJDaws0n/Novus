@@ -100,6 +100,26 @@ func run() int {
 		return 1
 	}
 	printDebug("Parsing complete. No errors.")
+
+	// --- Resolve compile-time conditionals (#if blocks) ---
+	if len(program.CompTimeBlocks) > 0 {
+		// Determine the target early so we can evaluate #if conditions.
+		compTimeTarget := resolveTargetFromArgs()
+		if compTimeTarget == nil {
+			// Auto-detect the host target.
+			compTimeTarget, _ = codegen.HostTarget()
+		}
+		if compTimeTarget != nil {
+			constants := map[string]string{
+				"os":   compTimeTarget.OSName(),
+				"arch": compTimeTarget.ArchName(),
+			}
+			printDebug(fmt.Sprintf("Resolving %d #if block(s) with os=%s, arch=%s",
+				len(program.CompTimeBlocks), constants["os"], constants["arch"]))
+			ast.ResolveCompTimeBlocks(program, constants)
+		}
+	}
+
 	printDebug("--- AST ---")
 	printDebug(ast.DebugString(program))
 	printDebug("--- End AST ---")
@@ -243,6 +263,23 @@ func splitTarget(s string) []string {
 		}
 	}
 	return []string{s}
+}
+
+// resolveTargetFromArgs checks for --target=os/arch in CLI args and returns
+// the corresponding Target, or nil if no --target flag is present.
+func resolveTargetFromArgs() *codegen.Target {
+	for _, arg := range os.Args[1:] {
+		if len(arg) > 9 && arg[:9] == "--target=" {
+			parts := splitTarget(arg[9:])
+			if len(parts) == 2 {
+				target, err := codegen.ResolveTarget(parts[0], parts[1])
+				if err == nil {
+					return target
+				}
+			}
+		}
+	}
+	return nil
 }
 
 /**
