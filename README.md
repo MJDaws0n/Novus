@@ -11,6 +11,7 @@ The aim in the short future is to re-write novus, in novus!
 ```sh
 sudo cp "novus_download" /usr/local/bin/novus
 sudo chmod +x /usr/local/bin/novus
+sudo xattr -d com.apple.quarantine /usr/local/bin/novus
 ```
 
 # Build your first app
