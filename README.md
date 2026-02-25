@@ -26,12 +26,12 @@ nox init
 ```sh
 nox pull std
 ```
-4. Write your first app.
+4. Write your first app by edditing the main.nov file
 ```novus
 module novus_example
 
 // Import standard lib as std
-// Use import lib/std; so import without std prefix
+// Use import lib/std; to import without std prefix
 import lib/std std;
 
 fn main() -> i32 {
@@ -42,6 +42,70 @@ fn main() -> i32 {
     std.exit(0);
     return 0;
 }
+```
+5. Build to an executable
+```sh
+novus main.nov
+```
+
+## Without using nox - with libraries
+1. Download the std package, or copy the functions for the respective operating system from [here](https://github.com/MJDaws0n/novus-std)
+2. Create a novus file and add your code.
+```novus
+module novus_example
+
+// Import standard lib as std
+// Use import lib/std; to import without std prefix
+import lib/std std;
+
+fn main() -> i32 {
+    // Print something
+    std.print("Hello World!");
+
+    // Exit program
+    std.exit(0);
+    return 0;
+}
+```
+3. Build to an exectuabl
+```sh
+novus your_file.nov
+```
+
+## Without using nox - without libraries
+1. Create a novus file and add your code.
+```novus
+module novus_example
+
+fn main() -> i32 {
+    // Print something
+    print("Hello World!");
+
+    // Exit program
+    exit(0);
+    return 0;
+}
+
+// Define a print function for macos silicon
+fn print(msg: str) -> void {
+    msg = msg + "\n";
+    mov(x0, 1);
+    mov(x1, msg);
+    mov(x2, len(msg));
+    mov(x16, 0x2000004);
+    syscall();
+}
+
+// Deffine an exit function for macos silicon
+fn exit(code: i32) -> void {
+    mov(x0, code);
+    mov(x16, 0x2000001);
+    syscall();
+}
+```
+2. Build to an exectuable
+```sh
+novus your_file.nov
 ```
 
 # Novus syntax and built in functions
