@@ -627,6 +627,380 @@ fn main() -> void {}
 	}
 }
 
+// Test that #if blocks with imports (not just functions) inside imported files work.
+func TestResolver_CompTimeIfImportInsideImportedFile(t *testing.T) {
+	dir := t.TempDir()
+
+	// Helper file that will be conditionally imported
+	os.WriteFile(dir+"/helper.nov", []byte(`module helper;
+fn helper_fn() -> i32 { return 99; }
+`), 0644)
+
+	// Library that uses #if to conditionally import helper
+	os.WriteFile(dir+"/mylib.nov", []byte(`module mylib;
+#if(os == "darwin") {
+	import helper;
+}
+fn lib_fn() -> i32 { return 1; }
+`), 0644)
+
+	// Main
+	mainFile := dir + "/main.nov"
+	os.WriteFile(mainFile, []byte(`module main;
+import mylib;
+fn main() -> void {}
+`), 0644)
+
+	mainSrc, _ := os.ReadFile(mainFile)
+	tokens, _ := lexer.Lex(string(mainSrc))
+	prog, _ := parser.Parse(tokens)
+
+	resolver := NewResolver(mainFile)
+	resolver.TargetOS = "darwin"
+	resolver.TargetArch = "arm64"
+
+	merged, errs := resolver.Resolve(prog, mainFile)
+	if len(errs) > 0 {
+		t.Fatalf("resolver errors: %v", errs)
+	}
+
+	fnNames := map[string]bool{}
+	for _, fn := range merged.Functions {
+		fnNames[fn.Name] = true
+	}
+
+	if !fnNames["lib_fn"] {
+		t.Error("expected lib_fn to be imported")
+	}
+	if !fnNames["helper_fn"] {
+		t.Error("expected helper_fn (from conditionally imported helper) to be imported")
+	}
+}
+
+// Test that #if blocks with non-matching OS exclude the import entirely.
+func TestResolver_CompTimeIfImportExcluded(t *testing.T) {
+	dir := t.TempDir()
+
+	os.WriteFile(dir+"/win_only.nov", []byte(`module win_only;
+fn win_fn() -> i32 { return 1; }
+`), 0644)
+
+	os.WriteFile(dir+"/mylib.nov", []byte(`module mylib;
+#if(os == "windows") {
+	import win_only;
+}
+fn lib_fn() -> i32 { return 2; }
+`), 0644)
+
+	mainFile := dir + "/main.nov"
+	os.WriteFile(mainFile, []byte(`module main;
+import mylib;
+fn main() -> void {}
+`), 0644)
+
+	mainSrc, _ := os.ReadFile(mainFile)
+	tokens, _ := lexer.Lex(string(mainSrc))
+	prog, _ := parser.Parse(tokens)
+
+	resolver := NewResolver(mainFile)
+	resolver.TargetOS = "darwin"
+	resolver.TargetArch = "arm64"
+
+	merged, errs := resolver.Resolve(prog, mainFile)
+	if len(errs) > 0 {
+		t.Fatalf("resolver errors: %v", errs)
+	}
+
+	fnNames := map[string]bool{}
+	for _, fn := range merged.Functions {
+		fnNames[fn.Name] = true
+	}
+
+	if !fnNames["lib_fn"] {
+		t.Error("expected lib_fn to be imported")
+	}
+	if fnNames["win_fn"] {
+		t.Error("win_fn should NOT be imported when target is darwin")
+	}
+}
+
+// Test deeply nested #if: main → lib (has #if import) → sub-lib (has its own #if functions)
+func TestResolver_CompTimeIfNestedDeep(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(dir+"/sub", 0755)
+
+	// sub/platform.nov has its own #if blocks
+	os.WriteFile(dir+"/sub/platform.nov", []byte(`module platform;
+#if(os == "linux") {
+	fn get_id() -> i32 { return 2; }
+}
+#if(os == "darwin") {
+	fn get_id() -> i32 { return 1; }
+}
+`), 0644)
+
+	// loader.nov uses #if to import the correct sub-module
+	os.WriteFile(dir+"/loader.nov", []byte(`module loader;
+#if(os == "darwin") {
+	import sub/platform;
+}
+fn loader_init() -> i32 { return 0; }
+`), 0644)
+
+	// main imports loader
+	mainFile := dir + "/main.nov"
+	os.WriteFile(mainFile, []byte(`module main;
+import loader;
+fn main() -> void {}
+`), 0644)
+
+	mainSrc, _ := os.ReadFile(mainFile)
+	tokens, _ := lexer.Lex(string(mainSrc))
+	prog, _ := parser.Parse(tokens)
+
+	resolver := NewResolver(mainFile)
+	resolver.TargetOS = "darwin"
+	resolver.TargetArch = "arm64"
+
+	merged, errs := resolver.Resolve(prog, mainFile)
+	if len(errs) > 0 {
+		t.Fatalf("resolver errors: %v", errs)
+	}
+
+	fnNames := map[string]bool{}
+	for _, fn := range merged.Functions {
+		fnNames[fn.Name] = true
+	}
+
+	if !fnNames["loader_init"] {
+		t.Error("expected loader_init")
+	}
+	if !fnNames["get_id"] {
+		t.Error("expected get_id from nested #if (darwin variant)")
+	}
+
+	// Only 1 get_id should exist (darwin only, not linux)
+	count := 0
+	for _, fn := range merged.Functions {
+		if fn.Name == "get_id" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 get_id, got %d", count)
+	}
+}
+
+// Test #if with selective imports: import lib[fn1, fn2] where fn2 comes from #if block.
+func TestResolver_CompTimeIfWithSelectiveImport(t *testing.T) {
+	dir := t.TempDir()
+
+	os.WriteFile(dir+"/mylib.nov", []byte(`module mylib;
+fn always_fn() -> i32 { return 10; }
+fn extra_fn() -> i32 { return 20; }
+#if(os == "darwin") {
+	fn platform_fn() -> i32 { return 1; }
+}
+#if(os == "linux") {
+	fn platform_fn() -> i32 { return 2; }
+}
+`), 0644)
+
+	mainFile := dir + "/main.nov"
+	os.WriteFile(mainFile, []byte(`module main;
+import mylib[always_fn, platform_fn];
+fn main() -> void {}
+`), 0644)
+
+	mainSrc, _ := os.ReadFile(mainFile)
+	tokens, _ := lexer.Lex(string(mainSrc))
+	prog, _ := parser.Parse(tokens)
+
+	resolver := NewResolver(mainFile)
+	resolver.TargetOS = "darwin"
+	resolver.TargetArch = "arm64"
+
+	merged, errs := resolver.Resolve(prog, mainFile)
+	if len(errs) > 0 {
+		t.Fatalf("resolver errors: %v", errs)
+	}
+
+	fnNames := map[string]bool{}
+	for _, fn := range merged.Functions {
+		fnNames[fn.Name] = true
+	}
+
+	if !fnNames["always_fn"] {
+		t.Error("expected always_fn (selected)")
+	}
+	if !fnNames["platform_fn"] {
+		t.Error("expected platform_fn (from #if darwin block, selected)")
+	}
+	if fnNames["extra_fn"] {
+		t.Error("extra_fn should NOT be imported (not in selective list)")
+	}
+}
+
+// Test #if with globals in imported file.
+func TestResolver_CompTimeIfGlobalsInImportedFile(t *testing.T) {
+	dir := t.TempDir()
+
+	os.WriteFile(dir+"/config.nov", []byte(`module config;
+#if(os == "darwin") {
+	let platform_name: str = "macOS";
+}
+#if(os == "windows") {
+	let platform_name: str = "Windows";
+}
+fn get_version() -> i32 { return 1; }
+`), 0644)
+
+	mainFile := dir + "/main.nov"
+	os.WriteFile(mainFile, []byte(`module main;
+import config;
+fn main() -> void {}
+`), 0644)
+
+	mainSrc, _ := os.ReadFile(mainFile)
+	tokens, _ := lexer.Lex(string(mainSrc))
+	prog, _ := parser.Parse(tokens)
+
+	resolver := NewResolver(mainFile)
+	resolver.TargetOS = "darwin"
+	resolver.TargetArch = "arm64"
+
+	merged, errs := resolver.Resolve(prog, mainFile)
+	if len(errs) > 0 {
+		t.Fatalf("resolver errors: %v", errs)
+	}
+
+	// Check that the global from #if(darwin) was merged
+	globalNames := map[string]bool{}
+	for _, g := range merged.Globals {
+		globalNames[g.Name] = true
+	}
+	if !globalNames["platform_name"] {
+		t.Error("expected platform_name global (from darwin #if block)")
+	}
+
+	// Count — should be exactly 1 (only darwin, not windows)
+	count := 0
+	for _, g := range merged.Globals {
+		if g.Name == "platform_name" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 platform_name global, got %d", count)
+	}
+}
+
+// Test that #if blocks with no TargetOS set on resolver are ignored (backwards compat).
+func TestResolver_CompTimeIfNoTarget(t *testing.T) {
+	dir := t.TempDir()
+
+	os.WriteFile(dir+"/mylib.nov", []byte(`module mylib;
+#if(os == "darwin") {
+	fn platform_fn() -> i32 { return 1; }
+}
+fn common_fn() -> i32 { return 0; }
+`), 0644)
+
+	mainFile := dir + "/main.nov"
+	os.WriteFile(mainFile, []byte(`module main;
+import mylib;
+fn main() -> void {}
+`), 0644)
+
+	mainSrc, _ := os.ReadFile(mainFile)
+	tokens, _ := lexer.Lex(string(mainSrc))
+	prog, _ := parser.Parse(tokens)
+
+	// Resolver with NO target set
+	resolver := NewResolver(mainFile)
+
+	merged, errs := resolver.Resolve(prog, mainFile)
+	if len(errs) > 0 {
+		t.Fatalf("resolver errors: %v", errs)
+	}
+
+	fnNames := map[string]bool{}
+	for _, fn := range merged.Functions {
+		fnNames[fn.Name] = true
+	}
+
+	if !fnNames["common_fn"] {
+		t.Error("expected common_fn")
+	}
+	// With no target, #if blocks are NOT resolved, so platform_fn should not exist
+	if fnNames["platform_fn"] {
+		t.Error("platform_fn should NOT be imported when no target is set")
+	}
+}
+
+// Test multiple #if blocks with different conditions in the same imported file.
+func TestResolver_CompTimeIfMultipleConditions(t *testing.T) {
+	dir := t.TempDir()
+
+	os.WriteFile(dir+"/multi.nov", []byte(`module multi;
+#if(os == "darwin") {
+	fn os_fn() -> i32 { return 1; }
+}
+#if(arch == "arm64") {
+	fn arch_fn() -> i32 { return 64; }
+}
+#if(arch == "amd64") {
+	fn arch_fn() -> i32 { return 86; }
+}
+fn common() -> i32 { return 0; }
+`), 0644)
+
+	mainFile := dir + "/main.nov"
+	os.WriteFile(mainFile, []byte(`module main;
+import multi;
+fn main() -> void {}
+`), 0644)
+
+	mainSrc, _ := os.ReadFile(mainFile)
+	tokens, _ := lexer.Lex(string(mainSrc))
+	prog, _ := parser.Parse(tokens)
+
+	resolver := NewResolver(mainFile)
+	resolver.TargetOS = "darwin"
+	resolver.TargetArch = "arm64"
+
+	merged, errs := resolver.Resolve(prog, mainFile)
+	if len(errs) > 0 {
+		t.Fatalf("resolver errors: %v", errs)
+	}
+
+	fnNames := map[string]bool{}
+	for _, fn := range merged.Functions {
+		fnNames[fn.Name] = true
+	}
+
+	if !fnNames["common"] {
+		t.Error("expected common")
+	}
+	if !fnNames["os_fn"] {
+		t.Error("expected os_fn (darwin match)")
+	}
+	if !fnNames["arch_fn"] {
+		t.Error("expected arch_fn (arm64 match)")
+	}
+
+	// Should only have 1 arch_fn (arm64, not amd64)
+	count := 0
+	for _, fn := range merged.Functions {
+		if fn.Name == "arch_fn" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected 1 arch_fn, got %d", count)
+	}
+}
+
 func TestResolver_ImportedFunctionsMarkedAsImported(t *testing.T) {
 	dir := t.TempDir()
 
