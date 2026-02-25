@@ -7,9 +7,9 @@ The aim in the short future is to re-write novus, in novus!
 
 # Quick install
 1. Download the latest from the realeases tab.
-2. Run the following command to install gobally (replace novus with the directy of the executable)
+2. Run the following command to install gobally (macos) (replace novus_download with the directy of the executable)
 ```sh
-sudo cp "novus" /usr/local/bin/novus
+sudo cp "novus_download" /usr/local/bin/novus
 sudo chmod +x /usr/local/bin/novus
 ```
 
