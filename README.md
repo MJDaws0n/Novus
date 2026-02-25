@@ -6,7 +6,7 @@
 The aim in the short future is to re-write novus, in novus!
 
 ## Existing projects in novus
-Manifold Edge Remove - Fixes STL files so they can be 3d printed. Perfect for novus as it needs to be done quickly. Uses novus's window library for rendering a window.
+- Manifold Edge Remove - Fixes STL files so they can be 3d printed. Perfect for novus as it needs to be done quickly. Uses novus's window library for rendering a window.
 https://github.com/MJDaws0n/Manifold-Edge-Remover-V2
 
 # Build and run
