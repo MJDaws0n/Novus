@@ -1,5 +1,5 @@
 # Novus
-**NOTE: ONLY WORKS PROPERLY ON MACOS SILICON (darwin_arm64). - Windows comming soon!**
+**NOTE: This is in very early development and may be very buggy and may not work on some os's or cpu's at all**
 
 *This may be used for my a-level project, therefore there are many references to clients and such.*
 
