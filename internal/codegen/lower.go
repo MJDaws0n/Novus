@@ -320,7 +320,13 @@ func (l *Lowerer) lowerFunction(fn *ast.FnDecl) {
 			// Parameter is on the stack — load from caller's frame.
 			// Spacing must match the emitter's push style:
 			// x86-64 uses 8-byte pushq, ARM64 uses 16-byte str [sp,#-16]!
-			callerOffset := int64(16 + (i-len(l.target.ArgRegs))*l.target.StackArgSlotSize)
+			// On Windows x64, the caller allocates 32 bytes of shadow space
+			// between the return address and the pushed stack args.
+			shadowSpace := 0
+			if l.target.OS == OS_Windows {
+				shadowSpace = 32
+			}
+			callerOffset := int64(16 + shadowSpace + (i-len(l.target.ArgRegs))*l.target.StackArgSlotSize)
 			tmpReg := l.freshVReg()
 			l.emit(IRInstr{
 				Op:   IRLoad,

@@ -839,10 +839,19 @@ func (e *x86_64Emitter) emitNASM() {
 	}
 
 	// BSS: bump-allocator heap.
-	if e.usesHeap() {
+	if e.usesHeap() || e.needsWinMainArgs() {
 		w.WriteString("section .bss\n")
-		w.WriteString("    _novus_heap: resb 1048576\n")
-		w.WriteString("    _novus_heap_ptr: resq 1\n\n")
+		if e.usesHeap() {
+			w.WriteString("    _novus_heap: resb 1048576\n")
+			w.WriteString("    _novus_heap_ptr: resq 1\n")
+		}
+		if e.needsWinMainArgs() {
+			w.WriteString("    _novus_win_argc: resd 1\n")
+			w.WriteString("    _novus_win_argv: resq 1\n")
+			w.WriteString("    _novus_win_envp: resq 1\n")
+			w.WriteString("    _novus_win_newmode: resd 1\n")
+		}
+		w.WriteString("\n")
 	}
 
 	// Global variables in data section.
@@ -863,6 +872,19 @@ func (e *x86_64Emitter) emitNASM() {
 
 	// Collect all Windows API functions used by win_call and emit extern declarations.
 	winExterns := e.collectWinCallExterns()
+	if e.needsWinMainArgs() {
+		// Add __getmainargs from msvcrt.dll for Windows argc/argv setup.
+		found := false
+		for _, name := range winExterns {
+			if name == "__getmainargs" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			winExterns = append(winExterns, "__getmainargs")
+		}
+	}
 	if len(winExterns) > 0 {
 		for _, name := range winExterns {
 			w.WriteString(fmt.Sprintf("extern %s\n", name))
@@ -890,6 +912,24 @@ func (e *x86_64Emitter) emitNASMFunction(fn *IRFunc) {
 	w.WriteString("    mov rbp, rsp\n")
 	if frameSize > 0 {
 		w.WriteString(fmt.Sprintf("    sub rsp, %d\n", frameSize))
+	}
+
+	// On Windows, the entry point doesn't receive argc/argv in registers.
+	// Call __getmainargs from msvcrt.dll to populate them.
+	if fn.Name == "main" && fn.ParamCount >= 2 && e.target.OS == OS_Windows {
+		w.WriteString("    ; --- Windows argc/argv setup via __getmainargs ---\n")
+		w.WriteString("    sub rsp, 48\n")                                     // shadow space (32) + 5th arg (8) + align (8)
+		w.WriteString("    lea rcx, [rel _novus_win_argc]\n")                  // &argc
+		w.WriteString("    lea rdx, [rel _novus_win_argv]\n")                  // &argv
+		w.WriteString("    lea r8, [rel _novus_win_envp]\n")                   // &envp
+		w.WriteString("    xor r9, r9\n")                                      // expand_wildcards = 0
+		w.WriteString("    lea rax, [rel _novus_win_newmode]\n")               // &new_mode
+		w.WriteString("    mov qword [rsp+32], rax\n")                         // 5th arg on stack
+		w.WriteString("    call __getmainargs\n")
+		w.WriteString("    add rsp, 48\n")
+		w.WriteString("    mov ecx, dword [rel _novus_win_argc]\n")            // argc -> rcx
+		w.WriteString("    mov rdx, qword [rel _novus_win_argv]\n")            // argv -> rdx
+		w.WriteString("    ; --- End Windows argc/argv setup ---\n")
 	}
 
 	for _, instr := range fn.Instrs {
@@ -1265,7 +1305,14 @@ func (e *x86_64Emitter) emitNASMCall(fn *IRFunc, instr IRInstr) {
 	argRegs := e.target.ArgRegs
 	stackArgs := 0
 
+	alignPad := 0
 	if len(instr.Args) > len(argRegs) {
+		// On Windows, ensure 16-byte alignment: if odd number of stack args, add padding.
+		extraArgs := len(instr.Args) - len(argRegs)
+		if e.target.OS == OS_Windows && extraArgs%2 != 0 {
+			w.WriteString("    sub rsp, 8\n") // alignment padding
+			alignPad = 8
+		}
 		for i := len(instr.Args) - 1; i >= len(argRegs); i-- {
 			src := e.nasmLoadToReg(fn, instr.Args[i], "r10")
 			w.WriteString(fmt.Sprintf("    push %s\n", src))
@@ -1291,8 +1338,8 @@ func (e *x86_64Emitter) emitNASMCall(fn *IRFunc, instr IRInstr) {
 		w.WriteString("    add rsp, 32\n")
 	}
 
-	if stackArgs > 0 {
-		w.WriteString(fmt.Sprintf("    add rsp, %d\n", stackArgs*8))
+	if stackArgs > 0 || alignPad > 0 {
+		w.WriteString(fmt.Sprintf("    add rsp, %d\n", stackArgs*8+alignPad))
 	}
 
 	if instr.Dst.Kind != OpNone {
@@ -1852,6 +1899,20 @@ func (e *x86_64Emitter) usesHeap() bool {
 			case IRStrConcat, IRArrayNew, IRArrayAppend:
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// needsWinMainArgs checks if the main function takes argc/argv parameters
+// on Windows, requiring a __getmainargs prologue.
+func (e *x86_64Emitter) needsWinMainArgs() bool {
+	if e.target.OS != OS_Windows {
+		return false
+	}
+	for _, fn := range e.mod.Functions {
+		if fn.Name == "main" && fn.ParamCount >= 2 {
+			return true
 		}
 	}
 	return false

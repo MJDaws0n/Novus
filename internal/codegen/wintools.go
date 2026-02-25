@@ -82,7 +82,7 @@ func EnsureWindowsToolchain(verbose bool) (string, string, error) {
 	return nasmPath, golinkPath, nil
 }
 
-// findNASM checks PATH first, then the tools directory.
+// findNASM checks PATH first, then the tools directory (including subdirectories).
 func findNASM(toolsDir string) (string, bool) {
 	if p, err := exec.LookPath("nasm"); err == nil {
 		return p, true
@@ -92,7 +92,20 @@ func findNASM(toolsDir string) (string, bool) {
 	if _, err := os.Stat(localNasm); err == nil {
 		return localNasm, true
 	}
-	// Also check nasm subdirectories (nasm-X.XX.XX).
+	// Check subdirectories of toolsDir/nasm/ (NSIS installer may create
+	// versioned subdirs like nasm-2.16.03/ inside the install directory).
+	nasmDir := filepath.Join(toolsDir, "nasm")
+	if subEntries, err := os.ReadDir(nasmDir); err == nil {
+		for _, se := range subEntries {
+			if se.IsDir() {
+				candidate := filepath.Join(nasmDir, se.Name(), "nasm.exe")
+				if _, err := os.Stat(candidate); err == nil {
+					return candidate, true
+				}
+			}
+		}
+	}
+	// Also check top-level nasm subdirectories (nasm-X.XX.XX).
 	entries, err := os.ReadDir(toolsDir)
 	if err == nil {
 		for _, e := range entries {
