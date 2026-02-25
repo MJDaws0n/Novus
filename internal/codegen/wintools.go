@@ -17,12 +17,15 @@ import (
 //
 // When compiling on Windows and NASM/GoLink are not in PATH, we
 // automatically download them into ~/.novus/tools/ and use them.
+//
+// NASM: Downloaded as an installer (.exe) and run silently with /S /D=...
+// GoLink: Downloaded as a .zip and extracted.
 // ---------------------------------------------------------------------------
 
 const (
-	nasmVersion = "2.16.03"
-	nasmURL     = "https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/win64/nasm-2.16.03-win64.zip"
-	golinkURL   = "https://www.godevtool.com/Golink.zip"
+	nasmVersion      = "2.16.03"
+	nasmInstallerURL = "https://www.nasm.us/pub/nasm/releasebuilds/" + nasmVersion + "/win64/nasm-" + nasmVersion + "-installer-x64.exe"
+	golinkURL        = "https://www.godevtool.com/Golink.zip"
 )
 
 // novusToolsDir returns the path to the Novus tools directory (~/.novus/tools/).
@@ -57,31 +60,23 @@ func EnsureWindowsToolchain(verbose bool) (string, string, error) {
 	}
 
 	if !nasmOK {
-		if verbose {
-			fmt.Println("[toolchain] NASM not found — downloading...")
-		}
+		fmt.Println("[toolchain] NASM not found — downloading and installing...")
 		var err error
-		nasmPath, err = downloadNASM(toolsDir, verbose)
+		nasmPath, err = downloadAndInstallNASM(toolsDir, verbose)
 		if err != nil {
-			return "", "", fmt.Errorf("failed to download NASM: %w", err)
+			return "", "", fmt.Errorf("failed to install NASM: %w", err)
 		}
-		if verbose {
-			fmt.Printf("[toolchain] NASM installed to %s\n", nasmPath)
-		}
+		fmt.Printf("[toolchain] NASM installed to %s\n", nasmPath)
 	}
 
 	if !golinkOK {
-		if verbose {
-			fmt.Println("[toolchain] GoLink not found — downloading...")
-		}
+		fmt.Println("[toolchain] GoLink not found — downloading...")
 		var err error
 		golinkPath, err = downloadGoLink(toolsDir, verbose)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to download GoLink: %w", err)
 		}
-		if verbose {
-			fmt.Printf("[toolchain] GoLink installed to %s\n", golinkPath)
-		}
+		fmt.Printf("[toolchain] GoLink installed to %s\n", golinkPath)
 	}
 
 	return nasmPath, golinkPath, nil
@@ -92,7 +87,7 @@ func findNASM(toolsDir string) (string, bool) {
 	if p, err := exec.LookPath("nasm"); err == nil {
 		return p, true
 	}
-	// Check tools directory.
+	// Check tools directory — the installer puts nasm.exe directly in the target dir.
 	localNasm := filepath.Join(toolsDir, "nasm", "nasm.exe")
 	if _, err := os.Stat(localNasm); err == nil {
 		return localNasm, true
@@ -127,39 +122,52 @@ func findGoLink(toolsDir string) (string, bool) {
 	return "", false
 }
 
-// downloadNASM downloads and extracts NASM to toolsDir/nasm/.
-func downloadNASM(toolsDir string, verbose bool) (string, error) {
-	zipPath := filepath.Join(toolsDir, "nasm.zip")
-	if err := downloadFile(nasmURL, zipPath, verbose); err != nil {
+// downloadAndInstallNASM downloads the NASM installer and runs it silently
+// into toolsDir/nasm/. The NASM Windows installer is NSIS-based and supports
+// /S for silent install and /D= to set the install directory.
+func downloadAndInstallNASM(toolsDir string, verbose bool) (string, error) {
+	installerPath := filepath.Join(toolsDir, "nasm-installer.exe")
+	if err := downloadFile(nasmInstallerURL, installerPath, verbose); err != nil {
 		return "", err
 	}
-	defer os.Remove(zipPath)
+	defer os.Remove(installerPath)
 
 	nasmDir := filepath.Join(toolsDir, "nasm")
 	if err := os.MkdirAll(nasmDir, 0o755); err != nil {
 		return "", err
 	}
 
-	if err := unzip(zipPath, nasmDir); err != nil {
-		return "", fmt.Errorf("failed to extract NASM: %w", err)
+	// Run the NSIS installer silently: /S = silent, /D= sets install directory.
+	// Note: /D= must be the last argument and must NOT be quoted.
+	if verbose {
+		fmt.Printf("[toolchain] Running NASM installer silently to %s ...\n", nasmDir)
+	}
+	cmd := exec.Command(installerPath, "/S", "/D="+nasmDir)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("NASM installer failed: %w", err)
 	}
 
-	// NASM zip usually contains a subdirectory like nasm-2.16.03/.
-	// Find nasm.exe recursively.
-	var nasmExe string
-	filepath.Walk(nasmDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
+	// Verify nasm.exe exists.
+	nasmExe := filepath.Join(nasmDir, "nasm.exe")
+	if _, err := os.Stat(nasmExe); err != nil {
+		// The installer might create a versioned subdirectory.
+		var found string
+		filepath.Walk(nasmDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			if !info.IsDir() && strings.EqualFold(info.Name(), "nasm.exe") {
+				found = path
+				return filepath.SkipAll
+			}
 			return nil
+		})
+		if found == "" {
+			return "", fmt.Errorf("nasm.exe not found after installation in %s", nasmDir)
 		}
-		if !info.IsDir() && strings.EqualFold(info.Name(), "nasm.exe") {
-			nasmExe = path
-			return filepath.SkipAll
-		}
-		return nil
-	})
-
-	if nasmExe == "" {
-		return "", fmt.Errorf("nasm.exe not found after extraction")
+		return found, nil
 	}
 	return nasmExe, nil
 }
@@ -200,20 +208,28 @@ func downloadGoLink(toolsDir string, verbose bool) (string, error) {
 	return golinkExe, nil
 }
 
-// downloadFile downloads a URL to a local file path.
+// downloadFile downloads a URL to a local file path with a proper User-Agent
+// header to avoid 403 rejections from some servers.
 func downloadFile(url, dest string, verbose bool) error {
 	if verbose {
 		fmt.Printf("[toolchain] Downloading %s ...\n", url)
 	}
 
-	resp, err := http.Get(url)
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+	req.Header.Set("User-Agent", "Novus-Compiler/1.0")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download returned status %d", resp.StatusCode)
+		return fmt.Errorf("download of %s returned HTTP %d", url, resp.StatusCode)
 	}
 
 	out, err := os.Create(dest)
@@ -239,7 +255,6 @@ func unzip(src, dest string) error {
 
 		// Prevent zip slip.
 		if !strings.HasPrefix(filepath.Clean(fpath), filepath.Clean(dest)+string(os.PathSeparator)) {
-			// Allow exact match (for files extracted to dest root).
 			if filepath.Clean(fpath) != filepath.Clean(dest) {
 				continue
 			}
