@@ -165,6 +165,26 @@ const (
 	IRLoadGlobal  // dst = load from global label (Src1=label)
 	IRStoreGlobal // store src1 to global label (Dst=label)
 
+	// Floating-point arithmetic (f64) — operands carry IEEE 754 bit patterns in integer regs/slots
+	IRFAdd    // dst = src1 + src2 (float64)
+	IRFSub    // dst = src1 - src2 (float64)
+	IRFMul    // dst = src1 * src2 (float64)
+	IRFDiv    // dst = src1 / src2 (float64)
+	IRFMod    // dst = fmod(src1, src2) (float64)
+	IRFNeg    // dst = -src1 (float64)
+
+	// Float comparison — sets dst to 0 or 1 (integer result)
+	IRFCmpEq // dst = (src1 == src2) float compare
+	IRFCmpNe // dst = (src1 != src2) float compare
+	IRFCmpLt // dst = (src1 <  src2) float compare
+	IRFCmpLe // dst = (src1 <= src2) float compare
+	IRFCmpGt // dst = (src1 >  src2) float compare
+	IRFCmpGe // dst = (src1 >= src2) float compare
+
+	// Float ↔ int conversion
+	IRIntToFloat // dst(f64 bits) = convert src1(i64) to f64
+	IRFloatToInt // dst(i64) = convert src1(f64 bits) to i64 (truncate toward zero)
+
 	// Misc
 	IRComment // emit a comment in the output (src1 = label with comment text)
 	IRData    // emit raw data (used for string constants in data section)
@@ -188,6 +208,10 @@ var irOpNames = map[IROp]string{
 	IRArrayAppend: "array_append", IRArrayPop: "array_pop", IRArrayLen: "array_len",
 	IRWinCall:    "win_call",
 	IRLoadGlobal: "load_global", IRStoreGlobal: "store_global",
+	IRFAdd: "fadd", IRFSub: "fsub", IRFMul: "fmul", IRFDiv: "fdiv", IRFMod: "fmod", IRFNeg: "fneg",
+	IRFCmpEq: "fcmp_eq", IRFCmpNe: "fcmp_ne", IRFCmpLt: "fcmp_lt", IRFCmpLe: "fcmp_le",
+	IRFCmpGt: "fcmp_gt", IRFCmpGe: "fcmp_ge",
+	IRIntToFloat: "i2f", IRFloatToInt: "f2i",
 	IRComment: "comment", IRData: "data",
 }
 
