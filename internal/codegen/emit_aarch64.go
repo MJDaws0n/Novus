@@ -490,6 +490,40 @@ func (e *arm64Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 			}
 			w.WriteString(fmt.Sprintf("    str %s, [x17]\n", src))
 		}
+
+	// Floating-point arithmetic
+	case IRFAdd:
+		e.emitFBinOp(fn, instr, "fadd")
+	case IRFSub:
+		e.emitFBinOp(fn, instr, "fsub")
+	case IRFMul:
+		e.emitFBinOp(fn, instr, "fmul")
+	case IRFDiv:
+		e.emitFBinOp(fn, instr, "fdiv")
+	case IRFMod:
+		e.emitFMod(fn, instr)
+	case IRFNeg:
+		e.emitFNeg(fn, instr)
+
+	// Float comparison
+	case IRFCmpEq:
+		e.emitFCmp(fn, instr, "eq")
+	case IRFCmpNe:
+		e.emitFCmp(fn, instr, "ne")
+	case IRFCmpLt:
+		e.emitFCmp(fn, instr, "mi")
+	case IRFCmpLe:
+		e.emitFCmp(fn, instr, "ls")
+	case IRFCmpGt:
+		e.emitFCmp(fn, instr, "gt")
+	case IRFCmpGe:
+		e.emitFCmp(fn, instr, "ge")
+
+	// Float ↔ int conversion
+	case IRIntToFloat:
+		e.emitIntToFloat(fn, instr)
+	case IRFloatToInt:
+		e.emitFloatToInt(fn, instr)
 	}
 }
 
@@ -539,6 +573,87 @@ func (e *arm64Emitter) emitCmp(fn *IRFunc, instr IRInstr, cond string) {
 		w.WriteString(fmt.Sprintf("    cmp %s, %s\n", src1, src2))
 	}
 	w.WriteString(fmt.Sprintf("    cset %s, %s\n", dst, cond))
+	e.spillIfNeeded(fn, instr.Dst, dst)
+}
+
+// ---------------------------------------------------------------------------
+// Floating-point helpers (ARM64 NEON/VFP)
+//
+// IEEE 754 f64 bit patterns travel in x-registers and stack slots.
+// For FP arithmetic we move the bit pattern into d-registers, operate,
+// then move the result back to an x-register for the generic spill path.
+// Scratch FP registers: d0, d1, d2  (caller-saved, safe to clobber).
+// ---------------------------------------------------------------------------
+
+// emitFBinOp handles fadd, fsub, fmul, fdiv.
+func (e *arm64Emitter) emitFBinOp(fn *IRFunc, instr IRInstr, mnemonic string) {
+	w := e.b
+	src1 := e.loadToReg(fn, instr.Src1, "x11")
+	src2 := e.loadToReg(fn, instr.Src2, "x12")
+	w.WriteString(fmt.Sprintf("    fmov d1, %s\n", src1))
+	w.WriteString(fmt.Sprintf("    fmov d2, %s\n", src2))
+	w.WriteString(fmt.Sprintf("    %s d0, d1, d2\n", mnemonic))
+	dst := e.dstReg(fn, instr.Dst, "x10")
+	w.WriteString(fmt.Sprintf("    fmov %s, d0\n", dst))
+	e.spillIfNeeded(fn, instr.Dst, dst)
+}
+
+// emitFMod handles fmod (a - trunc(a/b) * b).
+func (e *arm64Emitter) emitFMod(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	src1 := e.loadToReg(fn, instr.Src1, "x11")
+	src2 := e.loadToReg(fn, instr.Src2, "x12")
+	w.WriteString(fmt.Sprintf("    fmov d1, %s\n", src1))
+	w.WriteString(fmt.Sprintf("    fmov d2, %s\n", src2))
+	w.WriteString("    fdiv d3, d1, d2\n")     // d3 = a / b
+	w.WriteString("    frintz d3, d3\n")        // d3 = trunc(d3) — round toward zero
+	w.WriteString("    fmsub d0, d3, d2, d1\n") // d0 = d1 - d3*d2 = a - trunc(a/b)*b
+	dst := e.dstReg(fn, instr.Dst, "x10")
+	w.WriteString(fmt.Sprintf("    fmov %s, d0\n", dst))
+	e.spillIfNeeded(fn, instr.Dst, dst)
+}
+
+// emitFNeg handles fneg.
+func (e *arm64Emitter) emitFNeg(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	src := e.loadToReg(fn, instr.Src1, "x11")
+	w.WriteString(fmt.Sprintf("    fmov d1, %s\n", src))
+	w.WriteString("    fneg d0, d1\n")
+	dst := e.dstReg(fn, instr.Dst, "x10")
+	w.WriteString(fmt.Sprintf("    fmov %s, d0\n", dst))
+	e.spillIfNeeded(fn, instr.Dst, dst)
+}
+
+// emitFCmp handles float comparisons: fcmp + cset.
+func (e *arm64Emitter) emitFCmp(fn *IRFunc, instr IRInstr, cond string) {
+	w := e.b
+	src1 := e.loadToReg(fn, instr.Src1, "x11")
+	src2 := e.loadToReg(fn, instr.Src2, "x12")
+	w.WriteString(fmt.Sprintf("    fmov d1, %s\n", src1))
+	w.WriteString(fmt.Sprintf("    fmov d2, %s\n", src2))
+	w.WriteString("    fcmp d1, d2\n")
+	dst := e.dstReg(fn, instr.Dst, "x10")
+	w.WriteString(fmt.Sprintf("    cset %s, %s\n", dst, cond))
+	e.spillIfNeeded(fn, instr.Dst, dst)
+}
+
+// emitIntToFloat: scvtf (signed int → f64).
+func (e *arm64Emitter) emitIntToFloat(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	src := e.loadToReg(fn, instr.Src1, "x11")
+	w.WriteString(fmt.Sprintf("    scvtf d0, %s\n", src))
+	dst := e.dstReg(fn, instr.Dst, "x10")
+	w.WriteString(fmt.Sprintf("    fmov %s, d0\n", dst))
+	e.spillIfNeeded(fn, instr.Dst, dst)
+}
+
+// emitFloatToInt: fcvtzs (f64 → signed int, truncate toward zero).
+func (e *arm64Emitter) emitFloatToInt(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	src := e.loadToReg(fn, instr.Src1, "x11")
+	w.WriteString(fmt.Sprintf("    fmov d0, %s\n", src))
+	dst := e.dstReg(fn, instr.Dst, "x10")
+	w.WriteString(fmt.Sprintf("    fcvtzs %s, d0\n", dst))
 	e.spillIfNeeded(fn, instr.Dst, dst)
 }
 

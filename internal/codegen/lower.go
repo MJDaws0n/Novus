@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"fmt"
+	"math"
 	"novus/internal/ast"
 	"strconv"
 	"strings"
@@ -31,6 +32,7 @@ type Lowerer struct {
 	// Type tracking for string-aware lowering.
 	varTypes     map[string]string // variable name → declared type (e.g. "str", "i32")
 	vregIsStr    map[int]bool      // vreg number → true if it holds a string pointer
+	vregIsFloat  map[int]bool      // vreg number → true if it holds a float64 (IEEE 754 bits)
 	funcRetTypes map[string]string // function name → return type (pre-scanned)
 
 	// Loop context for break/continue.
@@ -252,6 +254,11 @@ func (l *Lowerer) lowerGlobal(g *ast.GlobalVar) {
 			if err == nil {
 				irGlobal.InitImm = val
 			}
+		case *ast.FloatLitExpr:
+			val, err := strconv.ParseFloat(v.Value, 64)
+			if err == nil {
+				irGlobal.InitImm = int64(math.Float64bits(val))
+			}
 		case *ast.BoolLitExpr:
 			if v.Value {
 				irGlobal.InitImm = 1
@@ -295,6 +302,7 @@ func (l *Lowerer) lowerFunction(fn *ast.FnDecl) {
 	l.loopContinueLabel = ""
 	l.varTypes = map[string]string{}
 	l.vregIsStr = map[int]bool{}
+	l.vregIsFloat = map[int]bool{}
 
 	// Function prologue label.
 	l.emit(IRInstr{Op: IRLabel, Dst: LabelOp(irName)})
@@ -611,12 +619,16 @@ func (l *Lowerer) lowerIntLit(e *ast.IntLitExpr) Operand {
 }
 
 func (l *Lowerer) lowerFloatLit(e *ast.FloatLitExpr) Operand {
-	// For now, truncate to integer. Full float support requires FP registers.
 	val, err := strconv.ParseFloat(e.Value, 64)
 	if err != nil {
 		return Imm(0)
 	}
-	return Imm(int64(val))
+	// Store the IEEE 754 double-precision bit pattern as an int64 immediate.
+	bits := int64(math.Float64bits(val))
+	dst := l.freshVReg()
+	l.vregIsFloat[dst] = true
+	l.emit(IRInstr{Op: IRMov, Dst: VReg(dst), Src1: Imm(bits)})
+	return VReg(dst)
 }
 
 func (l *Lowerer) lowerStringLit(e *ast.StringLitExpr) Operand {
@@ -654,6 +666,9 @@ func (l *Lowerer) lowerIdentExpr(e *ast.IdentExpr) Operand {
 		if l.varTypes[e.Name] == "str" {
 			l.vregIsStr[dst] = true
 		}
+		if l.varIsFloat(e.Name) {
+			l.vregIsFloat[dst] = true
+		}
 		return VReg(dst)
 	}
 	// Global variable?
@@ -662,6 +677,9 @@ func (l *Lowerer) lowerIdentExpr(e *ast.IdentExpr) Operand {
 		l.emit(IRInstr{Op: IRLoadGlobal, Dst: VReg(dst), Src1: LabelOp(label)})
 		if l.globalTypes[e.Name] == "str" {
 			l.vregIsStr[dst] = true
+		}
+		if l.globalTypes[e.Name] == "f64" || l.globalTypes[e.Name] == "f32" {
+			l.vregIsFloat[dst] = true
 		}
 		return VReg(dst)
 	}
@@ -674,7 +692,12 @@ func (l *Lowerer) lowerUnaryExpr(e *ast.UnaryExpr) Operand {
 	dst := l.freshVReg()
 	switch e.Op {
 	case "-":
-		l.emit(IRInstr{Op: IRNeg, Dst: VReg(dst), Src1: operand})
+		if l.operandIsFloat(operand) {
+			l.vregIsFloat[dst] = true
+			l.emit(IRInstr{Op: IRFNeg, Dst: VReg(dst), Src1: operand})
+		} else {
+			l.emit(IRInstr{Op: IRNeg, Dst: VReg(dst), Src1: operand})
+		}
 	case "!":
 		l.emit(IRInstr{Op: IRNot, Dst: VReg(dst), Src1: operand})
 	case "~":
@@ -694,6 +717,20 @@ func (l *Lowerer) operandIsStr(op Operand) bool {
 		return l.vregIsStr[op.Reg]
 	}
 	return false
+}
+
+// operandIsFloat reports whether an operand holds a float64 value (IEEE 754 bits).
+func (l *Lowerer) operandIsFloat(op Operand) bool {
+	if op.Kind == OpVirtReg {
+		return l.vregIsFloat[op.Reg]
+	}
+	return false
+}
+
+// varIsFloat reports whether a variable is declared as f64 or f32.
+func (l *Lowerer) varIsFloat(name string) bool {
+	t := l.varTypes[name]
+	return t == "f64" || t == "f32"
 }
 
 // varIsArray reports whether a variable is an array type.
@@ -766,6 +803,69 @@ func (l *Lowerer) lowerBinaryExpr(e *ast.BinaryExpr) Operand {
 		}
 	}
 
+	// Float arithmetic: if either operand is float, use float opcodes.
+	leftFloat := l.operandIsFloat(left)
+	rightFloat := l.operandIsFloat(right)
+	isFloat := leftFloat || rightFloat
+
+	if isFloat {
+		// Promote non-float operand to float if needed.
+		if !leftFloat {
+			conv := l.freshVReg()
+			l.vregIsFloat[conv] = true
+			l.emit(IRInstr{Op: IRIntToFloat, Dst: VReg(conv), Src1: left})
+			left = VReg(conv)
+		}
+		if !rightFloat {
+			conv := l.freshVReg()
+			l.vregIsFloat[conv] = true
+			l.emit(IRInstr{Op: IRIntToFloat, Dst: VReg(conv), Src1: right})
+			right = VReg(conv)
+		}
+
+		var op IROp
+		isCmp := false
+		switch e.Op {
+		case "+":
+			op = IRFAdd
+		case "-":
+			op = IRFSub
+		case "*":
+			op = IRFMul
+		case "/":
+			op = IRFDiv
+		case "%":
+			op = IRFMod
+		case "==":
+			op = IRFCmpEq
+			isCmp = true
+		case "!=":
+			op = IRFCmpNe
+			isCmp = true
+		case "<":
+			op = IRFCmpLt
+			isCmp = true
+		case "<=":
+			op = IRFCmpLe
+			isCmp = true
+		case ">":
+			op = IRFCmpGt
+			isCmp = true
+		case ">=":
+			op = IRFCmpGe
+			isCmp = true
+		default:
+			// Bitwise/logical ops don't make sense on floats — fall through to int.
+			goto intOps
+		}
+		if !isCmp {
+			l.vregIsFloat[dst] = true
+		}
+		l.emit(IRInstr{Op: op, Dst: VReg(dst), Src1: left, Src2: right})
+		return VReg(dst)
+	}
+
+intOps:
 	var op IROp
 	switch e.Op {
 	case "+":
@@ -870,6 +970,9 @@ func (l *Lowerer) lowerCallExpr(e *ast.CallExpr) Operand {
 	if l.funcRetTypes[resolvedName] == "str" {
 		l.vregIsStr[dst] = true
 	}
+	if l.funcRetTypes[resolvedName] == "f64" || l.funcRetTypes[resolvedName] == "f32" {
+		l.vregIsFloat[dst] = true
+	}
 	return VReg(dst)
 }
 
@@ -953,6 +1056,10 @@ func (l *Lowerer) builtinHandlers() map[string]builtinHandler {
 		"load32":       l.builtinLoad32,
 		"load64":       l.builtinLoad64,
 		"win_call":     l.builtinWinCall,
+		"i64_to_f64":   l.builtinI64ToF64,
+		"f64_to_i64":   l.builtinF64ToI64,
+		"f64_bits":     l.builtinF64Bits,
+		"f64_from_bits": l.builtinF64FromBits,
 	}
 }
 
@@ -1232,4 +1339,52 @@ func unescapeString(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// i64_to_f64(val) — convert integer to float64 (scvtf).
+func (l *Lowerer) builtinI64ToF64(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	src := l.lowerExpr(e.Args[0])
+	dst := l.freshVReg()
+	l.vregIsFloat[dst] = true
+	l.emit(IRInstr{Op: IRIntToFloat, Dst: VReg(dst), Src1: src})
+	return VReg(dst)
+}
+
+// f64_to_i64(val) — convert float64 to integer (fcvtzs, truncate toward zero).
+func (l *Lowerer) builtinF64ToI64(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	src := l.lowerExpr(e.Args[0])
+	dst := l.freshVReg()
+	l.emit(IRInstr{Op: IRFloatToInt, Dst: VReg(dst), Src1: src})
+	return VReg(dst)
+}
+
+// f64_bits(val) — reinterpret f64 bit pattern as raw i64 (no conversion, just type change).
+func (l *Lowerer) builtinF64Bits(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	src := l.lowerExpr(e.Args[0])
+	// Just return the value as-is — the bit pattern is already in an integer register/slot.
+	// Mark it as NOT float so subsequent ops treat it as integer.
+	dst := l.freshVReg()
+	l.emit(IRInstr{Op: IRMov, Dst: VReg(dst), Src1: src})
+	return VReg(dst)
+}
+
+// f64_from_bits(val) — reinterpret raw i64 bits as f64 (no conversion, just type change).
+func (l *Lowerer) builtinF64FromBits(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	src := l.lowerExpr(e.Args[0])
+	dst := l.freshVReg()
+	l.vregIsFloat[dst] = true
+	l.emit(IRInstr{Op: IRMov, Dst: VReg(dst), Src1: src})
+	return VReg(dst)
 }

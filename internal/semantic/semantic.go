@@ -426,6 +426,11 @@ var builtinFuncTable = map[string]builtinInfo{
 	"load64":   {Arity: 1, ReturnType: TypeI64},   // load 64-bit int from address → i64
 	"len":      {Arity: 1, ReturnType: TypeI32},   // string length → i32
 	"win_call": {Arity: -1, ReturnType: TypeVoid}, // call Windows API (variadic: first arg is function name string)
+	// Float conversion intrinsics
+	"i64_to_f64":   {Arity: 1, ReturnType: TypeF64},  // convert int → float64
+	"f64_to_i64":   {Arity: 1, ReturnType: TypeI64},  // convert float64 → int (truncate)
+	"f64_bits":     {Arity: 1, ReturnType: TypeI64},  // reinterpret f64 bits as i64
+	"f64_from_bits": {Arity: 1, ReturnType: TypeF64}, // reinterpret i64 bits as f64
 }
 
 // ---------------------------------------------------------------------------
