@@ -1527,7 +1527,7 @@ func (e *x86_64Emitter) emitGASArrayGet(fn *IRFunc, instr IRInstr) {
 	arrPtr := e.gasLoadToReg(fn, instr.Src1, "%r10")
 	idx := e.gasLoadToReg(fn, instr.Src2, "%r11")
 	w.WriteString(fmt.Sprintf("    movq (%s), %%r10\n", arrPtr)) // data_ptr
-	w.WriteString(fmt.Sprintf("    movq (%%r10,%s,8), %%r10\n", stripPercent(idx)))
+	w.WriteString(fmt.Sprintf("    movq (%%r10,%s,8), %%r10\n", idx))
 	e.gasStoreToOperand(fn, instr.Dst, "%r10")
 }
 
@@ -1537,7 +1537,7 @@ func (e *x86_64Emitter) emitGASArraySet(fn *IRFunc, instr IRInstr) {
 	idx := e.gasLoadToReg(fn, instr.Src1, "%r11")
 	val := e.gasLoadToReg(fn, instr.Src2, "%rcx")
 	w.WriteString(fmt.Sprintf("    movq (%s), %%r10\n", arrPtr))
-	w.WriteString(fmt.Sprintf("    movq %s, (%%r10,%s,8)\n", val, stripPercent(idx)))
+	w.WriteString(fmt.Sprintf("    movq %s, (%%r10,%s,8)\n", val, idx))
 }
 
 func (e *x86_64Emitter) emitGASArrayAppend(fn *IRFunc, instr IRInstr) {
