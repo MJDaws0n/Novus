@@ -152,9 +152,13 @@ func (e *x86_64Emitter) emitGAS() {
 	w.WriteString(fmt.Sprintf(".globl %s\n\n", entryFuncName))
 
 	// Linux needs a _start entry.
+	// The kernel places argc at (%rsp) and argv at 8(%rsp).
+	// Load them into rdi/rsi (the SysV calling convention arg registers) before calling main.
 	if e.target.OS == OS_Linux {
 		w.WriteString(".globl _start\n")
 		w.WriteString("_start:\n")
+		w.WriteString("    movq (%rsp), %rdi\n")
+		w.WriteString("    leaq 8(%rsp), %rsi\n")
 		w.WriteString(fmt.Sprintf("    call %s\n", entryFuncName))
 		w.WriteString("    movq %rax, %rdi\n")
 		w.WriteString("    movq $60, %rax\n")
@@ -355,8 +359,12 @@ func (e *x86_64Emitter) emitGASInstr(fn *IRFunc, instr IRInstr) {
 		e.emitGASMul(fn, instr)
 	case IRDiv:
 		e.emitGASDiv(fn, instr)
+	case IRUDiv:
+		e.emitGASUDiv(fn, instr)
 	case IRMod:
 		e.emitGASMod(fn, instr)
+	case IRUMod:
+		e.emitGASUMod(fn, instr)
 
 	case IRNeg:
 		src := e.gasLoadToReg(fn, instr.Src1, "%r10")
@@ -605,6 +613,36 @@ func (e *x86_64Emitter) emitGASMod(fn *IRFunc, instr IRInstr) {
 	} else {
 		w.WriteString(fmt.Sprintf("    movq %s, %%rcx\n", src2))
 		w.WriteString("    idivq %rcx\n")
+	}
+	e.gasStoreToOperand(fn, instr.Dst, "%rdx")
+}
+
+func (e *x86_64Emitter) emitGASUDiv(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	src1 := e.gasLoadToReg(fn, instr.Src1, "%r10")
+	src2 := e.gasLoadToReg(fn, instr.Src2, "%r11")
+	w.WriteString(fmt.Sprintf("    movq %s, %%rax\n", src1))
+	w.WriteString("    xorq %rdx, %rdx\n")
+	if src2 == "%r11" || src2 == "%rcx" {
+		w.WriteString(fmt.Sprintf("    divq %s\n", src2))
+	} else {
+		w.WriteString(fmt.Sprintf("    movq %s, %%rcx\n", src2))
+		w.WriteString("    divq %rcx\n")
+	}
+	e.gasStoreToOperand(fn, instr.Dst, "%rax")
+}
+
+func (e *x86_64Emitter) emitGASUMod(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	src1 := e.gasLoadToReg(fn, instr.Src1, "%r10")
+	src2 := e.gasLoadToReg(fn, instr.Src2, "%r11")
+	w.WriteString(fmt.Sprintf("    movq %s, %%rax\n", src1))
+	w.WriteString("    xorq %rdx, %rdx\n")
+	if src2 == "%r11" || src2 == "%rcx" {
+		w.WriteString(fmt.Sprintf("    divq %s\n", src2))
+	} else {
+		w.WriteString(fmt.Sprintf("    movq %s, %%rcx\n", src2))
+		w.WriteString("    divq %rcx\n")
 	}
 	e.gasStoreToOperand(fn, instr.Dst, "%rdx")
 }
@@ -1081,6 +1119,14 @@ func (e *x86_64Emitter) emitNASMInstr(fn *IRFunc, instr IRInstr) {
 		w.WriteString(fmt.Sprintf("    mov rcx, %s\n", src2))
 		w.WriteString("    idiv rcx\n")
 		e.nasmStoreToOperand(fn, instr.Dst, "rax")
+	case IRUDiv:
+		src1 := e.nasmLoadToReg(fn, instr.Src1, "r10")
+		src2 := e.nasmLoadToReg(fn, instr.Src2, "r11")
+		w.WriteString(fmt.Sprintf("    mov rax, %s\n", src1))
+		w.WriteString("    xor rdx, rdx\n")
+		w.WriteString(fmt.Sprintf("    mov rcx, %s\n", src2))
+		w.WriteString("    div rcx\n")
+		e.nasmStoreToOperand(fn, instr.Dst, "rax")
 	case IRMod:
 		src1 := e.nasmLoadToReg(fn, instr.Src1, "r10")
 		src2 := e.nasmLoadToReg(fn, instr.Src2, "r11")
@@ -1088,6 +1134,14 @@ func (e *x86_64Emitter) emitNASMInstr(fn *IRFunc, instr IRInstr) {
 		w.WriteString("    cqo\n")
 		w.WriteString(fmt.Sprintf("    mov rcx, %s\n", src2))
 		w.WriteString("    idiv rcx\n")
+		e.nasmStoreToOperand(fn, instr.Dst, "rdx")
+	case IRUMod:
+		src1 := e.nasmLoadToReg(fn, instr.Src1, "r10")
+		src2 := e.nasmLoadToReg(fn, instr.Src2, "r11")
+		w.WriteString(fmt.Sprintf("    mov rax, %s\n", src1))
+		w.WriteString("    xor rdx, rdx\n")
+		w.WriteString(fmt.Sprintf("    mov rcx, %s\n", src2))
+		w.WriteString("    div rcx\n")
 		e.nasmStoreToOperand(fn, instr.Dst, "rdx")
 
 	case IRNeg:

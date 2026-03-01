@@ -118,9 +118,13 @@ func (e *arm64Emitter) emit() {
 	w.WriteString(".p2align 2\n\n")
 
 	// Linux ARM64 needs a _start entry.
+	// The kernel places argc at [sp] and argv at sp+8.
+	// Load them into x0/x1 (the calling convention arg registers) before calling main.
 	if e.target.OS == OS_Linux {
 		w.WriteString(".globl _start\n")
 		w.WriteString("_start:\n")
+		w.WriteString("    ldr x0, [sp]\n")
+		w.WriteString("    add x1, sp, #8\n")
 		w.WriteString(fmt.Sprintf("    bl %s\n", entryFuncName))
 		w.WriteString("    mov x8, #93\n")
 		w.WriteString("    svc #0\n\n")
@@ -302,11 +306,20 @@ func (e *arm64Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		e.emitBinOp(fn, instr, "mul")
 	case IRDiv:
 		e.emitBinOp(fn, instr, "sdiv")
+	case IRUDiv:
+		e.emitBinOp(fn, instr, "udiv")
 	case IRMod:
 		dst := e.dstReg(fn, instr.Dst, "x10")
 		src1 := e.loadToReg(fn, instr.Src1, "x11")
 		src2 := e.loadToReg(fn, instr.Src2, "x12")
 		w.WriteString(fmt.Sprintf("    sdiv x13, %s, %s\n", src1, src2))
+		w.WriteString(fmt.Sprintf("    msub %s, x13, %s, %s\n", dst, src2, src1))
+		e.spillIfNeeded(fn, instr.Dst, dst)
+	case IRUMod:
+		dst := e.dstReg(fn, instr.Dst, "x10")
+		src1 := e.loadToReg(fn, instr.Src1, "x11")
+		src2 := e.loadToReg(fn, instr.Src2, "x12")
+		w.WriteString(fmt.Sprintf("    udiv x13, %s, %s\n", src1, src2))
 		w.WriteString(fmt.Sprintf("    msub %s, x13, %s, %s\n", dst, src2, src1))
 		e.spillIfNeeded(fn, instr.Dst, dst)
 

@@ -178,6 +178,15 @@ func (e *x86Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", src2))
 		w.WriteString("    idivl %ecx\n")
 		w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+	case IRUDiv:
+		src1 := e.operand(instr.Src1)
+		src2 := e.operand(instr.Src2)
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src1))
+		w.WriteString("    xorl %edx, %edx\n")
+		w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", src2))
+		w.WriteString("    divl %ecx\n")
+		w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
 	case IRMod:
 		src1 := e.operand(instr.Src1)
 		src2 := e.operand(instr.Src2)
@@ -186,6 +195,15 @@ func (e *x86Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		w.WriteString("    cdq\n")
 		w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", src2))
 		w.WriteString("    idivl %ecx\n")
+		w.WriteString(fmt.Sprintf("    movl %%edx, %s\n", dst))
+	case IRUMod:
+		src1 := e.operand(instr.Src1)
+		src2 := e.operand(instr.Src2)
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src1))
+		w.WriteString("    xorl %edx, %edx\n")
+		w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", src2))
+		w.WriteString("    divl %ecx\n")
 		w.WriteString(fmt.Sprintf("    movl %%edx, %s\n", dst))
 
 	case IRNeg:
