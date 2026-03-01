@@ -30,10 +30,11 @@ type Lowerer struct {
 	nextSlot int            // next slot index
 
 	// Type tracking for string-aware lowering.
-	varTypes     map[string]string // variable name → declared type (e.g. "str", "i32")
-	vregIsStr    map[int]bool      // vreg number → true if it holds a string pointer
-	vregIsFloat  map[int]bool      // vreg number → true if it holds a float64 (IEEE 754 bits)
-	funcRetTypes map[string]string // function name → return type (pre-scanned)
+	varTypes       map[string]string // variable name → declared type (e.g. "str", "i32")
+	vregIsStr      map[int]bool      // vreg number → true if it holds a string pointer
+	vregIsFloat    map[int]bool      // vreg number → true if it holds a float64 (IEEE 754 bits)
+	vregIsUnsigned map[int]bool      // vreg number → true if it holds an unsigned integer
+	funcRetTypes   map[string]string // function name → return type (pre-scanned)
 
 	// Loop context for break/continue.
 	loopBreakLabel    string
@@ -303,6 +304,7 @@ func (l *Lowerer) lowerFunction(fn *ast.FnDecl) {
 	l.varTypes = map[string]string{}
 	l.vregIsStr = map[int]bool{}
 	l.vregIsFloat = map[int]bool{}
+	l.vregIsUnsigned = map[int]bool{}
 
 	// Function prologue label.
 	l.emit(IRInstr{Op: IRLabel, Dst: LabelOp(irName)})
@@ -669,6 +671,9 @@ func (l *Lowerer) lowerIdentExpr(e *ast.IdentExpr) Operand {
 		if l.varIsFloat(e.Name) {
 			l.vregIsFloat[dst] = true
 		}
+		if l.varIsUnsigned(e.Name) {
+			l.vregIsUnsigned[dst] = true
+		}
 		return VReg(dst)
 	}
 	// Global variable?
@@ -680,6 +685,10 @@ func (l *Lowerer) lowerIdentExpr(e *ast.IdentExpr) Operand {
 		}
 		if l.globalTypes[e.Name] == "f64" || l.globalTypes[e.Name] == "f32" {
 			l.vregIsFloat[dst] = true
+		}
+		gt := l.globalTypes[e.Name]
+		if gt == "u64" || gt == "u32" || gt == "u16" || gt == "u8" {
+			l.vregIsUnsigned[dst] = true
 		}
 		return VReg(dst)
 	}
@@ -737,6 +746,20 @@ func (l *Lowerer) varIsFloat(name string) bool {
 func (l *Lowerer) varIsArray(name string) bool {
 	t := l.varTypes[name]
 	return len(t) > 2 && t[:2] == "[]"
+}
+
+// operandIsUnsigned reports whether an operand holds an unsigned integer value.
+func (l *Lowerer) operandIsUnsigned(op Operand) bool {
+	if op.Kind == OpVirtReg {
+		return l.vregIsUnsigned[op.Reg]
+	}
+	return false
+}
+
+// varIsUnsigned reports whether a variable is declared as an unsigned type.
+func (l *Lowerer) varIsUnsigned(name string) bool {
+	t := l.varTypes[name]
+	return t == "u64" || t == "u32" || t == "u16" || t == "u8"
 }
 
 // charToStr converts a byte value (e.g. from str_index) into a 1-char
@@ -876,8 +899,14 @@ intOps:
 		op = IRMul
 	case "/":
 		op = IRDiv
+		if l.operandIsUnsigned(left) || l.operandIsUnsigned(right) {
+			op = IRUDiv
+		}
 	case "%":
 		op = IRMod
+		if l.operandIsUnsigned(left) || l.operandIsUnsigned(right) {
+			op = IRUMod
+		}
 	case "==":
 		op = IRCmpEq
 	case "!=":
@@ -972,6 +1001,10 @@ func (l *Lowerer) lowerCallExpr(e *ast.CallExpr) Operand {
 	}
 	if l.funcRetTypes[resolvedName] == "f64" || l.funcRetTypes[resolvedName] == "f32" {
 		l.vregIsFloat[dst] = true
+	}
+	retType := l.funcRetTypes[resolvedName]
+	if retType == "u64" || retType == "u32" || retType == "u16" || retType == "u8" {
+		l.vregIsUnsigned[dst] = true
 	}
 	return VReg(dst)
 }

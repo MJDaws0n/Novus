@@ -96,9 +96,11 @@ const (
 	IRAdd // dst = src1 + src2
 	IRSub // dst = src1 - src2
 	IRMul // dst = src1 * src2
-	IRDiv // dst = src1 / src2 (signed)
-	IRMod // dst = src1 % src2 (signed)
-	IRNeg // dst = -src1
+	IRDiv  // dst = src1 / src2 (signed)
+	IRMod  // dst = src1 % src2 (signed)
+	IRUDiv // dst = src1 / src2 (unsigned)
+	IRUMod // dst = src1 % src2 (unsigned)
+	IRNeg  // dst = -src1
 
 	// Logic / bitwise
 	IRAnd    // dst = src1 & src2
@@ -193,7 +195,7 @@ const (
 var irOpNames = map[IROp]string{
 	IRMov: "mov", IRLea: "lea", IRLoad: "load", IRStore: "store",
 	IRPush: "push", IRPop: "pop",
-	IRAdd: "add", IRSub: "sub", IRMul: "mul", IRDiv: "div", IRMod: "mod", IRNeg: "neg",
+	IRAdd: "add", IRSub: "sub", IRMul: "mul", IRDiv: "div", IRMod: "mod", IRUDiv: "udiv", IRUMod: "umod", IRNeg: "neg",
 	IRAnd: "and", IROr: "or", IRXor: "xor", IRNot: "not",
 	IRShl: "shl", IRShr: "shr", IRBitNot: "bitnot",
 	IRCmpEq: "cmp_eq", IRCmpNe: "cmp_ne", IRCmpLt: "cmp_lt", IRCmpLe: "cmp_le",
