@@ -188,8 +188,9 @@ const (
 	IRFloatToInt // dst(i64) = convert src1(f64 bits) to i64 (truncate toward zero)
 
 	// Misc
-	IRComment // emit a comment in the output (src1 = label with comment text)
-	IRData    // emit raw data (used for string constants in data section)
+	IRComment   // emit a comment in the output (src1 = label with comment text)
+	IRData      // emit raw data (used for string constants in data section)
+	IRGCCollect // trigger garbage collection
 )
 
 var irOpNames = map[IROp]string{
@@ -214,6 +215,7 @@ var irOpNames = map[IROp]string{
 	IRFCmpEq: "fcmp_eq", IRFCmpNe: "fcmp_ne", IRFCmpLt: "fcmp_lt", IRFCmpLe: "fcmp_le",
 	IRFCmpGt: "fcmp_gt", IRFCmpGe: "fcmp_ge",
 	IRIntToFloat: "i2f", IRFloatToInt: "f2i",
+	IRGCCollect: "gc_collect",
 	IRComment: "comment", IRData: "data",
 }
 
