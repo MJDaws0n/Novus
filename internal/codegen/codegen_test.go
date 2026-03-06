@@ -2506,3 +2506,482 @@ func TestDetectToolchainWithPaths(t *testing.T) {
 		t.Error("expected missing tools with nonexistent paths")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Garbage Collection Tests
+// ---------------------------------------------------------------------------
+
+func TestGCCollectLowering(t *testing.T) {
+	src := `module test; fn main() -> i32 { gc_collect(); return 0; }`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+
+	found := false
+	for _, fn := range mod.Functions {
+		for _, instr := range fn.Instrs {
+			if instr.Op == IRGCCollect {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("expected IRGCCollect instruction in lowered IR")
+	}
+}
+
+func TestGCCollect_ARM64_Assembly(t *testing.T) {
+	src := `module test; fn main() -> i32 { gc_collect(); return 0; }`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	checks := []string{
+		"_novus_gc_table",
+		"_novus_gc_count",
+		"_novus_gc_threshold",
+		"_novus_gc_freelist",
+		"_novus_gc_stack_bottom",
+		"_novus_gc_register",
+		"_novus_gc_collect",
+		"_novus_gc_alloc",
+	}
+	for _, check := range checks {
+		if !strings.Contains(asm, check) {
+			t.Errorf("ARM64 GC assembly missing symbol: %s", check)
+		}
+	}
+}
+
+func TestGCCollect_x86_64_GAS_Assembly(t *testing.T) {
+	src := `module test; fn main() -> i32 { gc_collect(); return 0; }`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	checks := []string{
+		"_novus_gc_table",
+		"_novus_gc_count",
+		"_novus_gc_threshold",
+		"_novus_gc_freelist",
+		"_novus_gc_stack_bottom",
+		"_novus_gc_register",
+		"_novus_gc_collect",
+		"_novus_gc_alloc",
+	}
+	for _, check := range checks {
+		if !strings.Contains(asm, check) {
+			t.Errorf("x86_64 GAS GC assembly missing symbol: %s", check)
+		}
+	}
+}
+
+func TestGCCollect_NASM_Assembly(t *testing.T) {
+	src := `module test; fn main() -> i32 { gc_collect(); return 0; }`
+	prog := mustParse(t, src)
+	target := windowsAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	checks := []string{
+		"_novus_gc_table",
+		"_novus_gc_count",
+		"_novus_gc_threshold",
+		"_novus_gc_freelist",
+		"_novus_gc_stack_bottom",
+		"_novus_gc_register",
+		"_novus_gc_collect",
+		"_novus_gc_alloc",
+	}
+	for _, check := range checks {
+		if !strings.Contains(asm, check) {
+			t.Errorf("NASM GC assembly missing symbol: %s", check)
+		}
+	}
+}
+
+func TestGCCollect_x86_32_Assembly(t *testing.T) {
+	src := `module test; fn main() -> i32 { gc_collect(); return 0; }`
+	prog := mustParse(t, src)
+	target, _ := ResolveTarget("linux", "386")
+	mod := Lower(prog, target)
+	asm := EmitX86(mod, target)
+
+	checks := []string{
+		"_novus_gc_table",
+		"_novus_gc_count",
+		"_novus_gc_threshold",
+		"_novus_gc_freelist",
+		"_novus_gc_stack_bottom",
+		"_novus_gc_register",
+		"_novus_gc_collect",
+		"_novus_gc_alloc",
+	}
+	for _, check := range checks {
+		if !strings.Contains(asm, check) {
+			t.Errorf("x86 32-bit GC assembly missing symbol: %s", check)
+		}
+	}
+}
+
+func TestGC_ArrayAlloc_UsesGCAlloc_ARM64(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: []i32 = [1, 2, 3]; return 0; }`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	if !strings.Contains(asm, "_novus_gc_alloc") {
+		t.Error("ARM64 array allocation should use _novus_gc_alloc")
+	}
+}
+
+func TestGC_ArrayAlloc_UsesGCAlloc_x86_64(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: []i32 = [1, 2, 3]; return 0; }`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "_novus_gc_alloc") {
+		t.Error("x86_64 GAS array allocation should use _novus_gc_alloc")
+	}
+}
+
+func TestGC_ArrayAlloc_UsesGCAlloc_NASM(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: []i32 = [1, 2, 3]; return 0; }`
+	prog := mustParse(t, src)
+	target := windowsAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "_novus_gc_alloc") {
+		t.Error("NASM array allocation should use _novus_gc_alloc")
+	}
+}
+
+func TestGC_ArrayAlloc_UsesGCAlloc_x86_32(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: []i32 = [1, 2, 3]; return 0; }`
+	prog := mustParse(t, src)
+	target, _ := ResolveTarget("linux", "386")
+	mod := Lower(prog, target)
+	asm := EmitX86(mod, target)
+
+	if !strings.Contains(asm, "_novus_gc_alloc") {
+		t.Error("x86 32-bit array allocation should use _novus_gc_alloc")
+	}
+}
+
+func TestGC_StrConcat_UsesGCAlloc_ARM64(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: str = "hello"; let b: str = " world"; let s: str = a + b; return 0; }`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	if !strings.Contains(asm, "_novus_gc_alloc") {
+		t.Error("ARM64 string concatenation should use _novus_gc_alloc")
+	}
+}
+
+func TestGC_StrConcat_UsesGCAlloc_x86_64(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: str = "hello"; let b: str = " world"; let s: str = a + b; return 0; }`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "_novus_gc_alloc") {
+		t.Error("x86_64 GAS string concatenation should use _novus_gc_alloc")
+	}
+}
+
+func TestGC_StrConcat_UsesGCAlloc_NASM(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: str = "hello"; let b: str = " world"; let s: str = a + b; return 0; }`
+	prog := mustParse(t, src)
+	target := windowsAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "_novus_gc_alloc") {
+		t.Error("NASM string concatenation should use _novus_gc_alloc")
+	}
+}
+
+func TestGC_StrConcat_UsesGCAlloc_x86_32(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: str = "hello"; let b: str = " world"; let s: str = a + b; return 0; }`
+	prog := mustParse(t, src)
+	target, _ := ResolveTarget("linux", "386")
+	mod := Lower(prog, target)
+	asm := EmitX86(mod, target)
+
+	if !strings.Contains(asm, "_novus_gc_alloc") {
+		t.Error("x86 32-bit string concatenation should use _novus_gc_alloc")
+	}
+}
+
+func TestGC_StackBottomInit_ARM64(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: []i32 = [1]; return 0; }`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	if !strings.Contains(asm, "_novus_gc_stack_bottom") {
+		t.Error("ARM64 should init gc_stack_bottom")
+	}
+}
+
+func TestGC_StackBottomInit_x86_64(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: []i32 = [1]; return 0; }`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "_novus_gc_stack_bottom") {
+		t.Error("x86_64 GAS should init gc_stack_bottom")
+	}
+}
+
+func TestGC_ThresholdInit_ARM64(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: []i32 = [1]; return 0; }`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	if !strings.Contains(asm, "256") {
+		t.Error("ARM64 should init gc_threshold to 256")
+	}
+}
+
+func TestGC_RuntimeLabels_ARM64(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: []i32 = [1, 2]; return 0; }`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	labels := []string{
+		"_novus_gc_register:",
+		"_novus_gc_collect:",
+		"_novus_gc_alloc:",
+	}
+	for _, l := range labels {
+		if !strings.Contains(asm, l) {
+			t.Errorf("ARM64 GC runtime missing label: %s", l)
+		}
+	}
+}
+
+func TestGC_RuntimeLabels_GAS(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: []i32 = [1, 2]; return 0; }`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	labels := []string{
+		"_novus_gc_register:",
+		"_novus_gc_collect:",
+		"_novus_gc_alloc:",
+	}
+	for _, l := range labels {
+		if !strings.Contains(asm, l) {
+			t.Errorf("x86_64 GAS GC runtime missing label: %s", l)
+		}
+	}
+}
+
+func TestGC_RuntimeLabels_NASM(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: []i32 = [1, 2]; return 0; }`
+	prog := mustParse(t, src)
+	target := windowsAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	labels := []string{
+		"_novus_gc_register:",
+		"_novus_gc_collect:",
+		"_novus_gc_alloc:",
+	}
+	for _, l := range labels {
+		if !strings.Contains(asm, l) {
+			t.Errorf("NASM GC runtime missing label: %s", l)
+		}
+	}
+}
+
+func TestGC_RuntimeLabels_x86_32(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: []i32 = [1, 2]; return 0; }`
+	prog := mustParse(t, src)
+	target, _ := ResolveTarget("linux", "386")
+	mod := Lower(prog, target)
+	asm := EmitX86(mod, target)
+
+	labels := []string{
+		"_novus_gc_register:",
+		"_novus_gc_collect:",
+		"_novus_gc_alloc:",
+	}
+	for _, l := range labels {
+		if !strings.Contains(asm, l) {
+			t.Errorf("x86 32-bit GC runtime missing label: %s", l)
+		}
+	}
+}
+
+func TestGC_NoRuntimeWithoutHeap(t *testing.T) {
+	src := `module test; fn main() -> i32 { return 42; }`
+	prog := mustParse(t, src)
+
+	targets := []struct {
+		name   string
+		target *Target
+	}{
+		{"ARM64", darwinARM64Target()},
+		{"x86_64_GAS", linuxAMD64Target()},
+		{"NASM", windowsAMD64Target()},
+	}
+	for _, tc := range targets {
+		mod := Lower(prog, tc.target)
+		var asm string
+		if tc.target.Arch == Arch_ARM64 {
+			asm = EmitARM64(mod, tc.target)
+		} else {
+			asm = EmitX86_64(mod, tc.target)
+		}
+		if strings.Contains(asm, "_novus_gc_alloc:") {
+			t.Errorf("%s: GC runtime should not be emitted when heap is not used", tc.name)
+		}
+	}
+}
+
+func TestGC_ArrayAppendGrow_UsesGCAlloc_ARM64(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let a: []i32 = [1];
+		array_append(a, 2);
+		return 0;
+	}`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	if !strings.Contains(asm, "_novus_gc_alloc") {
+		t.Error("ARM64 array append should use _novus_gc_alloc for growth")
+	}
+}
+
+func TestGC_ArrayAppendGrow_UsesGCAlloc_GAS(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let a: []i32 = [1];
+		array_append(a, 2);
+		return 0;
+	}`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "_novus_gc_alloc") {
+		t.Error("x86_64 GAS array append should use _novus_gc_alloc for growth")
+	}
+}
+
+func TestGC_BSS_Sizes_ARM64(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: []i32 = [1]; return 0; }`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	// GC table: 8192 entries × 24 bytes = 196608.
+	if !strings.Contains(asm, "196608") {
+		t.Error("ARM64 GC table should be 196608 bytes (8192*24)")
+	}
+}
+
+func TestGC_BSS_Sizes_x86_64(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: []i32 = [1]; return 0; }`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "196608") {
+		t.Error("x86_64 GAS GC table should be 196608 bytes")
+	}
+}
+
+func TestGC_BSS_Sizes_x86_32(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: []i32 = [1]; return 0; }`
+	prog := mustParse(t, src)
+	target, _ := ResolveTarget("linux", "386")
+	mod := Lower(prog, target)
+	asm := EmitX86(mod, target)
+
+	// 32-bit: 8192 entries × 12 bytes = 98304.
+	if !strings.Contains(asm, "98304") {
+		t.Error("x86 32-bit GC table should be 98304 bytes (8192*12)")
+	}
+}
+
+func TestGC_SweepLabels_ARM64(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: []i32 = [1]; return 0; }`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	sweepLabels := []string{"gc_sweep", "gc_collect"}
+	for _, l := range sweepLabels {
+		if !strings.Contains(asm, l) {
+			t.Errorf("ARM64 GC should contain sweep/mark label containing: %s", l)
+		}
+	}
+}
+
+func TestGC_FreeListLogic_GAS(t *testing.T) {
+	src := `module test; fn main() -> i32 { gc_collect(); return 0; }`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	// Should contain free list scanning labels.
+	if !strings.Contains(asm, "gca_fl") {
+		t.Error("x86_64 GAS GC alloc should contain free list logic (.gca_fl labels)")
+	}
+}
+
+func TestGC_FreeListLogic_NASM(t *testing.T) {
+	src := `module test; fn main() -> i32 { gc_collect(); return 0; }`
+	prog := mustParse(t, src)
+	target := windowsAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "gca_fl") {
+		t.Error("NASM GC alloc should contain free list logic")
+	}
+}
+
+func TestGC_MultipleFunctionsWithHeap(t *testing.T) {
+	src := `module test; fn helper() -> str { let a: str = "hi"; let b: str = "there"; return a + b; }
+	fn main() -> i32 { let s: str = helper(); return 0; }`
+	prog := mustParse(t, src)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
+
+	if !strings.Contains(asm, "_novus_gc_alloc") {
+		t.Error("ARM64 should use GC alloc for string concat in helper function")
+	}
+	if !strings.Contains(asm, "_novus_gc_collect:") {
+		t.Error("ARM64 should emit GC runtime when heap is used")
+	}
+}

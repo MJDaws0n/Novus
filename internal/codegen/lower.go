@@ -1093,6 +1093,7 @@ func (l *Lowerer) builtinHandlers() map[string]builtinHandler {
 		"f64_to_i64":   l.builtinF64ToI64,
 		"f64_bits":     l.builtinF64Bits,
 		"f64_from_bits": l.builtinF64FromBits,
+		"gc_collect":    l.builtinGCCollect,
 	}
 }
 
@@ -1420,4 +1421,10 @@ func (l *Lowerer) builtinF64FromBits(e *ast.CallExpr) Operand {
 	l.vregIsFloat[dst] = true
 	l.emit(IRInstr{Op: IRMov, Dst: VReg(dst), Src1: src})
 	return VReg(dst)
+}
+
+// gc_collect() — explicitly trigger garbage collection.
+func (l *Lowerer) builtinGCCollect(e *ast.CallExpr) Operand {
+	l.emit(IRInstr{Op: IRGCCollect})
+	return None()
 }

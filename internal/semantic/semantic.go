@@ -431,6 +431,7 @@ var builtinFuncTable = map[string]builtinInfo{
 	"f64_to_i64":   {Arity: 1, ReturnType: TypeI64},  // convert float64 → int (truncate)
 	"f64_bits":     {Arity: 1, ReturnType: TypeI64},  // reinterpret f64 bits as i64
 	"f64_from_bits": {Arity: 1, ReturnType: TypeF64}, // reinterpret i64 bits as f64
+	"gc_collect":    {Arity: 0, ReturnType: TypeVoid}, // trigger garbage collection
 }
 
 // ---------------------------------------------------------------------------

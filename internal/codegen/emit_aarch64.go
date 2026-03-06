@@ -79,6 +79,20 @@ func (e *arm64Emitter) emit() {
 		heapEndSym := e.target.Sym("_novus_heap_end")
 		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n", heapPtrSym))
 		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n\n", heapEndSym))
+
+		// GC metadata: allocation table, free list, counters.
+		// Each GC table entry: { ptr(8), size(8), mark(8) } = 24 bytes.
+		// Max 8192 tracked allocations.
+		gcTable := e.target.Sym("_novus_gc_table")
+		gcCount := e.target.Sym("_novus_gc_count")
+		gcThreshold := e.target.Sym("_novus_gc_threshold")
+		gcFreelist := e.target.Sym("_novus_gc_freelist")
+		gcStackBot := e.target.Sym("_novus_gc_stack_bottom")
+		w.WriteString(fmt.Sprintf(".lcomm %s, %d\n", gcTable, 8192*24))
+		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n", gcCount))
+		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n", gcThreshold))
+		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n", gcFreelist))
+		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n\n", gcStackBot))
 	}
 
 	// Global variables in the data section.
@@ -123,6 +137,20 @@ func (e *arm64Emitter) emit() {
 	if e.target.OS == OS_Linux {
 		w.WriteString(".globl _start\n")
 		w.WriteString("_start:\n")
+		// Save stack bottom for GC root scanning.
+		if e.usesHeap() {
+			gcStackBot := e.target.Sym("_novus_gc_stack_bottom")
+			w.WriteString(fmt.Sprintf("    adrp x9, %s\n", gcStackBot))
+			w.WriteString(fmt.Sprintf("    add x9, x9, :lo12:%s\n", gcStackBot))
+			w.WriteString("    mov x10, sp\n")
+			w.WriteString("    str x10, [x9]\n")
+			// Initialize GC threshold.
+			gcThreshold := e.target.Sym("_novus_gc_threshold")
+			w.WriteString(fmt.Sprintf("    adrp x9, %s\n", gcThreshold))
+			w.WriteString(fmt.Sprintf("    add x9, x9, :lo12:%s\n", gcThreshold))
+			w.WriteString("    mov x10, #256\n")
+			w.WriteString("    str x10, [x9]\n")
+		}
 		w.WriteString("    ldr x0, [sp]\n")
 		w.WriteString("    add x1, sp, #8\n")
 		w.WriteString(fmt.Sprintf("    bl %s\n", entryFuncName))
@@ -137,6 +165,7 @@ func (e *arm64Emitter) emit() {
 	// Emit runtime heap allocator (uses mmap for growable memory).
 	if e.usesHeap() {
 		e.emitHeapAllocator()
+		e.emitGCRuntime()
 	}
 }
 
@@ -198,6 +227,20 @@ func (e *arm64Emitter) emitFunction(fn *IRFunc) {
 	w.WriteString("    mov x29, sp\n")
 	if frameSize > 0 {
 		e.emitSPAdj("sub", frameSize)
+	}
+
+	// Initialize GC stack bottom in main function (macOS entry).
+	if fn.Name == "main" && e.target.OS == OS_Darwin && e.usesHeap() {
+		gcStackBot := e.target.Sym("_novus_gc_stack_bottom")
+		w.WriteString(fmt.Sprintf("    adrp x9, %s@PAGE\n", gcStackBot))
+		w.WriteString(fmt.Sprintf("    add x9, x9, %s@PAGEOFF\n", gcStackBot))
+		w.WriteString("    add x10, x29, #16\n") // entry SP (above saved x29/x30)
+		w.WriteString("    str x10, [x9]\n")
+		gcThreshold := e.target.Sym("_novus_gc_threshold")
+		w.WriteString(fmt.Sprintf("    adrp x9, %s@PAGE\n", gcThreshold))
+		w.WriteString(fmt.Sprintf("    add x9, x9, %s@PAGEOFF\n", gcThreshold))
+		w.WriteString("    mov x10, #256\n")
+		w.WriteString("    str x10, [x9]\n")
 	}
 
 	for i := 0; i < len(fn.Instrs); i++ {
@@ -537,6 +580,10 @@ func (e *arm64Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		e.emitIntToFloat(fn, instr)
 	case IRFloatToInt:
 		e.emitFloatToInt(fn, instr)
+
+	case IRGCCollect:
+		gcCollectSym := e.target.Sym("_novus_gc_collect")
+		w.WriteString(fmt.Sprintf("    bl %s\n", gcCollectSym))
 	}
 }
 
@@ -758,7 +805,7 @@ func (e *arm64Emitter) emitStrConcat(fn *IRFunc, instr IRInstr) {
 	copy1Label := fmt.Sprintf(".Lsc1_%d", id)
 	copy2Label := fmt.Sprintf(".Lsc2_%d", id)
 
-	allocSym := e.target.Sym("_novus_heap_alloc")
+	allocSym := e.target.Sym("_novus_gc_alloc")
 
 	// Move sources into dedicated scratch registers.
 	if src1 != "x13" {
@@ -943,6 +990,378 @@ func (e *arm64Emitter) emitHeapAllocator() {
 	w.WriteString("\n")
 }
 
+// emitGCRuntime emits the garbage collector runtime:
+//   - _novus_gc_register: register an allocation in the GC table
+//   - _novus_gc_collect: conservative mark-sweep collection
+//   - _novus_gc_alloc: allocate with GC integration (free-list + auto-collect)
+//
+// GC table entry layout (24 bytes each):
+//
+//	[0]  ptr  — pointer to allocated block
+//	[8]  size — allocation size in bytes
+//	[16] mark — 0 = unmarked, 1 = marked
+//
+// Free list: singly-linked list of freed blocks. Each freed block has:
+//
+//	[0] next_ptr — pointer to next free block (0 = end)
+//	[8] size     — size of this free block
+func (e *arm64Emitter) emitGCRuntime() {
+	w := e.b
+
+	gcTable := e.target.Sym("_novus_gc_table")
+	gcCount := e.target.Sym("_novus_gc_count")
+	gcThreshold := e.target.Sym("_novus_gc_threshold")
+	gcFreelist := e.target.Sym("_novus_gc_freelist")
+	gcStackBot := e.target.Sym("_novus_gc_stack_bottom")
+	allocSym := e.target.Sym("_novus_heap_alloc")
+	gcAllocSym := e.target.Sym("_novus_gc_alloc")
+	gcRegSym := e.target.Sym("_novus_gc_register")
+	gcCollectSym := e.target.Sym("_novus_gc_collect")
+
+	// ---- _novus_gc_register(x0=ptr, x1=size) ----
+	// Adds an allocation to the GC tracking table.
+	w.WriteString("\n// ---- GC: register allocation ----\n")
+	w.WriteString(".p2align 2\n")
+	w.WriteString(fmt.Sprintf("%s:\n", gcRegSym))
+	w.WriteString("    stp x29, x30, [sp, #-16]!\n")
+	w.WriteString("    mov x29, sp\n")
+
+	// Load gc_count.
+	e.emitLoadGlobal("x9", gcCount)
+	w.WriteString("    ldr x10, [x9]\n") // x10 = count
+
+	// Bounds check: if count >= 8192, skip registration.
+	e.loadImm("x11", 8192)
+	w.WriteString("    cmp x10, x11\n")
+	w.WriteString("    b.ge .Lgcreg_done\n")
+
+	// Compute table entry address: gcTable + count * 24.
+	e.emitLoadGlobal("x12", gcTable)
+	w.WriteString("    mov x13, #24\n")
+	w.WriteString("    mul x14, x10, x13\n")
+	w.WriteString("    add x12, x12, x14\n") // x12 = &table[count]
+
+	// Store entry: {ptr, size, mark=0}.
+	w.WriteString("    str x0, [x12, #0]\n")  // ptr
+	w.WriteString("    str x1, [x12, #8]\n")  // size
+	w.WriteString("    str xzr, [x12, #16]\n") // mark = 0
+
+	// Increment count.
+	w.WriteString("    add x10, x10, #1\n")
+	w.WriteString("    str x10, [x9]\n")
+
+	w.WriteString(".Lgcreg_done:\n")
+	w.WriteString("    ldp x29, x30, [sp], #16\n")
+	w.WriteString("    ret\n")
+
+	// ---- _novus_gc_collect() ----
+	// Conservative mark-sweep garbage collector.
+	w.WriteString("\n// ---- GC: conservative mark-sweep collector ----\n")
+	w.WriteString(".p2align 2\n")
+	w.WriteString(fmt.Sprintf("%s:\n", gcCollectSym))
+	w.WriteString("    stp x29, x30, [sp, #-16]!\n")
+	w.WriteString("    mov x29, sp\n")
+	// Save callee-saved registers we'll use.
+	w.WriteString("    stp x19, x20, [sp, #-16]!\n")
+	w.WriteString("    stp x21, x22, [sp, #-16]!\n")
+	w.WriteString("    stp x23, x24, [sp, #-16]!\n")
+	w.WriteString("    stp x25, x26, [sp, #-16]!\n")
+	w.WriteString("    stp x27, x28, [sp, #-16]!\n")
+
+	// Load gc_count → x19.
+	e.emitLoadGlobal("x9", gcCount)
+	w.WriteString("    ldr x19, [x9]\n") // x19 = count
+	w.WriteString("    cbz x19, .Lgc_done\n")
+
+	// Load gc_table base → x20.
+	e.emitLoadGlobal("x20", gcTable)
+
+	// Phase 1: Clear all marks.
+	w.WriteString("    mov x21, #0\n") // i = 0
+	w.WriteString(".Lgc_clear:\n")
+	w.WriteString("    cmp x21, x19\n")
+	w.WriteString("    b.ge .Lgc_scan\n")
+	w.WriteString("    mov x22, #24\n")
+	w.WriteString("    mul x23, x21, x22\n")
+	w.WriteString("    add x24, x20, x23\n")       // x24 = &table[i]
+	w.WriteString("    str xzr, [x24, #16]\n")     // table[i].mark = 0
+	w.WriteString("    add x21, x21, #1\n")
+	w.WriteString("    b .Lgc_clear\n")
+
+	// Phase 2: Conservative stack scan.
+	// Scan from current SP to stack_bottom, checking each 8-byte word
+	// against GC table entries.
+	w.WriteString(".Lgc_scan:\n")
+	w.WriteString("    mov x21, sp\n") // x21 = scan cursor (current sp)
+	e.emitLoadGlobal("x9", gcStackBot)
+	w.WriteString("    ldr x22, [x9]\n") // x22 = stack_bottom
+	w.WriteString("    cbz x22, .Lgc_scan_globals\n") // skip if not set
+
+	w.WriteString(".Lgc_scan_loop:\n")
+	w.WriteString("    cmp x21, x22\n")
+	w.WriteString("    b.ge .Lgc_scan_globals\n")
+	w.WriteString("    ldr x23, [x21]\n") // x23 = potential pointer from stack
+
+	// Check against each GC table entry.
+	w.WriteString("    mov x9, #0\n") // j = 0
+	w.WriteString(".Lgc_match:\n")
+	w.WriteString("    cmp x9, x19\n")
+	w.WriteString("    b.ge .Lgc_next_word\n")
+	w.WriteString("    mov x10, #24\n")
+	w.WriteString("    mul x11, x9, x10\n")
+	w.WriteString("    add x12, x20, x11\n")     // x12 = &table[j]
+	w.WriteString("    ldr x13, [x12, #0]\n")     // x13 = table[j].ptr
+	w.WriteString("    cmp x23, x13\n")
+	w.WriteString("    b.lo .Lgc_match_next\n")    // value < ptr → skip
+	w.WriteString("    ldr x14, [x12, #8]\n")     // x14 = table[j].size
+	w.WriteString("    add x14, x13, x14\n")      // x14 = ptr + size
+	w.WriteString("    cmp x23, x14\n")
+	w.WriteString("    b.hs .Lgc_match_next\n")    // value >= ptr+size → skip
+	// Match found — mark this entry.
+	w.WriteString("    mov x14, #1\n")
+	w.WriteString("    str x14, [x12, #16]\n") // table[j].mark = 1
+	w.WriteString("    b .Lgc_next_word\n")
+
+	w.WriteString(".Lgc_match_next:\n")
+	w.WriteString("    add x9, x9, #1\n")
+	w.WriteString("    b .Lgc_match\n")
+
+	w.WriteString(".Lgc_next_word:\n")
+	w.WriteString("    add x21, x21, #8\n")
+	w.WriteString("    b .Lgc_scan_loop\n")
+
+	// Phase 2b: Scan global variables.
+	w.WriteString(".Lgc_scan_globals:\n")
+	for _, g := range e.mod.Globals {
+		gSym := e.target.Sym(g.Name)
+		e.emitLoadGlobal("x9", gSym)
+		w.WriteString("    ldr x23, [x9]\n") // x23 = global value
+
+		w.WriteString("    mov x9, #0\n") // j = 0
+		id := e.uniqueID()
+		matchLabel := fmt.Sprintf(".Lgc_gmatch_%d", id)
+		nextGlobal := fmt.Sprintf(".Lgc_gnext_%d", id)
+		matchNext := fmt.Sprintf(".Lgc_gmnext_%d", id)
+
+		w.WriteString(fmt.Sprintf("%s:\n", matchLabel))
+		w.WriteString("    cmp x9, x19\n")
+		w.WriteString(fmt.Sprintf("    b.ge %s\n", nextGlobal))
+		w.WriteString("    mov x10, #24\n")
+		w.WriteString("    mul x11, x9, x10\n")
+		w.WriteString("    add x12, x20, x11\n")
+		w.WriteString("    ldr x13, [x12, #0]\n")
+		w.WriteString("    cmp x23, x13\n")
+		w.WriteString(fmt.Sprintf("    b.lo %s\n", matchNext))
+		w.WriteString("    ldr x14, [x12, #8]\n")     // size
+		w.WriteString("    add x14, x13, x14\n")      // end = ptr + size
+		w.WriteString("    cmp x23, x14\n")
+		w.WriteString(fmt.Sprintf("    b.hs %s\n", matchNext))
+		w.WriteString("    mov x14, #1\n")
+		w.WriteString("    str x14, [x12, #16]\n")
+		w.WriteString(fmt.Sprintf("    b %s\n", nextGlobal))
+		w.WriteString(fmt.Sprintf("%s:\n", matchNext))
+		w.WriteString("    add x9, x9, #1\n")
+		w.WriteString(fmt.Sprintf("    b %s\n", matchLabel))
+		w.WriteString(fmt.Sprintf("%s:\n", nextGlobal))
+	}
+
+	// Phase 2c: Transitive marking — scan contents of marked allocations
+	// for interior pointers (e.g., array headers contain data_ptr).
+	w.WriteString(".Lgc_transitive:\n")
+	w.WriteString("    mov x21, #0\n")       // i = 0
+	w.WriteString("    mov x9, #0\n")        // changed = 0
+	w.WriteString(".Lgc_trans_loop:\n")
+	w.WriteString("    cmp x21, x19\n")
+	w.WriteString("    b.ge .Lgc_trans_check\n")
+	w.WriteString("    mov x10, #24\n")
+	w.WriteString("    mul x11, x21, x10\n")
+	w.WriteString("    add x12, x20, x11\n")     // &table[i]
+	w.WriteString("    ldr x13, [x12, #16]\n")   // mark
+	w.WriteString("    cbz x13, .Lgc_trans_next\n") // skip unmarked
+	// Scan contents of this marked allocation.
+	w.WriteString("    ldr x14, [x12, #0]\n")    // ptr
+	w.WriteString("    ldr x15, [x12, #8]\n")    // size
+	w.WriteString("    mov x16, #0\n")           // offset = 0
+	w.WriteString(".Lgc_trans_scan:\n")
+	w.WriteString("    add x17, x16, #8\n")
+	w.WriteString("    cmp x17, x15\n")
+	w.WriteString("    b.gt .Lgc_trans_next\n")   // offset+8 > size → done
+	w.WriteString("    ldr x23, [x14, x16]\n")   // potential interior pointer
+	// Check against all table entries.
+	w.WriteString("    mov x24, #0\n")            // j = 0
+	w.WriteString(".Lgc_trans_match:\n")
+	w.WriteString("    cmp x24, x19\n")
+	w.WriteString("    b.ge .Lgc_trans_scan_next\n")
+	w.WriteString("    mov x10, #24\n")
+	w.WriteString("    mul x11, x24, x10\n")
+	w.WriteString("    add x25, x20, x11\n")     // &table[j]
+	w.WriteString("    ldr x26, [x25, #16]\n")   // already marked?
+	w.WriteString("    cbnz x26, .Lgc_trans_match_next\n") // skip if already marked
+	w.WriteString("    ldr x26, [x25, #0]\n")    // entry.ptr
+	w.WriteString("    cmp x23, x26\n")
+	w.WriteString("    b.lo .Lgc_trans_match_next\n")
+	w.WriteString("    ldr x27, [x25, #8]\n")    // entry.size
+	w.WriteString("    add x27, x26, x27\n")     // end
+	w.WriteString("    cmp x23, x27\n")
+	w.WriteString("    b.hs .Lgc_trans_match_next\n")
+	// Mark it and set changed flag.
+	w.WriteString("    mov x26, #1\n")
+	w.WriteString("    str x26, [x25, #16]\n")
+	w.WriteString("    mov x9, #1\n")            // changed = true
+	w.WriteString(".Lgc_trans_match_next:\n")
+	w.WriteString("    add x24, x24, #1\n")
+	w.WriteString("    b .Lgc_trans_match\n")
+	w.WriteString(".Lgc_trans_scan_next:\n")
+	w.WriteString("    add x16, x16, #8\n")
+	w.WriteString("    b .Lgc_trans_scan\n")
+	w.WriteString(".Lgc_trans_next:\n")
+	w.WriteString("    add x21, x21, #1\n")
+	w.WriteString("    b .Lgc_trans_loop\n")
+	// If anything new was marked, repeat.
+	w.WriteString(".Lgc_trans_check:\n")
+	w.WriteString("    cbnz x9, .Lgc_transitive\n")
+
+	// Phase 3: Sweep — free unmarked objects, compact table.
+	w.WriteString("    mov x21, #0\n")         // i = 0 (read index)
+	w.WriteString("    mov x22, #0\n")         // write index
+	e.emitLoadGlobal("x9", gcFreelist)         // x9 = &freelist
+
+	w.WriteString(".Lgc_sweep:\n")
+	w.WriteString("    cmp x21, x19\n")
+	w.WriteString("    b.ge .Lgc_sweep_done\n")
+	w.WriteString("    mov x10, #24\n")
+	w.WriteString("    mul x11, x21, x10\n")
+	w.WriteString("    add x12, x20, x11\n")   // x12 = &table[i]
+	w.WriteString("    ldr x13, [x12, #16]\n") // x13 = mark
+
+	w.WriteString("    cbnz x13, .Lgc_sweep_keep\n")
+
+	// Unmarked: add to free list.
+	w.WriteString("    ldr x14, [x12, #0]\n")  // x14 = ptr
+	w.WriteString("    ldr x15, [x12, #8]\n")  // x15 = size
+	// Only add to free list if size >= 16 (min useful block).
+	w.WriteString("    cmp x15, #16\n")
+	w.WriteString("    b.lt .Lgc_sweep_skip\n")
+	// Free block layout: [next(8), size(8)].
+	w.WriteString("    ldr x16, [x9]\n")       // x16 = old freelist head
+	w.WriteString("    str x16, [x14, #0]\n")  // block.next = old head
+	w.WriteString("    str x15, [x14, #8]\n")  // block.size = size
+	w.WriteString("    str x14, [x9]\n")       // freelist = block
+
+	w.WriteString(".Lgc_sweep_skip:\n")
+	w.WriteString("    add x21, x21, #1\n")
+	w.WriteString("    b .Lgc_sweep\n")
+
+	// Keep: copy to write position (compact table).
+	w.WriteString(".Lgc_sweep_keep:\n")
+	w.WriteString("    cmp x21, x22\n")
+	w.WriteString("    b.eq .Lgc_sweep_keep_skip\n")
+	// Copy entry from read[i] to write[j].
+	w.WriteString("    mov x10, #24\n")
+	w.WriteString("    mul x11, x22, x10\n")
+	w.WriteString("    add x13, x20, x11\n")  // x13 = &table[j]
+	w.WriteString("    ldr x14, [x12, #0]\n")
+	w.WriteString("    str x14, [x13, #0]\n") // copy ptr
+	w.WriteString("    ldr x14, [x12, #8]\n")
+	w.WriteString("    str x14, [x13, #8]\n") // copy size
+	w.WriteString("    str xzr, [x13, #16]\n") // clear mark
+
+	w.WriteString(".Lgc_sweep_keep_skip:\n")
+	w.WriteString("    add x22, x22, #1\n") // write++
+	w.WriteString("    add x21, x21, #1\n") // read++
+	w.WriteString("    b .Lgc_sweep\n")
+
+	// Update gc_count to write index (compacted count).
+	w.WriteString(".Lgc_sweep_done:\n")
+	e.emitLoadGlobal("x9", gcCount)
+	w.WriteString("    str x22, [x9]\n") // gc_count = compacted count
+
+	w.WriteString(".Lgc_done:\n")
+	w.WriteString("    ldp x27, x28, [sp], #16\n")
+	w.WriteString("    ldp x25, x26, [sp], #16\n")
+	w.WriteString("    ldp x23, x24, [sp], #16\n")
+	w.WriteString("    ldp x21, x22, [sp], #16\n")
+	w.WriteString("    ldp x19, x20, [sp], #16\n")
+	w.WriteString("    ldp x29, x30, [sp], #16\n")
+	w.WriteString("    ret\n")
+
+	// ---- _novus_gc_alloc(x0=size) → x0=ptr ----
+	// GC-aware allocator: checks free list, triggers collection, bump-allocates.
+	w.WriteString("\n// ---- GC: allocator with free-list and auto-collection ----\n")
+	w.WriteString(".p2align 2\n")
+	w.WriteString(fmt.Sprintf("%s:\n", gcAllocSym))
+	w.WriteString("    stp x29, x30, [sp, #-16]!\n")
+	w.WriteString("    mov x29, sp\n")
+	w.WriteString("    stp x19, x20, [sp, #-16]!\n")
+
+	// Align size to 8 bytes, min 16.
+	w.WriteString("    add x0, x0, #7\n")
+	w.WriteString("    bic x0, x0, #7\n")
+	w.WriteString("    cmp x0, #16\n")
+	w.WriteString("    b.ge .Lgca_size_ok\n")
+	w.WriteString("    mov x0, #16\n")
+	w.WriteString(".Lgca_size_ok:\n")
+	w.WriteString("    mov x19, x0\n") // x19 = aligned size
+
+	// Check if GC collection needed: gc_count >= gc_threshold.
+	e.emitLoadGlobal("x9", gcCount)
+	w.WriteString("    ldr x10, [x9]\n")
+	e.emitLoadGlobal("x9", gcThreshold)
+	w.WriteString("    ldr x11, [x9]\n")
+	w.WriteString("    cmp x10, x11\n")
+	w.WriteString("    b.lt .Lgca_try_free\n")
+
+	// Trigger collection.
+	w.WriteString(fmt.Sprintf("    bl %s\n", gcCollectSym))
+
+	// Double the threshold (adaptive).
+	e.emitLoadGlobal("x9", gcThreshold)
+	w.WriteString("    ldr x10, [x9]\n")
+	w.WriteString("    lsl x10, x10, #1\n")
+	w.WriteString("    str x10, [x9]\n")
+
+	// Try free list: find a block >= requested size.
+	w.WriteString(".Lgca_try_free:\n")
+	e.emitLoadGlobal("x9", gcFreelist)
+	w.WriteString("    mov x20, x9\n")          // x20 = &prev_ptr (starts at &freelist)
+	w.WriteString("    ldr x10, [x9]\n")         // x10 = current block
+	w.WriteString(".Lgca_fl_loop:\n")
+	w.WriteString("    cbz x10, .Lgca_bump\n")   // end of list → bump allocate
+	w.WriteString("    ldr x11, [x10, #8]\n")    // x11 = block.size
+	w.WriteString("    cmp x11, x19\n")
+	w.WriteString("    b.ge .Lgca_fl_found\n")   // block big enough
+	w.WriteString("    mov x20, x10\n")           // prev = current
+	w.WriteString("    ldr x10, [x10, #0]\n")    // current = current.next
+	w.WriteString("    b .Lgca_fl_loop\n")
+
+	// Found a suitable free block — unlink from list.
+	w.WriteString(".Lgca_fl_found:\n")
+	w.WriteString("    ldr x11, [x10, #0]\n")    // x11 = block.next
+	w.WriteString("    str x11, [x20]\n")         // prev.next = block.next (unlink)
+	w.WriteString("    mov x20, x10\n")           // save block ptr in callee-safe x20
+	// Register in GC table.
+	w.WriteString("    mov x0, x20\n")            // ptr
+	w.WriteString("    mov x1, x19\n")            // size
+	w.WriteString(fmt.Sprintf("    bl %s\n", gcRegSym))
+	w.WriteString("    mov x0, x20\n")            // return the block
+	w.WriteString("    b .Lgca_ret\n")
+
+	// Bump allocate.
+	w.WriteString(".Lgca_bump:\n")
+	w.WriteString("    mov x0, x19\n")
+	w.WriteString(fmt.Sprintf("    bl %s\n", allocSym))
+	// x0 = allocated pointer. Register with GC.
+	w.WriteString("    mov x20, x0\n")            // save pointer
+	w.WriteString("    mov x1, x19\n")             // size
+	w.WriteString(fmt.Sprintf("    bl %s\n", gcRegSym))
+	w.WriteString("    mov x0, x20\n")             // restore pointer
+
+	w.WriteString(".Lgca_ret:\n")
+	w.WriteString("    ldp x19, x20, [sp], #16\n")
+	w.WriteString("    ldp x29, x30, [sp], #16\n")
+	w.WriteString("    ret\n")
+}
+
 // ---------------------------------------------------------------------------
 // Array operations (ARM64)
 //
@@ -963,7 +1382,7 @@ func (e *arm64Emitter) emitArrayNew(fn *IRFunc, instr IRInstr) {
 		cap = 4
 	}
 
-	allocSym := e.target.Sym("_novus_heap_alloc")
+	allocSym := e.target.Sym("_novus_gc_alloc")
 
 	// Allocate header (24 bytes) + data (cap * 8 bytes) in one call.
 	totalSize := 24 + cap*8
@@ -1022,7 +1441,7 @@ func (e *arm64Emitter) emitArrayAppend(fn *IRFunc, instr IRInstr) {
 	copyLabel := fmt.Sprintf(".Laacp_%d", id)
 	copyDoneLabel := fmt.Sprintf(".Laacd_%d", id)
 
-	allocSym := e.target.Sym("_novus_heap_alloc")
+	allocSym := e.target.Sym("_novus_gc_alloc")
 
 	// Load len and cap from header.
 	if arrPtr != "x11" {
@@ -1110,7 +1529,7 @@ func (e *arm64Emitter) usesHeap() bool {
 	for _, fn := range e.mod.Functions {
 		for _, instr := range fn.Instrs {
 			switch instr.Op {
-			case IRStrConcat, IRArrayNew, IRArrayAppend:
+			case IRStrConcat, IRArrayNew, IRArrayAppend, IRGCCollect:
 				return true
 			}
 		}
