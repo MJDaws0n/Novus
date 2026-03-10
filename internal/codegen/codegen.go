@@ -33,6 +33,12 @@ type Options struct {
 
 	// SkipLink stops after assembling (produce .o but don't link).
 	SkipLink bool
+
+	// HeapSize overrides the default heap size (in bytes). 0 means use default (64 MB).
+	HeapSize int64
+
+	// GCEntries overrides the default number of GC table entries. 0 means use default (65536).
+	GCEntries int
 }
 
 // DefaultOptions returns sensible defaults (host target, build/ directory).
@@ -75,6 +81,15 @@ func Generate(program *ast.Program, opts *Options) (*Result, error) {
 			return nil, fmt.Errorf("cannot detect host target: %w", err)
 		}
 	}
+
+	// Apply heap/GC overrides from options, then fill defaults.
+	if opts.HeapSize > 0 {
+		target.HeapSize = opts.HeapSize
+	}
+	if opts.GCEntries > 0 {
+		target.GCEntries = opts.GCEntries
+	}
+	target.EnsureHeapDefaults()
 
 	// --- Determine output name ---
 	outputName := opts.OutputName

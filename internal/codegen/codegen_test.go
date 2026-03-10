@@ -2899,9 +2899,9 @@ func TestGC_BSS_Sizes_ARM64(t *testing.T) {
 	mod := Lower(prog, target)
 	asm := EmitARM64(mod, target)
 
-	// GC table: 8192 entries × 24 bytes = 196608.
-	if !strings.Contains(asm, "196608") {
-		t.Error("ARM64 GC table should be 196608 bytes (8192*24)")
+	// GC table: 65536 entries × 24 bytes = 1572864.
+	if !strings.Contains(asm, "1572864") {
+		t.Error("ARM64 GC table should be 1572864 bytes (65536*24)")
 	}
 }
 
@@ -2912,8 +2912,13 @@ func TestGC_BSS_Sizes_x86_64(t *testing.T) {
 	mod := Lower(prog, target)
 	asm := EmitX86_64(mod, target)
 
-	if !strings.Contains(asm, "196608") {
-		t.Error("x86_64 GAS GC table should be 196608 bytes")
+	// Heap: 64 MB = 67108864.
+	if !strings.Contains(asm, "67108864") {
+		t.Error("x86_64 GAS heap should be 67108864 bytes (64 MB)")
+	}
+	// GC table: 65536 entries × 24 bytes = 1572864.
+	if !strings.Contains(asm, "1572864") {
+		t.Error("x86_64 GAS GC table should be 1572864 bytes")
 	}
 }
 
@@ -2924,9 +2929,13 @@ func TestGC_BSS_Sizes_x86_32(t *testing.T) {
 	mod := Lower(prog, target)
 	asm := EmitX86(mod, target)
 
-	// 32-bit: 8192 entries × 12 bytes = 98304.
-	if !strings.Contains(asm, "98304") {
-		t.Error("x86 32-bit GC table should be 98304 bytes (8192*12)")
+	// Heap: 64 MB = 67108864.
+	if !strings.Contains(asm, "67108864") {
+		t.Error("x86 32-bit heap should be 67108864 bytes (64 MB)")
+	}
+	// 32-bit: 65536 entries × 12 bytes = 786432.
+	if !strings.Contains(asm, "786432") {
+		t.Error("x86 32-bit GC table should be 786432 bytes (65536*12)")
 	}
 }
 

@@ -9,10 +9,11 @@ import (
 	"novus/internal/parser"
 	"novus/internal/semantic"
 	"os"
+	"strconv"
 	"time"
 )
 
-const VERSION = "0.1.1"
+const VERSION = "0.1.4"
 
 var debugMode = false
 
@@ -41,6 +42,13 @@ func run() int {
 
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: novus [flags] <file>")
+		fmt.Println("Flags:")
+		fmt.Println("  --target=os/arch      Cross-compile (e.g. linux/amd64)")
+		fmt.Println("  --heap-size=<size>     Set heap size (e.g. 64m, 128M, 1g) [default: 64m]")
+		fmt.Println("  --gc-entries=<N>       Set max GC entries [default: 65536]")
+		fmt.Println("  --asm-only             Only emit assembly, don't assemble/link")
+		fmt.Println("  --skip-link            Assemble but don't link")
+		fmt.Println("  --debug                Enable debug output")
 		return 1
 	}
 
@@ -239,6 +247,34 @@ func run() int {
 		}
 	}
 
+	// Check for --heap-size=<bytes> flag.
+	for _, arg := range os.Args[1:] {
+		if len(arg) > 12 && arg[:12] == "--heap-size=" {
+			val := arg[12:]
+			size, err := parseSize(val)
+			if err != nil {
+				fmt.Printf("Error: invalid heap size %q: %s\n", val, err)
+				return 1
+			}
+			codegenOpts.HeapSize = size
+			printDebug(fmt.Sprintf("Heap size set to %d bytes", size))
+		}
+	}
+
+	// Check for --gc-entries=<N> flag.
+	for _, arg := range os.Args[1:] {
+		if len(arg) > 13 && arg[:13] == "--gc-entries=" {
+			val := arg[13:]
+			n, err := strconv.Atoi(val)
+			if err != nil || n < 1 {
+				fmt.Printf("Error: invalid gc-entries value %q\n", val)
+				return 1
+			}
+			codegenOpts.GCEntries = n
+			printDebug(fmt.Sprintf("GC entries set to %d", n))
+		}
+	}
+
 	result, err := codegen.Generate(program, codegenOpts)
 	if err != nil {
 		fmt.Printf("Codegen error: %s\n", err)
@@ -336,4 +372,33 @@ func getFileContent(filePath string) (string, error) {
 		return "", err
 	}
 	return string(content), nil
+}
+
+// parseSize parses a size string like "64m", "128M", "1g", "67108864" into bytes.
+func parseSize(s string) (int64, error) {
+	if len(s) == 0 {
+		return 0, fmt.Errorf("empty size")
+	}
+	last := s[len(s)-1]
+	var multiplier int64 = 1
+	numStr := s
+	switch last {
+	case 'k', 'K':
+		multiplier = 1024
+		numStr = s[:len(s)-1]
+	case 'm', 'M':
+		multiplier = 1024 * 1024
+		numStr = s[:len(s)-1]
+	case 'g', 'G':
+		multiplier = 1024 * 1024 * 1024
+		numStr = s[:len(s)-1]
+	}
+	n, err := strconv.ParseInt(numStr, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	if n <= 0 {
+		return 0, fmt.Errorf("size must be positive")
+	}
+	return n * multiplier, nil
 }

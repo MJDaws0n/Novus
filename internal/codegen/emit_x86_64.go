@@ -23,6 +23,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func EmitX86_64(mod *IRModule, target *Target) string {
+	target.EnsureHeapDefaults()
 	e := &x86_64Emitter{
 		mod:    mod,
 		target: target,
@@ -137,7 +138,7 @@ func (e *x86_64Emitter) emitGAS() {
 	if e.usesHeap() {
 		heapSym := e.target.Sym("_novus_heap")
 		heapPtrSym := e.target.Sym("_novus_heap_ptr")
-		w.WriteString(fmt.Sprintf(".lcomm %s, 1048576\n", heapSym))
+		w.WriteString(fmt.Sprintf(".lcomm %s, %d\n", heapSym, e.target.HeapSize))
 		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n", heapPtrSym))
 
 		// GC metadata.
@@ -146,7 +147,7 @@ func (e *x86_64Emitter) emitGAS() {
 		gcThreshold := e.target.Sym("_novus_gc_threshold")
 		gcFreelist := e.target.Sym("_novus_gc_freelist")
 		gcStackBot := e.target.Sym("_novus_gc_stack_bottom")
-		w.WriteString(fmt.Sprintf(".lcomm %s, %d\n", gcTable, 8192*24))
+		w.WriteString(fmt.Sprintf(".lcomm %s, %d\n", gcTable, e.target.GCEntries*24))
 		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n", gcCount))
 		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n", gcThreshold))
 		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n", gcFreelist))
@@ -931,10 +932,10 @@ func (e *x86_64Emitter) emitNASM() {
 	if e.usesHeap() || e.needsWinMainArgs() {
 		w.WriteString("section .bss\n")
 		if e.usesHeap() {
-			w.WriteString("    _novus_heap: resb 1048576\n")
+			w.WriteString(fmt.Sprintf("    _novus_heap: resb %d\n", e.target.HeapSize))
 			w.WriteString("    _novus_heap_ptr: resq 1\n")
 			// GC metadata.
-			w.WriteString(fmt.Sprintf("    _novus_gc_table: resb %d\n", 8192*24))
+			w.WriteString(fmt.Sprintf("    _novus_gc_table: resb %d\n", e.target.GCEntries*24))
 			w.WriteString("    _novus_gc_count: resq 1\n")
 			w.WriteString("    _novus_gc_threshold: resq 1\n")
 			w.WriteString("    _novus_gc_freelist: resq 1\n")
@@ -1993,7 +1994,7 @@ func (e *x86_64Emitter) emitNASMGCRuntime() {
 	w.WriteString("    push rbx\n")
 	w.WriteString("    lea rax, [rel _novus_gc_count]\n")
 	w.WriteString("    mov rbx, [rax]\n") // rbx = count
-	w.WriteString("    cmp rbx, 8192\n")
+	w.WriteString(fmt.Sprintf("    cmp rbx, %d\n", e.target.GCEntries))
 	w.WriteString("    jge .gcr_full\n")
 	// table[count] = {ptr, size, 0}
 	w.WriteString("    lea rax, [rel _novus_gc_table]\n")
@@ -2331,7 +2332,7 @@ func (e *x86_64Emitter) emitGASGCRuntime() {
 	w.WriteString("    movq %rsp, %rbp\n")
 	w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %%rax\n", gcCount))
 	w.WriteString("    movq (%rax), %rcx\n") // rcx = count
-	w.WriteString("    cmpq $8192, %rcx\n")
+	w.WriteString(fmt.Sprintf("    cmpq $%d, %%rcx\n", e.target.GCEntries))
 	w.WriteString("    jge .Lgcreg_done_gas\n")
 	// Entry address: table + count * 24.
 	w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %%rdx\n", gcTable))

@@ -6,11 +6,18 @@
 The aim in the short future is to re-write novus, in novus!
 
 # Quick install
-1. Download the latest from the realeases tab.
-2. Run the following command to install gobally (macos) (replace novus_download with the directy of the executable)
+Run the following to install the latest version automatically:
+```sh
+curl -fsSL https://raw.githubusercontent.com/MJDaws0n/novus/main/install.sh | bash
+```
+
+Or manually:
+1. Download the latest binary for your platform from the [releases tab](https://github.com/MJDaws0n/novus/releases).
+2. Copy it to your PATH:
 ```sh
 sudo cp "novus_download" /usr/local/bin/novus
 sudo chmod +x /usr/local/bin/novus
+# macOS only:
 sudo xattr -d com.apple.quarantine /usr/local/bin/novus
 ```
 
