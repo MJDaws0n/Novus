@@ -14,6 +14,7 @@ import (
 
 // EmitX86 converts an IRModule to x86 (32-bit) assembly text.
 func EmitX86(mod *IRModule, target *Target) string {
+	target.EnsureHeapDefaults()
 	e := &x86Emitter{
 		mod:    mod,
 		target: target,
@@ -55,12 +56,12 @@ func (e *x86Emitter) emit() {
 	if e.usesHeap() {
 		w.WriteString(".bss\n")
 		w.WriteString("_novus_heap:\n")
-		w.WriteString("    .space 1048576\n")
+		w.WriteString(fmt.Sprintf("    .space %d\n", e.target.HeapSize))
 		w.WriteString("_novus_heap_ptr:\n")
 		w.WriteString("    .space 4\n")
 		// GC metadata (32-bit: 4-byte pointers, entries are {ptr(4), size(4), mark(4)} = 12 bytes).
 		w.WriteString("_novus_gc_table:\n")
-		w.WriteString(fmt.Sprintf("    .space %d\n", 8192*12))
+		w.WriteString(fmt.Sprintf("    .space %d\n", e.target.GCEntries*12))
 		w.WriteString("_novus_gc_count:\n")
 		w.WriteString("    .space 4\n")
 		w.WriteString("_novus_gc_threshold:\n")
@@ -954,7 +955,7 @@ func (e *x86Emitter) emitX86GCRuntime() {
 	w.WriteString("    movl %esp, %ebp\n")
 	w.WriteString("    pushl %ebx\n")
 	w.WriteString("    movl _novus_gc_count, %eax\n")
-	w.WriteString("    cmpl $8192, %eax\n")
+	w.WriteString(fmt.Sprintf("    cmpl $%d, %%eax\n", e.target.GCEntries))
 	w.WriteString("    jge .gcr32_full\n")
 	// table[count] = {ptr, size, 0}. Entry size = 12 bytes.
 	w.WriteString("    imull $12, %eax, %ebx\n")

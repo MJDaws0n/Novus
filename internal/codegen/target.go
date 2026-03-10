@@ -118,6 +118,15 @@ type Target struct {
 	// "int 0x80" on x86 linux, "svc #0x80" on arm64 darwin, "svc #0" on arm64 linux.
 	SyscallInstr string
 
+	// HeapSize is the size of the static bump-allocator heap in bytes.
+	// Defaults to 64 MB (67108864). Only used by x86/x86_64 emitters
+	// (ARM64 uses mmap-backed dynamic heap).
+	HeapSize int64
+
+	// GCEntries is the maximum number of GC-tracked allocations.
+	// Defaults to 65536. Each entry is PtrSize*3 bytes.
+	GCEntries int
+
 	// SymbolPrefix: macOS Mach-O prepends "_" to global symbols.
 	SymbolPrefix string
 
@@ -194,6 +203,23 @@ func ResolveTarget(osName, archName string) (*Target, error) {
 	}
 
 	return t, nil
+}
+
+// DefaultHeapSize is the default heap size in bytes (64 MB).
+const DefaultHeapSize int64 = 64 * 1024 * 1024
+
+// DefaultGCEntries is the default number of GC table entries.
+const DefaultGCEntries int = 65536
+
+// EnsureHeapDefaults fills in HeapSize and GCEntries with default values
+// if they are zero.
+func (t *Target) EnsureHeapDefaults() {
+	if t.HeapSize <= 0 {
+		t.HeapSize = DefaultHeapSize
+	}
+	if t.GCEntries <= 0 {
+		t.GCEntries = DefaultGCEntries
+	}
 }
 
 // ---------------------------------------------------------------------------

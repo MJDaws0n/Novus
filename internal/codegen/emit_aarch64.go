@@ -18,6 +18,7 @@ import (
 
 // EmitARM64 converts an IRModule to ARM64 assembly text.
 func EmitARM64(mod *IRModule, target *Target) string {
+	target.EnsureHeapDefaults()
 	e := &arm64Emitter{
 		mod:    mod,
 		target: target,
@@ -82,13 +83,12 @@ func (e *arm64Emitter) emit() {
 
 		// GC metadata: allocation table, free list, counters.
 		// Each GC table entry: { ptr(8), size(8), mark(8) } = 24 bytes.
-		// Max 8192 tracked allocations.
 		gcTable := e.target.Sym("_novus_gc_table")
 		gcCount := e.target.Sym("_novus_gc_count")
 		gcThreshold := e.target.Sym("_novus_gc_threshold")
 		gcFreelist := e.target.Sym("_novus_gc_freelist")
 		gcStackBot := e.target.Sym("_novus_gc_stack_bottom")
-		w.WriteString(fmt.Sprintf(".lcomm %s, %d\n", gcTable, 8192*24))
+		w.WriteString(fmt.Sprintf(".lcomm %s, %d\n", gcTable, e.target.GCEntries*24))
 		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n", gcCount))
 		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n", gcThreshold))
 		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n", gcFreelist))
@@ -1030,8 +1030,8 @@ func (e *arm64Emitter) emitGCRuntime() {
 	e.emitLoadGlobal("x9", gcCount)
 	w.WriteString("    ldr x10, [x9]\n") // x10 = count
 
-	// Bounds check: if count >= 8192, skip registration.
-	e.loadImm("x11", 8192)
+	// Bounds check: if count >= GCEntries, skip registration.
+	e.loadImm("x11", int64(e.target.GCEntries))
 	w.WriteString("    cmp x10, x11\n")
 	w.WriteString("    b.ge .Lgcreg_done\n")
 
