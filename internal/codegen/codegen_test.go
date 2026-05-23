@@ -2752,6 +2752,24 @@ func TestGC_StrConcat_UsesGCAlloc_x86_64(t *testing.T) {
 	}
 }
 
+func TestGC_GASUsesGrowableHeap(t *testing.T) {
+	src := `module test; fn main() -> i32 { let a: str = "a"; let b: str = "b"; let s: str = a + b; return 0; }`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if strings.Contains(asm, ".lcomm _novus_heap,") {
+		t.Error("x86_64 GAS should not emit a fixed static heap buffer")
+	}
+	if !strings.Contains(asm, "_novus_heap_end") {
+		t.Error("x86_64 GAS growable heap should track heap end")
+	}
+	if !strings.Contains(asm, ".Lgca_region_grow_gas") {
+		t.Error("x86_64 GAS growable heap should emit region grow path")
+	}
+}
+
 func TestGC_StrConcat_UsesGCAlloc_NASM(t *testing.T) {
 	src := `module test; fn main() -> i32 { let a: str = "hello"; let b: str = " world"; let s: str = a + b; return 0; }`
 	prog := mustParse(t, src)

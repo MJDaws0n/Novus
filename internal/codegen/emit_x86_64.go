@@ -136,10 +136,10 @@ func (e *x86_64Emitter) emitGAS() {
 
 	// --- BSS: bump-allocator heap ---
 	if e.usesHeap() {
-		heapSym := e.target.Sym("_novus_heap")
 		heapPtrSym := e.target.Sym("_novus_heap_ptr")
-		w.WriteString(fmt.Sprintf(".lcomm %s, %d\n", heapSym, e.target.HeapSize))
+		heapEndSym := e.target.Sym("_novus_heap_end")
 		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n", heapPtrSym))
+		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n", heapEndSym))
 
 		// GC metadata.
 		gcTable := e.target.Sym("_novus_gc_table")
@@ -193,6 +193,26 @@ func (e *x86_64Emitter) emitGAS() {
 	// Emit GC runtime functions.
 	if e.usesHeap() {
 		e.emitGASGCRuntime()
+	}
+}
+
+func (e *x86_64Emitter) emitGASMmapSyscall() {
+	w := e.b
+	w.WriteString("    movq $0, %rdi\n")
+	w.WriteString(fmt.Sprintf("    movq $%d, %%rsi\n", e.target.HeapSize))
+	w.WriteString("    movq $3, %rdx\n")
+	if e.target.OS == OS_Darwin {
+		w.WriteString("    movq $0x1002, %r10\n")
+		w.WriteString("    movq $-1, %r8\n")
+		w.WriteString("    movq $0, %r9\n")
+		w.WriteString(fmt.Sprintf("    movq $%d, %%rax\n", 197+e.target.SyscallNumOffset))
+		w.WriteString("    syscall\n")
+	} else {
+		w.WriteString("    movq $0x22, %r10\n")
+		w.WriteString("    movq $-1, %r8\n")
+		w.WriteString("    movq $0, %r9\n")
+		w.WriteString("    movq $9, %rax\n")
+		w.WriteString("    syscall\n")
 	}
 }
 
@@ -2320,8 +2340,8 @@ func (e *x86_64Emitter) emitGASGCRuntime() {
 	gcThreshold := e.target.Sym("_novus_gc_threshold")
 	gcFreelist := e.target.Sym("_novus_gc_freelist")
 	gcStackBot := e.target.Sym("_novus_gc_stack_bottom")
-	heapSym := e.target.Sym("_novus_heap")
 	heapPtrSym := e.target.Sym("_novus_heap_ptr")
+	heapEndSym := e.target.Sym("_novus_heap_end")
 	gcRegSym := e.target.Sym("_novus_gc_register")
 	gcCollectSym := e.target.Sym("_novus_gc_collect")
 	gcAllocSym := e.target.Sym("_novus_gc_alloc")
@@ -2601,17 +2621,42 @@ func (e *x86_64Emitter) emitGASGCRuntime() {
 
 	// Bump allocate.
 	w.WriteString(".Lgca_bump_gas:\n")
-	// Inline bump allocator (same as old _novus_heap logic).
-	readyLabel := fmt.Sprintf(".Lgca_ready_%d", e.uniqueID())
 	w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %%rcx\n", heapPtrSym))
 	w.WriteString("    movq (%rcx), %rax\n")
 	w.WriteString("    testq %rax, %rax\n")
-	w.WriteString(fmt.Sprintf("    jnz %s\n", readyLabel))
-	w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %%rax\n", heapSym))
-	w.WriteString(fmt.Sprintf("%s:\n", readyLabel))
-	w.WriteString("    movq %rax, %rbx\n")    // save alloc start
-	w.WriteString("    addq %r12, %rax\n")    // new heap ptr
-	w.WriteString("    movq %rax, (%rcx)\n")  // update heap ptr
+	w.WriteString("    jz .Lgca_region_init_gas\n")
+	w.WriteString(".Lgca_region_try_gas:\n")
+	w.WriteString("    leaq (%rax,%r12), %r11\n")
+	w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %%rdx\n", heapEndSym))
+	w.WriteString("    movq (%rdx), %r8\n")
+	w.WriteString("    cmpq %r8, %r11\n")
+	w.WriteString("    jg .Lgca_region_grow_gas\n")
+	w.WriteString("    movq %rax, %rbx\n")
+	w.WriteString("    movq %r11, (%rcx)\n")
+	w.WriteString("    jmp .Lgca_register_bump_gas\n")
+	w.WriteString(".Lgca_region_init_gas:\n")
+	w.WriteString("    pushq %rcx\n")
+	e.emitGASMmapSyscall()
+	w.WriteString("    popq %rcx\n")
+	w.WriteString("    movq %rax, %r10\n")
+	w.WriteString("    movq %r10, (%rcx)\n")
+	w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %%rdx\n", heapEndSym))
+	w.WriteString(fmt.Sprintf("    leaq %d(%%r10), %%r11\n", e.target.HeapSize))
+	w.WriteString("    movq %r11, (%rdx)\n")
+	w.WriteString("    movq %r10, %rax\n")
+	w.WriteString("    jmp .Lgca_region_try_gas\n")
+	w.WriteString(".Lgca_region_grow_gas:\n")
+	w.WriteString("    pushq %rcx\n")
+	e.emitGASMmapSyscall()
+	w.WriteString("    popq %rcx\n")
+	w.WriteString("    movq %rax, %r10\n")
+	w.WriteString("    movq %r10, (%rcx)\n")
+	w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %%rdx\n", heapEndSym))
+	w.WriteString(fmt.Sprintf("    leaq %d(%%r10), %%r11\n", e.target.HeapSize))
+	w.WriteString("    movq %r11, (%rdx)\n")
+	w.WriteString("    movq %r10, %rax\n")
+	w.WriteString("    jmp .Lgca_region_try_gas\n")
+	w.WriteString(".Lgca_register_bump_gas:\n")
 	// Register with GC.
 	w.WriteString("    movq %rbx, %rdi\n")
 	w.WriteString("    movq %r12, %rsi\n")
