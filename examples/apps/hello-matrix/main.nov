@@ -1,0 +1,26 @@
+module hello_matrix;
+
+import ../../lib/core core;
+import ../../lib/term term;
+
+fn main() -> i32 {
+    term.println("== Novus hello-matrix ==");
+    term.println("Simple table of squares and cubes");
+
+    let i: i32 = 1;
+    while (i <= 8) {
+        let square: i32 = i * i;
+        let cube: i32 = square * i;
+        term.println(
+            "n=" + core.int_to_str(i) +
+            " square=" + core.int_to_str(square) +
+            " cube=" + core.int_to_str(cube)
+        );
+        i = i + 1;
+    }
+
+    let checksum: i32 = core.lcg_next(424242);
+    term.print_key_value("checksum", core.int_to_str(checksum));
+    term.exit_with(0);
+    return 0;
+}

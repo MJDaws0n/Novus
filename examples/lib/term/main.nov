@@ -1,0 +1,54 @@
+module term;
+
+#if(os == "linux") {
+    fn write_raw(msg: str) -> void {
+        mov(rax, 1);
+        mov(rdi, 1);
+        mov(rsi, msg);
+        mov(rdx, len(msg));
+        syscall();
+    }
+
+    fn exit_with(code: i32) -> void {
+        mov(rax, 60);
+        mov(rdi, code);
+        syscall();
+    }
+}
+
+#if(os == "darwin") {
+    fn write_raw(msg: str) -> void {
+        mov(x0, 1);
+        mov(x1, msg);
+        mov(x2, len(msg));
+        mov(x16, 0x2000004);
+        syscall();
+    }
+
+    fn exit_with(code: i32) -> void {
+        mov(x0, code);
+        mov(x16, 0x2000001);
+        syscall();
+    }
+}
+
+#if(os == "windows") {
+    fn write_raw(msg: str) -> void {
+        win_call("GetStdHandle", -11);
+        let out_handle: u64 = getreg(rax);
+        win_call("WriteConsoleA", out_handle, msg, len(msg), 0, 0);
+    }
+
+    fn exit_with(code: i32) -> void {
+        win_call("ExitProcess", code);
+    }
+}
+
+fn println(msg: str) -> void {
+    write_raw(msg);
+    write_raw("\n");
+}
+
+fn print_key_value(key: str, value: str) -> void {
+    println(key + ": " + value);
+}

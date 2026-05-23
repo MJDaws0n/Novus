@@ -1,0 +1,16 @@
+module portable_sanity;
+
+import ../../lib/core core;
+import ../../lib/game game;
+
+fn main() -> i32 {
+    let seed: i32 = core.lcg_next(12345);
+    let delta: i32 = game.duel_delta(seed, 6);
+    let damage: i32 = game.damage_from_delta(delta);
+    let clamped: i32 = core.clamp_i32(damage, 1, 6);
+
+    if (clamped >= 1 && clamped <= 6) {
+        return 0;
+    }
+    return 1;
+}

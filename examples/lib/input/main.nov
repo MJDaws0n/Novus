@@ -1,0 +1,19 @@
+module input;
+
+let input_state: i32 = 0;
+
+fn INPUT_UP() -> i32 { return 1; }
+fn INPUT_DOWN() -> i32 { return 2; }
+fn INPUT_LEFT() -> i32 { return 4; }
+fn INPUT_RIGHT() -> i32 { return 8; }
+fn INPUT_JUMP() -> i32 { return 16; }
+
+fn input_check(key: i32) -> i32 {
+    let result: i32 = input_state & key;
+    if (result == 0) {
+        return 0;
+    }
+    return 1;
+}
+
+fn input_update() -> void {}

@@ -89,7 +89,13 @@ func (tc *Toolchain) assembleGAS() error {
 		case Arch_x86:
 			cmd = exec.Command("as", "--32", "-o", tc.ObjFile, tc.AsmFile)
 		case Arch_ARM64:
-			cmd = exec.Command("as", "-o", tc.ObjFile, tc.AsmFile)
+			asBin := "as"
+			if runtime.GOARCH != "arm64" {
+				if p, ok := firstAvailableTool("aarch64-linux-gnu-as", "as"); ok {
+					asBin = p
+				}
+			}
+			cmd = exec.Command(asBin, "-o", tc.ObjFile, tc.AsmFile)
 		default:
 			cmd = exec.Command("as", "--64", "-o", tc.ObjFile, tc.AsmFile)
 		}
@@ -166,7 +172,13 @@ func (tc *Toolchain) linkLinux() error {
 		cmd := exec.Command("ld", "-m", "elf_i386", "-o", tc.ExeFile, tc.ObjFile)
 		return tc.runCmd(cmd, "link")
 	case Arch_ARM64:
-		cmd := exec.Command("ld", "-o", tc.ExeFile, tc.ObjFile)
+		ldBin := "ld"
+		if runtime.GOARCH != "arm64" {
+			if p, ok := firstAvailableTool("aarch64-linux-gnu-ld", "ld"); ok {
+				ldBin = p
+			}
+		}
+		cmd := exec.Command(ldBin, "-o", tc.ExeFile, tc.ObjFile)
 		return tc.runCmd(cmd, "link")
 	default:
 		cmd := exec.Command("ld", "-o", tc.ExeFile, tc.ObjFile)
@@ -238,6 +250,15 @@ func findMacOSSDK() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+func firstAvailableTool(candidates ...string) (string, bool) {
+	for _, c := range candidates {
+		if p, err := exec.LookPath(c); err == nil {
+			return p, true
+		}
+	}
+	return "", false
+}
+
 // DetectToolchain checks whether the required external tools are available
 // for the given target and returns a list of missing tools.
 func DetectToolchain(target *Target) []string {
@@ -251,14 +272,20 @@ func DetectToolchainWithPaths(target *Target, nasmPath, golinkPath string) []str
 	switch {
 	case target.Flavor == NASM:
 		if nasmPath != "" {
-			if _, err := os.Stat(nasmPath); err != nil {
+			if !toolExists(nasmPath) {
 				missing = append(missing, "nasm")
 			}
 		} else if _, err := exec.LookPath("nasm"); err != nil {
 			missing = append(missing, "nasm")
 		}
 	default:
-		if _, err := exec.LookPath("as"); err != nil {
+		if target.OS == OS_Darwin && runtime.GOOS != "darwin" {
+			missing = append(missing, "darwin assembler/toolchain (host macOS or cctools cross-toolchain)")
+		} else if target.OS == OS_Linux && target.Arch == Arch_ARM64 && runtime.GOARCH != "arm64" {
+			if _, err := exec.LookPath("aarch64-linux-gnu-as"); err != nil {
+				missing = append(missing, "aarch64-linux-gnu-as (linux/arm64 assembler)")
+			}
+		} else if _, err := exec.LookPath("as"); err != nil {
 			// Try cc as fallback.
 			if _, err := exec.LookPath("cc"); err != nil {
 				missing = append(missing, "as (assembler)")
@@ -268,17 +295,23 @@ func DetectToolchainWithPaths(target *Target, nasmPath, golinkPath string) []str
 
 	switch target.OS {
 	case OS_Darwin:
-		if _, err := exec.LookPath("ld"); err != nil {
+		if runtime.GOOS != "darwin" {
+			missing = append(missing, "darwin linker/toolchain (host macOS or cctools cross-toolchain)")
+		} else if _, err := exec.LookPath("ld"); err != nil {
 			missing = append(missing, "ld (linker)")
 		}
 	case OS_Linux:
-		if _, err := exec.LookPath("ld"); err != nil {
+		if target.Arch == Arch_ARM64 && runtime.GOARCH != "arm64" {
+			if _, err := exec.LookPath("aarch64-linux-gnu-ld"); err != nil {
+				missing = append(missing, "aarch64-linux-gnu-ld (linux/arm64 linker)")
+			}
+		} else if _, err := exec.LookPath("ld"); err != nil {
 			missing = append(missing, "ld (linker)")
 		}
 	case OS_Windows:
 		hasLinker := false
 		if golinkPath != "" {
-			if _, err := os.Stat(golinkPath); err == nil {
+			if toolExists(golinkPath) {
 				hasLinker = true
 			}
 		}
@@ -296,4 +329,14 @@ func DetectToolchainWithPaths(target *Target, nasmPath, golinkPath string) []str
 	}
 
 	return missing
+}
+
+func toolExists(pathOrName string) bool {
+	if _, err := os.Stat(pathOrName); err == nil {
+		return true
+	}
+	if _, err := exec.LookPath(pathOrName); err == nil {
+		return true
+	}
+	return false
 }
