@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const VERSION = "0.1.5"
+const VERSION = "0.1.6"
 
 var debugMode = false
 
