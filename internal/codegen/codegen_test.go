@@ -6,6 +6,9 @@ import (
 	"novus/internal/lexer"
 	"novus/internal/parser"
 	"novus/internal/semantic"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -2456,18 +2459,18 @@ func TestLower_ImportedFlagPropagated(t *testing.T) {
 	prog := &ast.Program{
 		Functions: []*ast.FnDecl{
 			{
-				Name:     "imported_fn",
-				Imported: true,
-				Params:   []*ast.Param{},
+				Name:       "imported_fn",
+				Imported:   true,
+				Params:     []*ast.Param{},
 				ReturnType: &ast.TypeExpr{Name: "void"},
-				Body:     &ast.BlockStmt{},
+				Body:       &ast.BlockStmt{},
 			},
 			{
-				Name:     "main",
-				Imported: false,
-				Params:   []*ast.Param{},
+				Name:       "main",
+				Imported:   false,
+				Params:     []*ast.Param{},
 				ReturnType: &ast.TypeExpr{Name: "void"},
-				Body:     &ast.BlockStmt{},
+				Body:       &ast.BlockStmt{},
 			},
 		},
 	}
@@ -2504,6 +2507,57 @@ func TestDetectToolchainWithPaths(t *testing.T) {
 	missing := DetectToolchainWithPaths(target, "/nonexistent/nasm.exe", "/nonexistent/golink.exe")
 	if len(missing) == 0 {
 		t.Error("expected missing tools with nonexistent paths")
+	}
+}
+
+func TestDetectToolchainWithCommandNamesInPath(t *testing.T) {
+	dir := t.TempDir()
+	nasm := filepath.Join(dir, "nasm")
+	golink := filepath.Join(dir, "golink")
+	stub := []byte("#!/bin/sh\nexit 0\n")
+	if err := os.WriteFile(nasm, stub, 0o755); err != nil {
+		t.Fatalf("write nasm stub: %v", err)
+	}
+	if err := os.WriteFile(golink, stub, 0o755); err != nil {
+		t.Fatalf("write golink stub: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	target := &Target{OS: OS_Windows, Arch: Arch_x86_64, Flavor: NASM}
+	missing := DetectToolchainWithPaths(target, "nasm", "golink")
+	if len(missing) > 0 {
+		t.Fatalf("expected no missing tools, got: %v", missing)
+	}
+}
+
+func TestDetectToolchain_DarwinOnNonDarwinHost(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("only relevant on non-darwin hosts")
+	}
+	target := &Target{OS: OS_Darwin, Arch: Arch_ARM64, Flavor: GAS}
+	missing := DetectToolchainWithPaths(target, "", "")
+	joined := strings.Join(missing, " | ")
+	if !strings.Contains(joined, "darwin assembler/toolchain") {
+		t.Fatalf("expected darwin cross-assembler hint, got: %s", joined)
+	}
+	if !strings.Contains(joined, "darwin linker/toolchain") {
+		t.Fatalf("expected darwin cross-linker hint, got: %s", joined)
+	}
+}
+
+func TestDetectToolchain_LinuxARM64OnNonARM64Host(t *testing.T) {
+	if runtime.GOARCH == "arm64" {
+		t.Skip("only relevant on non-arm64 hosts")
+	}
+	target := &Target{OS: OS_Linux, Arch: Arch_ARM64, Flavor: GAS}
+	missing := DetectToolchainWithPaths(target, "", "")
+	if len(missing) == 0 {
+		// If cross tools are installed in CI/local env, this may legitimately pass.
+		return
+	}
+	joined := strings.Join(missing, " | ")
+	if !strings.Contains(joined, "aarch64-linux-gnu-") {
+		t.Fatalf("expected linux/arm64 cross-tool hint, got: %s", joined)
 	}
 }
 

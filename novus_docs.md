@@ -29,6 +29,8 @@ A complete reference for the **Novus** systems programming language — a compil
 21. [Project Structure](#21-project-structure)
 22. [Complete Example: CLI Tool](#22-complete-example-cli-tool)
 23. [Compiler Flags](#23-compiler-flags)
+24. [Validation Matrix (Linux Host)](#24-validation-matrix-linux-host)
+25. [Example Apps and Library Docs](#25-example-apps-and-library-docs)
 
 ---
 
@@ -1670,17 +1672,17 @@ These are resolved at link time by GoLink against the appropriate Windows DLLs.
 
 ## 17. Target Platforms
 
-Novus supports cross-compilation to multiple operating systems and CPU architectures from a single machine.
+Novus supports cross-compilation to multiple operating systems and CPU architectures from a single machine, provided the corresponding assembler/linker toolchains are installed.
 
 ### Supported Targets
 
-| OS      | Architecture | Flag Values                       | Assembler | Linker     |
-|---------|-------------|-----------------------------------|-----------|------------|
-| macOS   | ARM64       | `--os darwin --arch arm64`        | as        | ld         |
-| Linux   | ARM64       | `--os linux --arch arm64`         | as        | ld         |
-| Linux   | x86_64      | `--os linux --arch amd64`         | nasm      | ld         |
-| Linux   | x86 (32-bit)| `--os linux --arch 386`           | nasm      | ld         |
-| Windows | x86_64      | `--os windows --arch amd64`       | nasm      | GoLink     |
+| OS      | Architecture | Flag Values                | Assembler                              | Linker                                |
+|---------|-------------|----------------------------|----------------------------------------|----------------------------------------|
+| macOS   | ARM64       | `--target=darwin/arm64`   | Apple `as` (`-arch arm64`)             | Apple `ld`                             |
+| Linux   | ARM64       | `--target=linux/arm64`    | `as` (native ARM64) or `aarch64-linux-gnu-as` (cross) | `ld` (native ARM64) or `aarch64-linux-gnu-ld` (cross) |
+| Linux   | x86_64      | `--target=linux/amd64`    | nasm                                   | ld                                     |
+| Linux   | x86 (32-bit)| `--target=linux/386`      | nasm                                   | ld (`-m elf_i386`)                     |
+| Windows | x86_64      | `--target=windows/amd64`  | nasm                                   | GoLink or MSVC `link.exe`              |
 
 ### Default Target
 
@@ -1692,21 +1694,21 @@ To cross-compile, specify the target OS and architecture:
 
 ```bash
 # Compile for Linux x86_64 from any platform
-novus --os linux --arch amd64 main.nov
+novus --target=linux/amd64 main.nov
 
 # Compile for Windows x86_64
-novus --os windows --arch amd64 main.nov
+novus --target=windows/amd64 main.nov
 
 # Compile for Linux ARM64
-novus --os linux --arch arm64 main.nov
+novus --target=linux/arm64 main.nov
 
 # Compile for Linux 32-bit x86
-novus --os linux --arch 386 main.nov
+novus --target=linux/386 main.nov
 ```
 
 ### Output Directory
 
-The compiled binary is placed in a directory named after the target:
+When assemble+link succeeds, the compiled binary is placed in a directory named after the target:
 
 ```
 build/<os>_<arch>/<binary_name>
@@ -1716,13 +1718,15 @@ Examples:
 
 ```
 build/darwin_arm64/myapp
-build/linux_amd64/myapp
-build/windows_amd64/myapp.exe
-build/linux_386/myapp
+build/linux_x86_64/myapp
+build/windows_x86_64/myapp.exe
+build/linux_x86/myapp
 build/linux_arm64/myapp
 ```
 
 ### Platform-Specific Considerations
+
+If required toolchain components are missing for a target, Novus still emits assembly and prints a warning so you can assemble/link manually.
 
 **macOS ARM64:**
 - Uses the system assembler (`as`) and linker (`ld`).
@@ -1735,13 +1739,20 @@ build/linux_arm64/myapp
 - x86 (386) target produces 32-bit ELF binaries.
 
 **Linux ARM64:**
-- Uses the system assembler (`as`) and linker (`ld`).
+- On native ARM64 hosts, uses system `as`/`ld`.
+- On non-ARM64 hosts, requires cross tools (`aarch64-linux-gnu-as` and `aarch64-linux-gnu-ld`) for full binaries.
 - Generates ARM64 assembly (same instruction set as macOS ARM64, different syscall conventions).
 
 **Windows x86_64:**
 - Uses NASM as the assembler and GoLink as the linker.
 - Generates NASM-syntax x86_64 assembly with Windows calling conventions.
 - Produces PE executables (`.exe`).
+
+### Practical host notes
+
+- **Linux host targeting macOS:** requires a Darwin cross toolchain (for example, cctools/ld64). Without it, Novus can emit assembly but cannot link a Mach-O binary.
+- **Linux host targeting Windows:** requires NASM plus GoLink (or MSVC link on Windows environments).
+- **Linux host targeting Linux ARM64:** requires `aarch64-linux-gnu-as` and `aarch64-linux-gnu-ld` unless running on ARM64 natively.
 
 ---
 
@@ -2428,48 +2439,52 @@ Enables verbose compilation output. Shows each compilation stage, generated asse
 novus --debug main.nov
 ```
 
-### `--os <os>`
+### `--target=<os>/<arch>`
 
-Sets the target operating system. Valid values:
+Sets the target operating system and architecture in one flag.
 
-| Value     | Target     |
-|-----------|------------|
-| `darwin`  | macOS      |
-| `linux`   | Linux      |
-| `windows` | Windows    |
+| Value example            | Target          |
+|--------------------------|-----------------|
+| `--target=darwin/arm64`  | macOS ARM64     |
+| `--target=linux/amd64`   | Linux x86_64    |
+| `--target=linux/arm64`   | Linux ARM64     |
+| `--target=linux/386`     | Linux x86 32-bit|
+| `--target=windows/amd64` | Windows x86_64  |
 
 ```bash
-novus --os linux main.nov
+novus --target=linux/amd64 main.nov
 ```
 
-### `--arch <arch>`
+### `--asm-only`
 
-Sets the target CPU architecture. Valid values:
-
-| Value   | Architecture      |
-|---------|-------------------|
-| `arm64` | ARM 64-bit        |
-| `amd64` | x86 64-bit        |
-| `386`   | x86 32-bit        |
+Emits assembly only and skips assembling/linking:
 
 ```bash
-novus --arch amd64 main.nov
+novus --asm-only --target=windows/amd64 main.nov
 ```
 
-### `--nasm-path <path>`
+### `--skip-link`
 
-Specifies a custom path to the NASM assembler binary. This is primarily useful on Windows where NASM may not be in the system PATH:
+Assembles to object code but skips final linking:
 
 ```bash
-novus --nasm-path "C:\tools\nasm\nasm.exe" --os windows --arch amd64 main.nov
+novus --skip-link --target=linux/amd64 main.nov
 ```
 
-### `--golink-path <path>`
+### `--heap-size=<size>`
 
-Specifies a custom path to the GoLink linker binary. Used for Windows targets:
+Sets the GC heap size. Supports raw bytes or `k`, `m`, `g` suffixes:
 
 ```bash
-novus --golink-path "C:\tools\golink\golink.exe" --os windows --arch amd64 main.nov
+novus --heap-size=128m main.nov
+```
+
+### `--gc-entries=<N>`
+
+Sets max GC table entries:
+
+```bash
+novus --gc-entries=131072 main.nov
 ```
 
 ### Combined Example
@@ -2477,7 +2492,108 @@ novus --golink-path "C:\tools\golink\golink.exe" --os windows --arch amd64 main.
 Cross-compile for Linux x86_64 with debug output:
 
 ```bash
-novus --debug --os linux --arch amd64 main.nov
+novus --debug --target=linux/amd64 main.nov
 ```
 
-The resulting binary will be at `build/linux_amd64/main`.
+The resulting binary will be at `build/linux_x86_64/main`.
+
+---
+
+## 24. Validation Matrix (Linux Host)
+
+This matrix reflects a real run on Linux x86_64 with Novus `0.1.4` and Nox `3.2.0`.
+
+### Compiler test suites
+
+| Suite | Result |
+|-------|--------|
+| `go test ./...` | PASS |
+| `internal/lexer` | PASS |
+| `internal/parser` | PASS |
+| `internal/semantic` | PASS |
+| `internal/imports` | PASS |
+| `internal/codegen` | PASS |
+
+### Cross-target compile checks (`--asm-only`)
+
+| Target | Result | Output directory |
+|--------|--------|------------------|
+| `linux/amd64` | PASS | `build/linux_x86_64/` |
+| `linux/arm64` | PASS | `build/linux_arm64/` |
+| `linux/386` | PASS | `build/linux_x86/` |
+| `windows/amd64` | PASS | `build/windows_x86_64/` |
+| `darwin/arm64` | PASS | `build/darwin_arm64/` |
+
+### Linux runtime checks
+
+| Target | Result |
+|--------|--------|
+| `linux/amd64` minimal program build + run | PASS |
+| `linux/386` minimal program build + run | PASS |
+| `lib/std/tests_linux_amd64.nov` build + run | PASS |
+
+### Toolchain-dependent full-link checks
+
+| Target | Status on Linux x86_64 host |
+|--------|-----------------------------|
+| `linux/arm64` | Assembly emitted; full link requires `aarch64-linux-gnu-as` + `aarch64-linux-gnu-ld` |
+| `darwin/arm64` | Assembly emitted; full link requires Darwin toolchain (macOS or cctools) |
+| `windows/amd64` | Assembly emitted when NASM/Windows linker unavailable |
+
+### Nox workflow checks
+
+| Check | Result |
+|------|--------|
+| `nox list` registry fetch | PASS |
+| `nox init` scaffold creation | PASS |
+| `nox pull std` | PASS |
+| `nox check` in dependency-heavy project | PASS |
+
+### Project smoke checks
+
+| Project | Initial status | After pulling dependencies with Nox |
+|---------|----------------|-------------------------------------|
+| `GolemMC` | Import failures (missing libs) | `--asm-only` PASS |
+| `BigManComputer` | Import failures (missing libs) | `--asm-only` PASS |
+| `OwenAI` | Import failures (missing libs) | `--asm-only` PASS |
+| `Manifold-Edge-Remover-V2` | No `.nov` sources detected in repo root snapshot | n/a |
+
+---
+
+## 25. Example Apps and Library Docs
+
+The repository now includes a modern examples workspace:
+
+- `examples/apps/hello-matrix/main.nov`
+- `examples/apps/dice-duel/main.nov`
+- `examples/apps/string-lab/main.nov`
+- `examples/apps/portable-sanity/main.nov`
+- `examples/lib/core/main.nov`
+- `examples/lib/game/main.nov`
+- `examples/lib/term/main.nov`
+
+### Build and run examples
+
+```bash
+novus --target=linux/amd64 examples/apps/hello-matrix/main.nov
+./build/linux_x86_64/hello_matrix
+```
+
+```bash
+novus --target=linux/amd64 examples/apps/dice-duel/main.nov
+./build/linux_x86_64/dice_duel
+```
+
+### Cross-target smoke checks
+
+```bash
+novus --target=linux/arm64 --asm-only examples/apps/portable-sanity/main.nov
+novus --target=darwin/arm64 --asm-only examples/apps/portable-sanity/main.nov
+novus --target=windows/amd64 --asm-only examples/apps/portable-sanity/main.nov
+```
+
+### Additional docs
+
+- Full library-by-library reference: `docs/library-reference.md`
+- Example and cross-target test matrix: `docs/testing-matrix.md`
+- Reproducible script: `scripts/run-example-matrix.sh`

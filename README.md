@@ -126,5 +126,64 @@ https://github.com/MJDaws0n/Manifold-Edge-Remover-V2
 
 # Build and run
 ```sh
-go run cmd/novus/main.go --target=darwin/arm64 novus-examples/example.nov
+go run cmd/novus/main.go --target=linux/amd64 example_old_lib_examples/example.nov
+```
+
+## Target output directories
+
+Novus writes artifacts to `build/<target>/` using these target directory names:
+
+- `darwin_arm64`
+- `linux_x86_64`
+- `linux_x86`
+- `linux_arm64`
+- `windows_x86_64`
+
+## Cross-compilation toolchain notes
+
+- `linux/amd64` and `linux/386` use NASM + `ld`.
+- `linux/arm64` needs `aarch64-linux-gnu-as` and `aarch64-linux-gnu-ld` when compiling from a non-ARM64 host.
+- `windows/amd64` needs NASM + GoLink (or `link.exe`).
+- `darwin/arm64` linking requires macOS tooling (`as`/`ld`) or an installed Darwin cross-toolchain.
+
+See [`novus_docs.md`](./novus_docs.md) for full language/CLI reference and a complete platform section.
+
+## New example apps and libraries
+
+A modern, reusable example set now lives in [`examples/`](./examples/):
+
+- Apps:
+  - `examples/apps/hello-matrix/main.nov`
+  - `examples/apps/dice-duel/main.nov`
+  - `examples/apps/string-lab/main.nov`
+  - `examples/apps/portable-sanity/main.nov`
+- Libraries:
+  - `examples/lib/core/main.nov`
+  - `examples/lib/game/main.nov`
+  - `examples/lib/term/main.nov`
+
+Build and run examples (Linux host):
+
+```sh
+novus --target=linux/amd64 examples/apps/hello-matrix/main.nov
+./build/linux_x86_64/hello_matrix
+```
+
+```sh
+novus --target=linux/amd64 examples/apps/dice-duel/main.nov
+./build/linux_x86_64/dice_duel
+```
+
+## Library documentation
+
+- Full library reference: [`docs/library-reference.md`](./docs/library-reference.md)
+- Example + cross-target matrix: [`docs/testing-matrix.md`](./docs/testing-matrix.md)
+
+## Reproducible test script
+
+Run the end-to-end example and cross-target checks:
+
+```sh
+chmod +x scripts/run-example-matrix.sh
+NOVUS_BIN=/home/max/.local/bin/novus ./scripts/run-example-matrix.sh
 ```

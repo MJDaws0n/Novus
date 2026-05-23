@@ -1,0 +1,75 @@
+module game;
+
+fn abs_i32(v: i32) -> i32 {
+    if (v < 0) {
+        return 0 - v;
+    }
+    return v;
+}
+
+fn clamp_i32(value: i32, min_value: i32, max_value: i32) -> i32 {
+    if (value < min_value) {
+        return min_value;
+    }
+    if (value > max_value) {
+        return max_value;
+    }
+    return value;
+}
+
+fn repeat(s: str, count: i32) -> str {
+    let out: str = "";
+    let i: i32 = 0;
+    while (i < count) {
+        out = out + s;
+        i = i + 1;
+    }
+    return out;
+}
+
+fn lcg_next(seed: i32) -> i32 {
+    let next: i32 = seed * 1103515245 + 12345;
+    if (next < 0) {
+        return 0 - next;
+    }
+    return next;
+}
+
+fn roll(seed: i32, sides: i32) -> i32 {
+    let safe_sides: i32 = sides;
+    if (safe_sides <= 0) {
+        safe_sides = 1;
+    }
+    return (lcg_next(seed) % safe_sides) + 1;
+}
+
+fn duel_delta(seed: i32, sides: i32) -> i32 {
+    let left: i32 = roll(seed, sides);
+    let right: i32 = roll(seed + 97, sides);
+    return left - right;
+}
+
+fn damage_from_delta(delta: i32) -> i32 {
+    return abs_i32(delta) + 1;
+}
+
+fn winner_label(delta: i32) -> str {
+    if (delta > 0) {
+        return "hero";
+    }
+    if (delta < 0) {
+        return "villain";
+    }
+    return "draw";
+}
+
+fn hp_bar(hp: i32, max_hp: i32, width: i32) -> str {
+    let bounded_hp: i32 = clamp_i32(hp, 0, max_hp);
+    let filled: i32 = 0;
+    if (max_hp > 0) {
+        filled = (bounded_hp * width) / max_hp;
+    }
+    let safe_filled: i32 = clamp_i32(filled, 0, width);
+    let empty: i32 = width - safe_filled;
+    return "[" + repeat("#", safe_filled) + repeat("-", empty) + "]";
+}
