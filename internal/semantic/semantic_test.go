@@ -748,6 +748,12 @@ func TestBuiltinSetflagValid(t *testing.T) {
 	expectErrors(t, diags, 0)
 }
 
+func TestBuiltinStoreByteValid(t *testing.T) {
+	src := "fn f(p: u64) -> void { store_byte(p, 65); }"
+	diags := analyze(t, src)
+	expectErrors(t, diags, 0)
+}
+
 func TestBuiltinArityError(t *testing.T) {
 	src := "fn f() -> void { mov(eax); }"
 	diags := analyze(t, src)
