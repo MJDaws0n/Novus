@@ -408,29 +408,30 @@ type builtinInfo struct {
 // getreg and getflag return concrete data that can be used directly in the
 // language (u64 and bool respectively).
 var builtinFuncTable = map[string]builtinInfo{
-	"push":     {Arity: 1, ReturnType: TypeVoid},  // push value onto stack
-	"pop":      {Arity: 0, ReturnType: TypeU64},   // pop stack → u64 value
-	"lea":      {Arity: 2, ReturnType: TypeVoid},  // load effective address
-	"mov":      {Arity: 2, ReturnType: TypeVoid},  // move data
-	"call":     {Arity: 1, ReturnType: TypeVoid},  // call function
-	"ret":      {Arity: 0, ReturnType: TypeVoid},  // return from call
-	"syscall":  {Arity: 0, ReturnType: TypeVoid},  // invoke system call
-	"int":      {Arity: 1, ReturnType: TypeVoid},  // software interrupt
-	"setreg":   {Arity: 2, ReturnType: TypeVoid},  // set register value
-	"getreg":   {Arity: 1, ReturnType: TypeU64},   // read register → u64
-	"nop":      {Arity: 0, ReturnType: TypeVoid},  // no operation
-	"setflag":  {Arity: 2, ReturnType: TypeVoid},  // set CPU flag
-	"getflag":  {Arity: 1, ReturnType: TypeBool},  // read CPU flag → bool
-	"load8":    {Arity: 1, ReturnType: TypeI32},   // load byte from address → i32
-	"load32":   {Arity: 1, ReturnType: TypeI32},   // load 32-bit int from address → i32
-	"load64":   {Arity: 1, ReturnType: TypeI64},   // load 64-bit int from address → i64
-	"len":      {Arity: 1, ReturnType: TypeI32},   // string length → i32
-	"win_call": {Arity: -1, ReturnType: TypeVoid}, // call Windows API (variadic: first arg is function name string)
+	"push":       {Arity: 1, ReturnType: TypeVoid},  // push value onto stack
+	"pop":        {Arity: 0, ReturnType: TypeU64},   // pop stack → u64 value
+	"lea":        {Arity: 2, ReturnType: TypeVoid},  // load effective address
+	"mov":        {Arity: 2, ReturnType: TypeVoid},  // move data
+	"call":       {Arity: 1, ReturnType: TypeVoid},  // call function
+	"ret":        {Arity: 0, ReturnType: TypeVoid},  // return from call
+	"syscall":    {Arity: 0, ReturnType: TypeVoid},  // invoke system call
+	"int":        {Arity: 1, ReturnType: TypeVoid},  // software interrupt
+	"setreg":     {Arity: 2, ReturnType: TypeVoid},  // set register value
+	"getreg":     {Arity: 1, ReturnType: TypeU64},   // read register → u64
+	"nop":        {Arity: 0, ReturnType: TypeVoid},  // no operation
+	"setflag":    {Arity: 2, ReturnType: TypeVoid},  // set CPU flag
+	"getflag":    {Arity: 1, ReturnType: TypeBool},  // read CPU flag → bool
+	"load8":      {Arity: 1, ReturnType: TypeI32},   // load byte from address → i32
+	"store_byte": {Arity: 2, ReturnType: TypeVoid},  // store low byte to raw address
+	"load32":     {Arity: 1, ReturnType: TypeI32},   // load 32-bit int from address → i32
+	"load64":     {Arity: 1, ReturnType: TypeI64},   // load 64-bit int from address → i64
+	"len":        {Arity: 1, ReturnType: TypeI32},   // string length → i32
+	"win_call":   {Arity: -1, ReturnType: TypeVoid}, // call Windows API (variadic: first arg is function name string)
 	// Float conversion intrinsics
-	"i64_to_f64":   {Arity: 1, ReturnType: TypeF64},  // convert int → float64
-	"f64_to_i64":   {Arity: 1, ReturnType: TypeI64},  // convert float64 → int (truncate)
-	"f64_bits":     {Arity: 1, ReturnType: TypeI64},  // reinterpret f64 bits as i64
-	"f64_from_bits": {Arity: 1, ReturnType: TypeF64}, // reinterpret i64 bits as f64
+	"i64_to_f64":    {Arity: 1, ReturnType: TypeF64},  // convert int → float64
+	"f64_to_i64":    {Arity: 1, ReturnType: TypeI64},  // convert float64 → int (truncate)
+	"f64_bits":      {Arity: 1, ReturnType: TypeI64},  // reinterpret f64 bits as i64
+	"f64_from_bits": {Arity: 1, ReturnType: TypeF64},  // reinterpret i64 bits as f64
 	"gc_collect":    {Arity: 0, ReturnType: TypeVoid}, // trigger garbage collection
 }
 

@@ -131,6 +131,26 @@ func TestLowerArithmetic(t *testing.T) {
 	}
 }
 
+func TestLowerBuiltinStoreByte(t *testing.T) {
+	src := `module test; fn main(p: u64) -> i32 { store_byte(p, 65); return 0; }`
+	prog := mustParse(t, src)
+	mod := Lower(prog, linuxAMD64Target())
+	fn := mod.Functions[0]
+
+	hasStoreByte := false
+	for _, instr := range fn.Instrs {
+		if instr.Op == IRStoreByte {
+			hasStoreByte = true
+			if instr.Src1.Kind != OpImmediate || instr.Src1.Imm != 65 {
+				t.Fatalf("expected store_byte immediate 65, got %+v", instr.Src1)
+			}
+		}
+	}
+	if !hasStoreByte {
+		t.Fatal("expected IRStoreByte instruction")
+	}
+}
+
 func TestLowerSubMulDiv(t *testing.T) {
 	src := `module test; fn main() -> i32 {
 		let a: i32 = 10;

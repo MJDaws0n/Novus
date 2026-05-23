@@ -1069,29 +1069,30 @@ type builtinHandler func(e *ast.CallExpr) Operand
 
 func (l *Lowerer) builtinHandlers() map[string]builtinHandler {
 	return map[string]builtinHandler{
-		"mov":          l.builtinMov,
-		"lea":          l.builtinLea,
-		"push":         l.builtinPush,
-		"pop":          l.builtinPop,
-		"syscall":      l.builtinSyscall,
-		"int":          l.builtinInt,
-		"call":         l.builtinCall,
-		"ret":          l.builtinRet,
-		"nop":          l.builtinNop,
-		"setreg":       l.builtinSetReg,
-		"getreg":       l.builtinGetReg,
-		"setflag":      l.builtinSetFlag,
-		"getflag":      l.builtinGetFlag,
-		"array_append": l.builtinAppend,
-		"array_pop":    l.builtinArrayPop,
-		"len":          l.builtinLen,
-		"load8":        l.builtinLoad8,
-		"load32":       l.builtinLoad32,
-		"load64":       l.builtinLoad64,
-		"win_call":     l.builtinWinCall,
-		"i64_to_f64":   l.builtinI64ToF64,
-		"f64_to_i64":   l.builtinF64ToI64,
-		"f64_bits":     l.builtinF64Bits,
+		"mov":           l.builtinMov,
+		"lea":           l.builtinLea,
+		"push":          l.builtinPush,
+		"pop":           l.builtinPop,
+		"syscall":       l.builtinSyscall,
+		"int":           l.builtinInt,
+		"call":          l.builtinCall,
+		"ret":           l.builtinRet,
+		"nop":           l.builtinNop,
+		"setreg":        l.builtinSetReg,
+		"getreg":        l.builtinGetReg,
+		"setflag":       l.builtinSetFlag,
+		"getflag":       l.builtinGetFlag,
+		"array_append":  l.builtinAppend,
+		"array_pop":     l.builtinArrayPop,
+		"len":           l.builtinLen,
+		"load8":         l.builtinLoad8,
+		"store_byte":    l.builtinStoreByte,
+		"load32":        l.builtinLoad32,
+		"load64":        l.builtinLoad64,
+		"win_call":      l.builtinWinCall,
+		"i64_to_f64":    l.builtinI64ToF64,
+		"f64_to_i64":    l.builtinF64ToI64,
+		"f64_bits":      l.builtinF64Bits,
 		"f64_from_bits": l.builtinF64FromBits,
 		"gc_collect":    l.builtinGCCollect,
 	}
@@ -1276,6 +1277,17 @@ func (l *Lowerer) builtinLoad8(e *ast.CallExpr) Operand {
 	dst := l.freshVReg()
 	l.emit(IRInstr{Op: IRLoad8, Dst: VReg(dst), Src1: srcOp})
 	return VReg(dst)
+}
+
+// store_byte(addr, value) — store the low byte of value to a raw memory address.
+func (l *Lowerer) builtinStoreByte(e *ast.CallExpr) Operand {
+	if len(e.Args) != 2 {
+		return None()
+	}
+	addrOp := l.lowerExpr(e.Args[0])
+	valOp := l.lowerExpr(e.Args[1])
+	l.emit(IRInstr{Op: IRStoreByte, Dst: addrOp, Src1: valOp})
+	return None()
 }
 
 // load32(addr) — load 32-bit integer from memory address → i32.
