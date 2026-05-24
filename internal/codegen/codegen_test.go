@@ -56,6 +56,11 @@ func windowsAMD64Target() *Target {
 	return tgt
 }
 
+func linuxX86Target() *Target {
+	tgt, _ := ResolveTarget("linux", "386")
+	return tgt
+}
+
 // ---------------------------------------------------------------------------
 // IR Lowering Tests
 // ---------------------------------------------------------------------------
@@ -284,6 +289,52 @@ func TestLowerStringLiteral(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected string 'hello' in module strings")
+	}
+}
+
+func TestLowerSingleCharDoubleQuotedStringAsStringRef(t *testing.T) {
+	src := `module test; fn main() -> i32 { let s: str = "0"; return 0; }`
+	prog := mustParse(t, src)
+	mod := Lower(prog, linuxAMD64Target())
+	fn := mod.Functions[0]
+
+	for _, instr := range fn.Instrs {
+		if instr.Op == IRStore && instr.Dst.Kind == OpMemory && instr.Dst.MemOffset == -8 {
+			if instr.Src1.Kind != OpStringRef {
+				t.Fatalf("expected single-char double-quoted literal to lower as string ref, got %+v", instr.Src1)
+			}
+			return
+		}
+	}
+	t.Fatal("expected store for local string literal")
+}
+
+func TestLowerAssignStrFromIndexConvertsByteToString(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let srcs: str = "ab";
+		let dst: str = "";
+		dst = srcs[0];
+		return len(dst);
+	}`
+	prog := mustParse(t, src)
+	mod := Lower(prog, linuxAMD64Target())
+	fn := mod.Functions[0]
+
+	hasIndex := false
+	hasTempStringAddr := false
+	for _, instr := range fn.Instrs {
+		if instr.Op == IRStrIndex {
+			hasIndex = true
+		}
+		if instr.Op == IRLea {
+			hasTempStringAddr = true
+		}
+	}
+	if !hasIndex {
+		t.Fatal("expected string index lowering")
+	}
+	if !hasTempStringAddr {
+		t.Fatal("expected byte-to-string coercion during str assignment")
 	}
 }
 
@@ -864,6 +915,46 @@ func TestComputeFrameSize_AccountsForVregs(t *testing.T) {
 		}
 	}
 	t.Error("could not find frame size allocation in assembly")
+}
+
+func TestEmitX86FrameSizeAndStringAddressing(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let s: str = "0";
+		let n: i32 = len(s);
+		return n + 1;
+	}`
+	prog := mustParse(t, src)
+	target := linuxX86Target()
+	mod := Lower(prog, target)
+	fn := mod.Functions[0]
+	asm := EmitX86(mod, target)
+
+	if strings.Contains(asm, "(%%") {
+		t.Fatalf("unexpected doubled percent in x86 assembly:\n%s", asm)
+	}
+
+	maxVreg := 0
+	for _, instr := range fn.Instrs {
+		for _, op := range []Operand{instr.Dst, instr.Src1, instr.Src2} {
+			if op.Kind == OpVirtReg && op.Reg > maxVreg {
+				maxVreg = op.Reg
+			}
+		}
+	}
+	minRequired := (fn.Locals + maxVreg + 1) * target.PtrSize
+	for _, line := range strings.Split(asm, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "subl $") && strings.Contains(line, "%esp") {
+			var frameSize int
+			if _, err := fmt.Sscanf(line, "subl $%d", &frameSize); err == nil {
+				if frameSize < minRequired {
+					t.Fatalf("frame size %d is too small; need at least %d", frameSize, minRequired)
+				}
+				return
+			}
+		}
+	}
+	t.Fatal("could not find x86 frame allocation in assembly")
 }
 
 // ---------------------------------------------------------------------------

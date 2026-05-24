@@ -414,12 +414,7 @@ func (l *Lowerer) lowerLetStmt(s *ast.LetStmt) {
 		l.varTypes[s.Name] = s.Type.Name
 	}
 	valOp := l.lowerExpr(s.Value)
-
-	// Bug 1 fix: if the declared type is str but the value is a raw byte
-	// (e.g. from str_index), convert the byte into a 1-char string.
-	if s.Type != nil && s.Type.Name == "str" && !l.operandIsStr(valOp) && valOp.Kind != OpNone {
-		valOp = l.charToStr(valOp)
-	}
+	valOp = l.coerceAssignedValue(s.Type, valOp)
 
 	l.emit(IRInstr{
 		Op:   IRStore,
@@ -427,6 +422,15 @@ func (l *Lowerer) lowerLetStmt(s *ast.LetStmt) {
 		Src1: valOp,
 	})
 	_ = slot
+}
+
+func (l *Lowerer) coerceAssignedValue(targetType *ast.TypeExpr, valOp Operand) Operand {
+	// str locals/globals store pointers. If the assigned value is a raw byte
+	// (for example from str indexing), convert it into a 1-char string first.
+	if targetType != nil && targetType.Name == "str" && !l.operandIsStr(valOp) && valOp.Kind != OpNone {
+		return l.charToStr(valOp)
+	}
+	return valOp
 }
 
 func (l *Lowerer) lowerReturnStmt(s *ast.ReturnStmt) {
@@ -534,11 +538,13 @@ func (l *Lowerer) lowerAssignStmt(s *ast.AssignStmt) {
 		// Local variable?
 		slot := l.varSlot(target.Name)
 		if slot >= 0 {
+			valOp = l.coerceAssignedValue(&ast.TypeExpr{Name: l.varTypes[target.Name]}, valOp)
 			l.emit(IRInstr{Op: IRStore, Dst: l.slotMem(slot), Src1: valOp})
 			return
 		}
 		// Global variable?
 		if label, ok := l.globals[target.Name]; ok {
+			valOp = l.coerceAssignedValue(&ast.TypeExpr{Name: l.globalTypes[target.Name]}, valOp)
 			l.emit(IRInstr{Op: IRStoreGlobal, Dst: LabelOp(label), Src1: valOp})
 			return
 		}
