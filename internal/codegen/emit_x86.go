@@ -29,12 +29,42 @@ type x86Emitter struct {
 	target *Target
 	b      *strings.Builder
 	nextID int
+	fn     *IRFunc
 }
 
 func (e *x86Emitter) uniqueID() int {
 	id := e.nextID
 	e.nextID++
 	return id
+}
+
+func (e *x86Emitter) computeFrameSize(fn *IRFunc) int {
+	maxVReg := 0
+	for _, instr := range fn.Instrs {
+		for _, op := range []Operand{instr.Dst, instr.Src1, instr.Src2} {
+			if op.Kind == OpVirtReg && op.Reg+1 > maxVReg {
+				maxVReg = op.Reg + 1
+			}
+		}
+		for _, op := range instr.Args {
+			if op.Kind == OpVirtReg && op.Reg+1 > maxVReg {
+				maxVReg = op.Reg + 1
+			}
+		}
+	}
+	totalSlots := fn.Locals + maxVReg + 4
+	size := totalSlots * 4
+	if size%16 != 0 {
+		size += 16 - (size % 16)
+	}
+	if size < 16 {
+		size = 16
+	}
+	return size
+}
+
+func (e *x86Emitter) vregOffset(fn *IRFunc, reg int) int {
+	return -((fn.Locals + reg + 1) * 4)
 }
 
 func (e *x86Emitter) emit() {
@@ -116,12 +146,14 @@ func (e *x86Emitter) emit() {
 
 func (e *x86Emitter) emitFunction(fn *IRFunc) {
 	w := e.b
+	e.fn = fn
+	frameSize := e.computeFrameSize(fn)
 
 	w.WriteString(fmt.Sprintf("%s:\n", fn.Name))
 	w.WriteString("    pushl %ebp\n")
 	w.WriteString("    movl %esp, %ebp\n")
-	if fn.FrameSize > 0 {
-		w.WriteString(fmt.Sprintf("    subl $%d, %%esp\n", fn.FrameSize))
+	if frameSize > 0 {
+		w.WriteString(fmt.Sprintf("    subl $%d, %%esp\n", frameSize))
 	}
 
 	for _, instr := range fn.Instrs {
@@ -129,6 +161,7 @@ func (e *x86Emitter) emitFunction(fn *IRFunc) {
 	}
 
 	w.WriteString("\n")
+	e.fn = nil
 }
 
 func (e *x86Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
@@ -378,8 +411,9 @@ func (e *x86Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 			src := e.operand(instr.Src1)
 			w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src))
 		}
-		if fn.FrameSize > 0 {
-			w.WriteString(fmt.Sprintf("    addl $%d, %%esp\n", fn.FrameSize))
+		frameSize := e.computeFrameSize(fn)
+		if frameSize > 0 {
+			w.WriteString(fmt.Sprintf("    addl $%d, %%esp\n", frameSize))
 		}
 		w.WriteString("    popl %ebp\n")
 		w.WriteString("    ret\n")
@@ -534,13 +568,14 @@ func (e *x86Emitter) emitStrLen(instr IRInstr) {
 	w := e.b
 	src := e.operand(instr.Src1)
 	dst := e.operand(instr.Dst)
-	startLabel := fmt.Sprintf(".Lstrlen32_s_%p", &instr)
-	doneLabel := fmt.Sprintf(".Lstrlen32_d_%p", &instr)
+	id := e.uniqueID()
+	startLabel := fmt.Sprintf(".Lstrlen32_s_%d", id)
+	doneLabel := fmt.Sprintf(".Lstrlen32_d_%d", id)
 
 	w.WriteString(fmt.Sprintf("    movl %s, %%edi\n", src))
 	w.WriteString("    xorl %ecx, %ecx\n")
 	w.WriteString(fmt.Sprintf("%s:\n", startLabel))
-	w.WriteString("    cmpb $0, (%%edi,%%ecx)\n")
+	w.WriteString("    cmpb $0, (%edi,%ecx)\n")
 	w.WriteString(fmt.Sprintf("    je %s\n", doneLabel))
 	w.WriteString("    incl %ecx\n")
 	w.WriteString(fmt.Sprintf("    jmp %s\n", startLabel))
@@ -556,7 +591,7 @@ func (e *x86Emitter) emitStrIndex(instr IRInstr) {
 	w.WriteString(fmt.Sprintf("    movl %s, %%edi\n", src))
 	w.WriteString(fmt.Sprintf("    movl %s, %%esi\n", idx))
 	w.WriteString("    xorl %eax, %eax\n")
-	w.WriteString("    movb (%%edi,%%esi), %al\n")
+	w.WriteString("    movb (%edi,%esi), %al\n")
 	w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
 }
 
@@ -586,7 +621,7 @@ func (e *x86Emitter) emitStrConcat(instr IRInstr) {
 	// Compute strlen(s1) → ecx.
 	w.WriteString("    xorl %ecx, %ecx\n")
 	w.WriteString(fmt.Sprintf("%s:\n", len1Label))
-	w.WriteString("    cmpb $0, (%%esi,%%ecx)\n")
+	w.WriteString("    cmpb $0, (%esi,%ecx)\n")
 	w.WriteString(fmt.Sprintf("    je %s\n", len1Done))
 	w.WriteString("    incl %ecx\n")
 	w.WriteString(fmt.Sprintf("    jmp %s\n", len1Label))
@@ -596,7 +631,7 @@ func (e *x86Emitter) emitStrConcat(instr IRInstr) {
 	// Compute strlen(s2) → eax.
 	w.WriteString("    xorl %eax, %eax\n")
 	w.WriteString(fmt.Sprintf("%s:\n", len2Label))
-	w.WriteString("    cmpb $0, (%%edx,%%eax)\n")
+	w.WriteString("    cmpb $0, (%edx,%eax)\n")
 	w.WriteString(fmt.Sprintf("    je %s\n", len2Done))
 	w.WriteString("    incl %eax\n")
 	w.WriteString(fmt.Sprintf("    jmp %s\n", len2Label))
@@ -669,8 +704,10 @@ func (e *x86Emitter) operand(op Operand) string {
 	case OpPhysReg:
 		return fmt.Sprintf("%%%s", op.PhysReg)
 	case OpVirtReg:
-		offset := -(op.Reg + 1) * 4
-		return fmt.Sprintf("%d(%%ebp)", offset-512) // vregs at ebp-512 and below
+		if e.fn == nil {
+			return "0(%ebp)"
+		}
+		return fmt.Sprintf("%d(%%ebp)", e.vregOffset(e.fn, op.Reg))
 	case OpStringRef:
 		label := e.mod.Strings[op.Imm].Label
 		return fmt.Sprintf("$%s", label)
@@ -803,10 +840,10 @@ func (e *x86Emitter) emitArrayNew(instr IRInstr) {
 	w.WriteString("    call _novus_gc_alloc\n")
 	w.WriteString("    addl $4, %esp\n")
 	// eax = header pointer.
-	w.WriteString("    leal 12(%eax), %ecx\n")                      // ecx = data start
-	w.WriteString("    movl %ecx, (%eax)\n")                        // header.data_ptr
-	w.WriteString("    movl $0, 4(%eax)\n")                         // header.len = 0
-	w.WriteString(fmt.Sprintf("    movl $%d, 8(%%eax)\n", cap))    // header.cap
+	w.WriteString("    leal 12(%eax), %ecx\n")                  // ecx = data start
+	w.WriteString("    movl %ecx, (%eax)\n")                    // header.data_ptr
+	w.WriteString("    movl $0, 4(%eax)\n")                     // header.len = 0
+	w.WriteString(fmt.Sprintf("    movl $%d, 8(%%eax)\n", cap)) // header.cap
 	dst := e.operand(instr.Dst)
 	w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
 }
@@ -871,18 +908,18 @@ func (e *x86Emitter) emitArrayAppend(instr IRInstr) {
 
 	// Allocate new data via gc_alloc: new_cap * 4 bytes. cdecl.
 	w.WriteString("    movl %edi, %eax\n")
-	w.WriteString("    shll $2, %eax\n")    // eax = new_cap * 4
+	w.WriteString("    shll $2, %eax\n") // eax = new_cap * 4
 	w.WriteString("    pushl %eax\n")
 	w.WriteString("    call _novus_gc_alloc\n")
 	w.WriteString("    addl $4, %esp\n")
 	// eax = new data block.
 
 	// Restore saved values.
-	w.WriteString("    popl %edi\n") // new_cap
-	w.WriteString("    popl %ecx\n") // len
-	w.WriteString("    popl %edx\n") // val
+	w.WriteString("    popl %edi\n")       // new_cap
+	w.WriteString("    popl %ecx\n")       // len
+	w.WriteString("    popl %edx\n")       // val
 	w.WriteString("    movl %eax, %esi\n") // esi = new data
-	w.WriteString("    popl %eax\n") // arrPtr
+	w.WriteString("    popl %eax\n")       // arrPtr
 
 	// Copy old data. esi=new_data, ecx=len, eax=arrPtr.
 	w.WriteString("    pushl %ebx\n")
@@ -907,13 +944,13 @@ func (e *x86Emitter) emitArrayAppend(instr IRInstr) {
 	w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", arrPtr))
 
 	// Update header.
-	w.WriteString("    movl %esi, (%eax)\n")   // data_ptr = new_data
-	w.WriteString("    movl %edi, 8(%eax)\n")  // cap = new_cap
+	w.WriteString("    movl %esi, (%eax)\n")  // data_ptr = new_data
+	w.WriteString("    movl %edi, 8(%eax)\n") // cap = new_cap
 
 	// --- NO GROW ---
 	w.WriteString(fmt.Sprintf("%s:\n", noGrowLabel))
-	w.WriteString("    movl (%eax), %esi\n")       // data_ptr
-	w.WriteString("    movl 4(%eax), %ecx\n")      // len (reload)
+	w.WriteString("    movl (%eax), %esi\n")        // data_ptr
+	w.WriteString("    movl 4(%eax), %ecx\n")       // len (reload)
 	w.WriteString("    movl %edx, (%esi,%ecx,4)\n") // data[len] = val
 	w.WriteString("    incl %ecx\n")
 	w.WriteString("    movl %ecx, 4(%eax)\n") // len++
@@ -960,11 +997,11 @@ func (e *x86Emitter) emitX86GCRuntime() {
 	// table[count] = {ptr, size, 0}. Entry size = 12 bytes.
 	w.WriteString("    imull $12, %eax, %ebx\n")
 	w.WriteString("    addl $_novus_gc_table, %ebx\n")
-	w.WriteString("    movl 8(%ebp), %ecx\n")  // ptr arg
+	w.WriteString("    movl 8(%ebp), %ecx\n") // ptr arg
 	w.WriteString("    movl %ecx, (%ebx)\n")
 	w.WriteString("    movl 12(%ebp), %ecx\n") // size arg
 	w.WriteString("    movl %ecx, 4(%ebx)\n")
-	w.WriteString("    movl $0, 8(%ebx)\n")    // mark = 0
+	w.WriteString("    movl $0, 8(%ebx)\n") // mark = 0
 	w.WriteString("    incl %eax\n")
 	w.WriteString("    movl %eax, _novus_gc_count\n")
 	w.WriteString(".gcr32_full:\n")
@@ -998,7 +1035,7 @@ func (e *x86Emitter) emitX86GCRuntime() {
 	w.WriteString("    movl _novus_gc_stack_bottom, %edi\n")
 	w.WriteString(".gcc32_scan_stack:\n")
 	w.WriteString("    cmpl %edi, %esi\n")
-	w.WriteString("    jge .gcc32_trans\n") // go to transitive marking
+	w.WriteString("    jge .gcc32_trans\n")  // go to transitive marking
 	w.WriteString("    movl (%esi), %edx\n") // potential pointer
 	// Inner loop: check edx against all table entries.
 	// Save esi/edi on stack since we need registers.
@@ -1011,14 +1048,14 @@ func (e *x86Emitter) emitX86GCRuntime() {
 	w.WriteString("    jge .gcc32_check_done\n")
 	w.WriteString("    imull $12, %ebx, %eax\n")
 	w.WriteString("    addl $_novus_gc_table, %eax\n")
-	w.WriteString("    movl (%eax), %esi\n")   // entry.ptr
+	w.WriteString("    movl (%eax), %esi\n") // entry.ptr
 	w.WriteString("    cmpl %esi, %edx\n")
 	w.WriteString("    jb .gcc32_next_e\n")
-	w.WriteString("    movl 4(%eax), %edi\n")  // entry.size
-	w.WriteString("    addl %esi, %edi\n")     // end = ptr + size
+	w.WriteString("    movl 4(%eax), %edi\n") // entry.size
+	w.WriteString("    addl %esi, %edi\n")    // end = ptr + size
 	w.WriteString("    cmpl %edi, %edx\n")
 	w.WriteString("    jae .gcc32_next_e\n")
-	w.WriteString("    movl $1, 8(%eax)\n")    // mark
+	w.WriteString("    movl $1, 8(%eax)\n") // mark
 	w.WriteString(".gcc32_next_e:\n")
 	w.WriteString("    incl %ebx\n")
 	w.WriteString("    jmp .gcc32_check\n")
@@ -1030,60 +1067,60 @@ func (e *x86Emitter) emitX86GCRuntime() {
 
 	// Transitive marking — scan marked allocation contents (4 bytes at a time).
 	w.WriteString(".gcc32_trans:\n")
-	w.WriteString("    xorl %ebx, %ebx\n")          // i = 0
-	w.WriteString("    xorl %edx, %edx\n")           // changed = 0
+	w.WriteString("    xorl %ebx, %ebx\n") // i = 0
+	w.WriteString("    xorl %edx, %edx\n") // changed = 0
 	w.WriteString(".gcc32_trans_loop:\n")
 	w.WriteString("    movl _novus_gc_count, %ecx\n")
 	w.WriteString("    cmpl %ecx, %ebx\n")
 	w.WriteString("    jge .gcc32_trans_check\n")
 	w.WriteString("    imull $12, %ebx, %eax\n")
 	w.WriteString("    addl $_novus_gc_table, %eax\n")
-	w.WriteString("    cmpl $0, 8(%eax)\n")          // marked?
+	w.WriteString("    cmpl $0, 8(%eax)\n") // marked?
 	w.WriteString("    je .gcc32_trans_next\n")
-	w.WriteString("    pushl %ebx\n")                 // save i
-	w.WriteString("    pushl %edx\n")                 // save changed
-	w.WriteString("    movl (%eax), %esi\n")          // ptr
-	w.WriteString("    movl 4(%eax), %edi\n")         // size
-	w.WriteString("    xorl %ebx, %ebx\n")            // offset = 0
+	w.WriteString("    pushl %ebx\n")         // save i
+	w.WriteString("    pushl %edx\n")         // save changed
+	w.WriteString("    movl (%eax), %esi\n")  // ptr
+	w.WriteString("    movl 4(%eax), %edi\n") // size
+	w.WriteString("    xorl %ebx, %ebx\n")    // offset = 0
 	w.WriteString(".gcc32_trans_scan:\n")
 	w.WriteString("    leal 4(%ebx), %eax\n")
 	w.WriteString("    cmpl %edi, %eax\n")
 	w.WriteString("    jg .gcc32_trans_scan_done\n")
-	w.WriteString("    movl (%esi,%ebx), %edx\n")     // potential ptr
+	w.WriteString("    movl (%esi,%ebx), %edx\n") // potential ptr
 	w.WriteString("    pushl %esi\n")
 	w.WriteString("    pushl %edi\n")
-	w.WriteString("    pushl %ebx\n")                  // save offset
+	w.WriteString("    pushl %ebx\n") // save offset
 	w.WriteString("    movl _novus_gc_count, %ecx\n")
-	w.WriteString("    xorl %ebx, %ebx\n")             // j = 0
+	w.WriteString("    xorl %ebx, %ebx\n") // j = 0
 	w.WriteString(".gcc32_trans_match:\n")
 	w.WriteString("    cmpl %ecx, %ebx\n")
 	w.WriteString("    jge .gcc32_trans_match_done\n")
 	w.WriteString("    imull $12, %ebx, %eax\n")
 	w.WriteString("    addl $_novus_gc_table, %eax\n")
-	w.WriteString("    cmpl $0, 8(%eax)\n")           // already marked?
+	w.WriteString("    cmpl $0, 8(%eax)\n") // already marked?
 	w.WriteString("    jne .gcc32_trans_match_next\n")
-	w.WriteString("    movl (%eax), %esi\n")           // entry.ptr
+	w.WriteString("    movl (%eax), %esi\n") // entry.ptr
 	w.WriteString("    cmpl %esi, %edx\n")
 	w.WriteString("    jb .gcc32_trans_match_next\n")
-	w.WriteString("    movl 4(%eax), %edi\n")          // entry.size
+	w.WriteString("    movl 4(%eax), %edi\n") // entry.size
 	w.WriteString("    addl %esi, %edi\n")
 	w.WriteString("    cmpl %edi, %edx\n")
 	w.WriteString("    jae .gcc32_trans_match_next\n")
-	w.WriteString("    movl $1, 8(%eax)\n")            // mark
+	w.WriteString("    movl $1, 8(%eax)\n") // mark
 	// Set changed flag on stack (was pushed as 2nd item).
-	w.WriteString("    movl $1, 12(%esp)\n")           // changed (offset: ebx=0, edi=4, esi=8, changed=12 on stack)
+	w.WriteString("    movl $1, 12(%esp)\n") // changed (offset: ebx=0, edi=4, esi=8, changed=12 on stack)
 	w.WriteString(".gcc32_trans_match_next:\n")
 	w.WriteString("    incl %ebx\n")
 	w.WriteString("    jmp .gcc32_trans_match\n")
 	w.WriteString(".gcc32_trans_match_done:\n")
-	w.WriteString("    popl %ebx\n")                   // restore offset
+	w.WriteString("    popl %ebx\n") // restore offset
 	w.WriteString("    popl %edi\n")
 	w.WriteString("    popl %esi\n")
 	w.WriteString("    addl $4, %ebx\n")
 	w.WriteString("    jmp .gcc32_trans_scan\n")
 	w.WriteString(".gcc32_trans_scan_done:\n")
-	w.WriteString("    popl %edx\n")                   // restore changed
-	w.WriteString("    popl %ebx\n")                   // restore i
+	w.WriteString("    popl %edx\n") // restore changed
+	w.WriteString("    popl %ebx\n") // restore i
 	w.WriteString(".gcc32_trans_next:\n")
 	w.WriteString("    incl %ebx\n")
 	w.WriteString("    jmp .gcc32_trans_loop\n")
@@ -1094,8 +1131,8 @@ func (e *x86Emitter) emitX86GCRuntime() {
 	// Sweep phase: compact marked entries, free unmarked.
 	w.WriteString(".gcc32_sweep:\n")
 	w.WriteString("    movl _novus_gc_count, %ecx\n")
-	w.WriteString("    xorl %ebx, %ebx\n")  // read index
-	w.WriteString("    xorl %edi, %edi\n")  // write index
+	w.WriteString("    xorl %ebx, %ebx\n") // read index
+	w.WriteString("    xorl %edi, %edi\n") // write index
 	w.WriteString(".gcc32_sweep_loop:\n")
 	w.WriteString("    cmpl %ecx, %ebx\n")
 	w.WriteString("    jge .gcc32_sweep_done\n")
@@ -1104,13 +1141,13 @@ func (e *x86Emitter) emitX86GCRuntime() {
 	w.WriteString("    cmpl $0, 8(%eax)\n")
 	w.WriteString("    jne .gcc32_keep\n")
 	// Unmarked — add to free list if size >= 8.
-	w.WriteString("    movl (%eax), %esi\n")     // ptr
-	w.WriteString("    movl 4(%eax), %edx\n")    // size
+	w.WriteString("    movl (%eax), %esi\n")  // ptr
+	w.WriteString("    movl 4(%eax), %edx\n") // size
 	w.WriteString("    cmpl $8, %edx\n")
 	w.WriteString("    jl .gcc32_skip\n")
 	w.WriteString("    movl _novus_gc_freelist, %eax\n")
-	w.WriteString("    movl %eax, (%esi)\n")     // block.next = old head
-	w.WriteString("    movl %edx, 4(%esi)\n")    // block.size
+	w.WriteString("    movl %eax, (%esi)\n")  // block.next = old head
+	w.WriteString("    movl %edx, 4(%esi)\n") // block.size
 	w.WriteString("    movl %esi, _novus_gc_freelist\n")
 	w.WriteString(".gcc32_skip:\n")
 	w.WriteString("    incl %ebx\n")
@@ -1172,12 +1209,12 @@ func (e *x86Emitter) emitX86GCRuntime() {
 	// eax = allocated block.
 
 	// Register with GC.
-	w.WriteString("    pushl %eax\n")   // save result
-	w.WriteString("    pushl %esi\n")   // size arg
-	w.WriteString("    pushl %eax\n")   // ptr arg
+	w.WriteString("    pushl %eax\n") // save result
+	w.WriteString("    pushl %esi\n") // size arg
+	w.WriteString("    pushl %eax\n") // ptr arg
 	w.WriteString("    call _novus_gc_register\n")
 	w.WriteString("    addl $8, %esp\n")
-	w.WriteString("    popl %eax\n")    // restore result
+	w.WriteString("    popl %eax\n") // restore result
 
 	w.WriteString("    popl %edi\n")
 	w.WriteString("    popl %esi\n")
