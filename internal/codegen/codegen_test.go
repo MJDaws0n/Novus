@@ -337,6 +337,31 @@ func TestLowerNewlineLiteralAsImmediate(t *testing.T) {
 	}
 }
 
+func TestLowerStringCompareWithSingleQuotedLiteralUsesStringOperand(t *testing.T) {
+	src := `module test; fn main() -> i32 {
+		let ch: str = "|";
+		if (ch == '|') { return 1; }
+		return 0;
+	}`
+	prog := mustParse(t, src)
+	mod := Lower(prog, linuxAMD64Target())
+	fn := mod.Functions[0]
+
+	hasStrCmp := false
+	for _, instr := range fn.Instrs {
+		if instr.Op != IRStrCmpEq {
+			continue
+		}
+		hasStrCmp = true
+		if instr.Src1.Kind == OpImmediate || instr.Src2.Kind == OpImmediate {
+			t.Fatalf("expected IRStrCmpEq operands to be string values, got %+v", instr)
+		}
+	}
+	if !hasStrCmp {
+		t.Fatal("expected string comparison to lower to IRStrCmpEq")
+	}
+}
+
 func TestLowerFunctionCall(t *testing.T) {
 	src := `module test;
 	fn add(a: i32, b: i32) -> i32 { return a + b; }

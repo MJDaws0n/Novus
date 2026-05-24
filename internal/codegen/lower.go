@@ -816,6 +816,12 @@ func (l *Lowerer) lowerBinaryExpr(e *ast.BinaryExpr) Operand {
 		leftStr := l.operandIsStr(left)
 		rightStr := l.operandIsStr(right)
 		if leftStr || rightStr {
+			if !leftStr {
+				left = l.charToStr(left)
+			}
+			if !rightStr {
+				right = l.charToStr(right)
+			}
 			l.emit(IRInstr{Op: IRStrCmpEq, Dst: VReg(dst), Src1: left, Src2: right})
 			if e.Op == "!=" {
 				negDst := l.freshVReg()
