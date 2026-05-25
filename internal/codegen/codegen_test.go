@@ -2697,6 +2697,21 @@ func TestDetectToolchain_LinuxARM64OnNonARM64Host(t *testing.T) {
 	}
 }
 
+func TestDetectToolchain_LinuxAMD64OnNonLinuxAMD64Host(t *testing.T) {
+	if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" {
+		t.Skip("only relevant on non-linux/amd64 hosts")
+	}
+	target := &Target{OS: OS_Linux, Arch: Arch_x86_64, Flavor: GAS}
+	missing := DetectToolchainWithPaths(target, "", "")
+	if len(missing) == 0 {
+		return
+	}
+	joined := strings.Join(missing, " | ")
+	if !strings.Contains(joined, "x86_64-linux-gnu-") && !strings.Contains(joined, "linux/amd64") {
+		t.Fatalf("expected linux/amd64 cross-tool hint, got: %s", joined)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Garbage Collection Tests
 // ---------------------------------------------------------------------------
