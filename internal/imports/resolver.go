@@ -418,12 +418,17 @@ func (r *Resolver) GetModules() []*ImportedModule {
 }
 
 // CheckAliasConflicts validates that no two imports with the same alias
-// export overlapping function names with *different* signatures from
-// *different* source files.  Functions that share the same name AND the same
-// signature (parameter types + return type) are allowed — this supports the
-// common pattern of the same library being transitively imported from
-// multiple files.  Overloads (same name, different params) from the same
-// source file are also allowed.
+// export the *same* function signature from *different* source files in a
+// way that would create a true ambiguity.
+//
+// Allowed:
+//   • Same name + same signature from different files — duplicate import
+//     (e.g. the same library transitively imported via two paths).
+//   • Same name + different signatures from any file(s) — function
+//     overloading. The semantic analyser dispatches by argument types.
+//
+// Disallowed (and surfaced as a real error elsewhere): same name + same
+// signature in the *same* file (a true redefinition).
 func (r *Resolver) CheckAliasConflicts() []*ResolveError {
 	type sigOrigin struct {
 		filePath string
@@ -443,29 +448,17 @@ func (r *Resolver) CheckAliasConflicts() []*ResolveError {
 			sig := funcSignature(fn)
 			origins := aliasFuncs[alias][fn.Name]
 
-			// Check whether we already have this exact signature from another file.
-			duplicate := false
+			// Skip if the exact same (name, sig) has already been seen — that's a
+			// duplicate transitive import and is harmless. Otherwise add it as a
+			// new overload candidate.
+			seen := false
 			for _, o := range origins {
 				if o.sig == sig {
-					// Same signature — accepted (duplicate import).
-					duplicate = true
+					seen = true
 					break
 				}
-				if o.filePath != mod.FilePath {
-					// Different signature from a different file — conflict.
-					r.errors = append(r.errors, &ResolveError{
-						Message: fmt.Sprintf(
-							"function %q conflicts: imported from %q (sig %s) and %q (sig %s) under alias %q",
-							fn.Name, o.modPath, o.sig, mod.Path, sig, alias),
-						Pos:  fn.Pos,
-						File: mod.FilePath,
-					})
-					duplicate = true
-					break
-				}
-				// Different signature from the same file — overload, OK.
 			}
-			if !duplicate {
+			if !seen {
 				aliasFuncs[alias][fn.Name] = append(origins, sigOrigin{
 					filePath: mod.FilePath,
 					sig:      sig,

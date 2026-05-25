@@ -83,6 +83,15 @@ const (
 	// Logical operators
 	AND = "AND" // &&
 	OR  = "OR"  // ||
+
+	// Compound assignment operators
+	PLUS_ASSIGN    = "PLUS_ASSIGN"    // +=
+	MINUS_ASSIGN   = "MINUS_ASSIGN"   // -=
+	STAR_ASSIGN    = "STAR_ASSIGN"    // *=
+	SLASH_ASSIGN   = "SLASH_ASSIGN"   // /=
+	PERCENT_ASSIGN = "PERCENT_ASSIGN" // %=
+	INC            = "INC"            // ++
+	DEC            = "DEC"            // --
 )
 
 // keywords maps reserved words to their token types.
@@ -429,6 +438,12 @@ func lexOperatorOrDelimiter(input string, i int, line int, col int) (Token, int)
 		if next == '>' {
 			return Token{ARROW, "->", line, col}, 2
 		}
+		if next == '=' {
+			return Token{MINUS_ASSIGN, "-=", line, col}, 2
+		}
+		if next == '-' {
+			return Token{DEC, "--", line, col}, 2
+		}
 		return Token{MINUS, "-", line, col}, 1
 	case '=':
 		if next == '=' {
@@ -491,12 +506,27 @@ func lexOperatorOrDelimiter(input string, i int, line int, col int) (Token, int)
 	case '.':
 		return Token{DOT, ".", line, col}, 1
 	case '+':
+		if next == '=' {
+			return Token{PLUS_ASSIGN, "+=", line, col}, 2
+		}
+		if next == '+' {
+			return Token{INC, "++", line, col}, 2
+		}
 		return Token{PLUS, "+", line, col}, 1
 	case '*':
+		if next == '=' {
+			return Token{STAR_ASSIGN, "*=", line, col}, 2
+		}
 		return Token{STAR, "*", line, col}, 1
 	case '/':
+		if next == '=' {
+			return Token{SLASH_ASSIGN, "/=", line, col}, 2
+		}
 		return Token{SLASH, "/", line, col}, 1
 	case '%':
+		if next == '=' {
+			return Token{PERCENT_ASSIGN, "%=", line, col}, 2
+		}
 		return Token{PERCENT, "%", line, col}, 1
 	case '^':
 		return Token{CARET, "^", line, col}, 1
