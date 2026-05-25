@@ -1,2 +1,18 @@
+# Build artifacts
 build/
+dist/
+
+# Compiled novus CLI (release binaries are published via GitHub releases)
+novus
+novus-test
+novus-darwin-amd64
+novus-darwin-arm64
+novus-linux-386
+novus-linux-amd64
+novus-linux-arm64
+novus-windows-amd64.exe
+novus-windows-amd64
+*.exe
+
+# OS
 .DS_Store

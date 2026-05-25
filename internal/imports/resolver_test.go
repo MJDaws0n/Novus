@@ -189,7 +189,13 @@ func TestCheckAliasConflicts_IdenticalSignatureNoError(t *testing.T) {
 	}
 }
 
-func TestCheckAliasConflicts_DifferentSignatureErrors(t *testing.T) {
+// Cross-module overloading: when the same name is imported from two
+// different files but with *different* signatures, it must be treated as a
+// valid overload (the semantic analyser will dispatch by argument types).
+// This is the foundation that lets standard-library files expose a unified
+// name like `len` or `to_str` that delegates to typed implementations
+// living in separate files.
+func TestCheckAliasConflicts_DifferentSignatureNoError(t *testing.T) {
 	fn1 := &ast.FnDecl{
 		Name:       "helper",
 		Params:     []*ast.Param{{Name: "x", Type: &ast.TypeExpr{Name: "i32"}}},
@@ -208,8 +214,8 @@ func TestCheckAliasConflicts_DifferentSignatureErrors(t *testing.T) {
 	}
 
 	errs := r.CheckAliasConflicts()
-	if len(errs) == 0 {
-		t.Error("expected an error for conflicting signatures, got none")
+	if len(errs) != 0 {
+		t.Errorf("expected no errors for cross-module overloads, got %d: %v", len(errs), errs)
 	}
 }
 

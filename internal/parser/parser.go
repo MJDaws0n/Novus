@@ -648,6 +648,55 @@ func (p *Parser) parseForStmt() *ast.ForStmt {
 
 // ---- Expression-or-Assignment statement ----
 
+// compoundOp maps a compound-assignment token type to the corresponding
+// binary operator lexeme. Returns "" if the token is not a compound assign.
+func compoundOp(typ string) string {
+	switch typ {
+	case lexer.PLUS_ASSIGN:
+		return "+"
+	case lexer.MINUS_ASSIGN:
+		return "-"
+	case lexer.STAR_ASSIGN:
+		return "*"
+	case lexer.SLASH_ASSIGN:
+		return "/"
+	case lexer.PERCENT_ASSIGN:
+		return "%"
+	}
+	return ""
+}
+
+// buildAssignFromCompound desugars `target OP= value` into `target = target OP value`.
+func buildAssignFromCompound(target ast.Expr, op string, value ast.Expr) *ast.AssignStmt {
+	bin := &ast.BinaryExpr{
+		Op:    op,
+		Left:  target,
+		Right: value,
+		Pos:   target.GetPos(),
+	}
+	return &ast.AssignStmt{
+		Target: target,
+		Value:  bin,
+		Pos:    target.GetPos(),
+	}
+}
+
+// buildAssignFromIncDec desugars `target++` / `target--` into `target = target + 1` / `target = target - 1`.
+func buildAssignFromIncDec(target ast.Expr, op string) *ast.AssignStmt {
+	one := &ast.IntLitExpr{Value: "1", Pos: target.GetPos()}
+	bin := &ast.BinaryExpr{
+		Op:    op,
+		Left:  target,
+		Right: one,
+		Pos:   target.GetPos(),
+	}
+	return &ast.AssignStmt{
+		Target: target,
+		Value:  bin,
+		Pos:    target.GetPos(),
+	}
+}
+
 // parseExprOrAssignStmt parses either an expression statement or an
 // assignment statement, consuming the trailing semicolon.
 func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
@@ -662,6 +711,24 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 			Value:  value,
 			Pos:    expr.GetPos(),
 		}
+	}
+
+	if op := compoundOp(p.peek().Type); op != "" {
+		p.advance() // consume compound op
+		value := p.parseExpression()
+		p.expect(lexer.SEMICOLON, "expected ';' after assignment")
+		return buildAssignFromCompound(expr, op, value)
+	}
+
+	if p.check(lexer.INC) {
+		p.advance()
+		p.expect(lexer.SEMICOLON, "expected ';' after '++'")
+		return buildAssignFromIncDec(expr, "+")
+	}
+	if p.check(lexer.DEC) {
+		p.advance()
+		p.expect(lexer.SEMICOLON, "expected ';' after '--'")
+		return buildAssignFromIncDec(expr, "-")
 	}
 
 	p.expect(lexer.SEMICOLON, "expected ';' after expression statement")
@@ -681,6 +748,21 @@ func (p *Parser) parseExprOrAssignStmtNoSemicolon() ast.Stmt {
 			Value:  value,
 			Pos:    expr.GetPos(),
 		}
+	}
+
+	if op := compoundOp(p.peek().Type); op != "" {
+		p.advance()
+		value := p.parseExpression()
+		return buildAssignFromCompound(expr, op, value)
+	}
+
+	if p.check(lexer.INC) {
+		p.advance()
+		return buildAssignFromIncDec(expr, "+")
+	}
+	if p.check(lexer.DEC) {
+		p.advance()
+		return buildAssignFromIncDec(expr, "-")
 	}
 
 	return &ast.ExprStmt{Expression: expr, Pos: expr.GetPos()}
