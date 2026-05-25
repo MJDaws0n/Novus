@@ -232,8 +232,8 @@ func (e *x86_64Emitter) emitGASFunction(fn *IRFunc) {
 	if fn.Name == "main" && e.target.OS == OS_Darwin && e.usesHeap() {
 		gcStackBot := e.target.Sym("_novus_gc_stack_bottom")
 		w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %%rax\n", gcStackBot))
-		w.WriteString("    leaq 16(%%rbp), %%rcx\n") // entry SP above saved rbp/ret
-		w.WriteString("    movq %%rcx, (%%rax)\n")
+		w.WriteString("    leaq 16(%rbp), %rcx\n") // entry SP above saved rbp/ret
+		w.WriteString("    movq %rcx, (%rax)\n")
 		gcThreshold := e.target.Sym("_novus_gc_threshold")
 		w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %%rax\n", gcThreshold))
 		w.WriteString("    movq $256, (%rax)\n")
@@ -257,6 +257,8 @@ func (e *x86_64Emitter) emitGASFunction(fn *IRFunc) {
 // since we emit movq (64-bit) instructions.
 func promoteReg(name string) string {
 	m := map[string]string{
+		"ax": "rax", "bx": "rbx", "cx": "rcx", "dx": "rdx",
+		"si": "rsi", "di": "rdi", "bp": "rbp", "sp": "rsp",
 		"eax": "rax", "ebx": "rbx", "ecx": "rcx", "edx": "rdx",
 		"esi": "rsi", "edi": "rdi", "ebp": "rbp", "esp": "rsp",
 	}
@@ -290,7 +292,7 @@ func (e *x86_64Emitter) gasLoadToReg(fn *IRFunc, op Operand, scratch string) str
 		}
 		return scratch
 	case OpMemory:
-		w.WriteString(fmt.Sprintf("    movq %d(%%%s), %s\n", op.MemOffset, op.MemBase, scratch))
+		w.WriteString(fmt.Sprintf("    movq %d(%%%s), %s\n", op.MemOffset, promoteReg(op.MemBase), scratch))
 		return scratch
 	case OpLabel:
 		return op.Label
@@ -324,7 +326,7 @@ func (e *x86_64Emitter) gasStoreToOperand(fn *IRFunc, dst Operand, reg string) {
 		off := e.vregOffset(fn, dst.Reg)
 		w.WriteString(fmt.Sprintf("    movq %s, %d(%%rbp)\n", reg, off))
 	case OpMemory:
-		w.WriteString(fmt.Sprintf("    movq %s, %d(%%%s)\n", reg, dst.MemOffset, dst.MemBase))
+		w.WriteString(fmt.Sprintf("    movq %s, %d(%%%s)\n", reg, dst.MemOffset, promoteReg(dst.MemBase)))
 	}
 }
 
@@ -368,7 +370,7 @@ func (e *x86_64Emitter) emitGASInstr(fn *IRFunc, instr IRInstr) {
 			off := e.vregOffset(fn, instr.Src1.Reg)
 			w.WriteString(fmt.Sprintf("    leaq %d(%%rbp), %s\n", off, scratch))
 		} else if instr.Src1.Kind == OpMemory {
-			w.WriteString(fmt.Sprintf("    leaq %d(%%%s), %s\n", instr.Src1.MemOffset, instr.Src1.MemBase, scratch))
+			w.WriteString(fmt.Sprintf("    leaq %d(%%%s), %s\n", instr.Src1.MemOffset, promoteReg(instr.Src1.MemBase), scratch))
 		} else {
 			e.gasLoadToReg(fn, instr.Src1, scratch)
 		}
@@ -377,7 +379,7 @@ func (e *x86_64Emitter) emitGASInstr(fn *IRFunc, instr IRInstr) {
 	case IRLoad:
 		scratch := "%r10"
 		if instr.Src1.Kind == OpMemory {
-			w.WriteString(fmt.Sprintf("    movq %d(%%%s), %s\n", instr.Src1.MemOffset, instr.Src1.MemBase, scratch))
+			w.WriteString(fmt.Sprintf("    movq %d(%%%s), %s\n", instr.Src1.MemOffset, promoteReg(instr.Src1.MemBase), scratch))
 		} else if instr.Src1.Kind == OpStringRef {
 			label := e.mod.Strings[instr.Src1.Imm].Label
 			sym := e.target.Sym(label)
@@ -390,7 +392,7 @@ func (e *x86_64Emitter) emitGASInstr(fn *IRFunc, instr IRInstr) {
 	case IRStore:
 		src := e.gasLoadToReg(fn, instr.Src1, "%r10")
 		if instr.Dst.Kind == OpMemory {
-			w.WriteString(fmt.Sprintf("    movq %s, %d(%%%s)\n", src, instr.Dst.MemOffset, instr.Dst.MemBase))
+			w.WriteString(fmt.Sprintf("    movq %s, %d(%%%s)\n", src, instr.Dst.MemOffset, promoteReg(instr.Dst.MemBase)))
 		} else if instr.Src2.Kind != OpNone {
 			addr := e.gasLoadToReg(fn, instr.Src2, "%r11")
 			w.WriteString(fmt.Sprintf("    movq %s, (%s)\n", src, addr))

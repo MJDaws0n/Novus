@@ -97,7 +97,13 @@ func (tc *Toolchain) assembleGAS() error {
 			}
 			cmd = exec.Command(asBin, "-o", tc.ObjFile, tc.AsmFile)
 		default:
-			cmd = exec.Command("as", "--64", "-o", tc.ObjFile, tc.AsmFile)
+			asBin := "as"
+			if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+				if p, ok := firstAvailableTool("x86_64-linux-gnu-as", "as"); ok {
+					asBin = p
+				}
+			}
+			cmd = exec.Command(asBin, "-o", tc.ObjFile, tc.AsmFile)
 		}
 	default:
 		cmd = exec.Command("as", "-o", tc.ObjFile, tc.AsmFile)
@@ -285,6 +291,10 @@ func DetectToolchainWithPaths(target *Target, nasmPath, golinkPath string) []str
 			if _, err := exec.LookPath("aarch64-linux-gnu-as"); err != nil {
 				missing = append(missing, "aarch64-linux-gnu-as (linux/arm64 assembler)")
 			}
+		} else if target.OS == OS_Linux && target.Arch == Arch_x86_64 && (runtime.GOOS != "linux" || runtime.GOARCH != "amd64") {
+			if _, ok := firstAvailableTool("x86_64-linux-gnu-as", "as"); !ok {
+				missing = append(missing, "x86_64-linux-gnu-as or as (linux/amd64 assembler)")
+			}
 		} else if _, err := exec.LookPath("as"); err != nil {
 			// Try cc as fallback.
 			if _, err := exec.LookPath("cc"); err != nil {
@@ -304,6 +314,10 @@ func DetectToolchainWithPaths(target *Target, nasmPath, golinkPath string) []str
 		if target.Arch == Arch_ARM64 && runtime.GOARCH != "arm64" {
 			if _, err := exec.LookPath("aarch64-linux-gnu-ld"); err != nil {
 				missing = append(missing, "aarch64-linux-gnu-ld (linux/arm64 linker)")
+			}
+		} else if target.Arch == Arch_x86_64 && (runtime.GOOS != "linux" || runtime.GOARCH != "amd64") {
+			if _, ok := firstAvailableTool("x86_64-linux-gnu-ld", "ld"); !ok {
+				missing = append(missing, "x86_64-linux-gnu-ld or ld (linux/amd64 linker)")
 			}
 		} else if _, err := exec.LookPath("ld"); err != nil {
 			missing = append(missing, "ld (linker)")
