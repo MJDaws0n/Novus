@@ -954,11 +954,17 @@ intOps:
 }
 
 func (l *Lowerer) lowerCallExpr(e *ast.CallExpr) Operand {
-	// Determine callee name.
+	// Determine callee name. Prefer the semantically resolved callee — it
+	// carries the mangled name for overloaded functions and disambiguates
+	// user overloads of built-in intrinsic names (e.g. `len` for arrays).
 	calleeName := ""
 	switch c := e.Callee.(type) {
 	case *ast.IdentExpr:
-		calleeName = c.Name
+		if e.ResolvedCallee != "" {
+			calleeName = e.ResolvedCallee
+		} else {
+			calleeName = c.Name
+		}
 	case *ast.MemberExpr:
 		// For import-aliased calls, use the resolved callee set by semantic analysis.
 		if e.ResolvedCallee != "" {

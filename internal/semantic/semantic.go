@@ -353,6 +353,42 @@ func (s *Scope) lookupFunc(name string, argTypes []*Type) *Symbol {
 	return nil
 }
 
+// builtinAcceptsArgs reports whether the named builtin can natively handle
+// the given argument types. Most low-level intrinsics (mov, push, syscall, …)
+// are register-level and accept any argument shape, so they return true here.
+// `len` is special: its inlined IRStrLen handler only works for `str`, so any
+// other arg type must be routed to a user overload instead.
+func builtinAcceptsArgs(name string, argTypes []*Type) bool {
+	switch name {
+	case "len":
+		if len(argTypes) != 1 || argTypes[0] == nil {
+			return false
+		}
+		return argTypes[0] == TypeStr
+	default:
+		return true
+	}
+}
+
+// overloadParamsMatch reports whether every parameter type of sym is a real
+// type match for the corresponding argument type (no nil-skipping). This is
+// used to decide whether a user-defined overload should win over a built-in
+// intrinsic when both names collide.
+func overloadParamsMatch(sym *Symbol, argTypes []*Type) bool {
+	if sym == nil || len(sym.Params) != len(argTypes) {
+		return false
+	}
+	for i, paramType := range sym.Params {
+		if paramType == nil || argTypes[i] == nil {
+			return false
+		}
+		if !isAssignableTo(paramType, argTypes[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 // lookup traverses the scope chain (current → parent → …) to find a symbol.
 func (s *Scope) lookup(name string) *Symbol {
 	if sym := s.symbols[name]; sym != nil {
@@ -1304,6 +1340,25 @@ func (a *Analyzer) analyzeCallExpr(e *ast.CallExpr) *Type {
 		// Try to resolve as a builtin or non-overloaded symbol first.
 		sym := a.scope.lookup(callee.Name)
 
+		// If a builtin matches by name but user-defined overloads of the same
+		// name exist whose parameter types fit the actual arguments better,
+		// prefer the user overload. This lets the std library (or user code)
+		// extend a built-in like `len` from strings to arrays without losing
+		// the string fast-path.
+		if sym != nil && sym.Kind == SymBuiltin {
+			// Only override the builtin when the builtin can NOT natively
+			// handle the actual argument types. The `len` builtin, for
+			// example, inlines a strlen loop that only works for `str`; for
+			// arrays we must route to a user overload.
+			builtinHandles := builtinAcceptsArgs(callee.Name, argTypes)
+			if !builtinHandles {
+				if overload := a.scope.lookupFunc(callee.Name, argTypes); overload != nil {
+					if overloadParamsMatch(overload, argTypes) {
+						sym = overload
+					}
+				}
+			}
+		}
 		// If not found directly, or if found but it's not callable, try overloads.
 		if sym == nil || (sym.Kind != SymFunc && sym.Kind != SymBuiltin) {
 			// Try function overloads.
