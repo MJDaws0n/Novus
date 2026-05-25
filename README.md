@@ -1,189 +1,133 @@
 # Novus
-**NOTE: This is in very early development and may be very buggy and may not work on some os's or cpu's at all**
 
-*This may be used for my a-level project, therefore there are many references to clients and such.*
+Novus is a small, statically-typed systems language that compiles directly to native
+machine code. It targets darwin/arm64, linux/amd64, linux/arm64, linux/x86 and
+windows/amd64 today.
 
-The aim in the short future is to re-write novus, in novus!
+> **Status:** active development. The language is stable enough to write real
+> command-line apps (see [Todo-App](https://github.com/MJDaws0n/Todo-App) and
+> [stopwatch](https://github.com/MJDaws0n/stopwatch)), but expect rough edges.
 
-# Quick install
-Run the following to install the latest version automatically:
+---
+
+## Install
+
+Automatic:
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/MJDaws0n/novus/main/install.sh | bash
 ```
 
-Or manually:
-1. Download the latest binary for your platform from the [releases tab](https://github.com/MJDaws0n/novus/releases).
-2. Copy it to your PATH:
+Manual: grab a binary for your platform from the
+[releases page](https://github.com/MJDaws0n/Novus/releases) and put it on your `PATH`.
+
 ```sh
-sudo cp "novus_download" /usr/local/bin/novus
+sudo cp novus_<your-platform> /usr/local/bin/novus
 sudo chmod +x /usr/local/bin/novus
 # macOS only:
 sudo xattr -d com.apple.quarantine /usr/local/bin/novus
 ```
 
-# Build your first app
-It's suggested you use the offical [novus package manager nox](https://github.com/mjdaws0n/nox), however it's not required.
+It is strongly recommended to also install the package manager,
+[Nox](https://github.com/MJDaws0n/Nox).
 
-## Using nox
-1. Download and install [nox](https://github.com/mjdaws0n/nox)
-2. Run the following command in the folder you wish to use
-'''sh
-nox init
-'''
-3. Import the standard library
+---
+
+## Quick start
+
 ```sh
-nox pull std
-```
-4. Write your first app by edditing the main.nov file
-```novus
-module novus_example
-
-// Import standard lib as std
-// Use import lib/std; to import without std prefix
-import lib/std std;
-
-fn main() -> i32 {
-    // Print something
-    std.print("Hello World!");
-
-    // Exit program
-    std.exit(0);
-    return 0;
-}
-```
-5. Build to an executable
-```sh
+nox init my-app
+cd my-app
 novus main.nov
+./build/<target>/my-app
 ```
 
-## Without using nox - with libraries
-1. Download the std package, or copy the functions for the respective operating system from [here](https://github.com/MJDaws0n/novus-std)
-2. Create a novus file and add your code.
-```novus
-module novus_example
+`nox init` already adds the standard library (`std`) by default. The starter
+`main.nov` looks like:
 
-// Import standard lib as std
-// Use import lib/std; to import without std prefix
+```novus
+module my_app
+
 import lib/std std;
 
 fn main() -> i32 {
-    // Print something
-    std.print("Hello World!");
-
-    // Exit program
+    std.print("Hello, world!");
     std.exit(0);
     return 0;
 }
 ```
-3. Build to an exectuabl
-```sh
-novus your_file.nov
-```
 
-## Without using nox - without libraries
-1. Create a novus file and add your code.
+---
+
+## Language at a glance
+
 ```novus
-module novus_example
+module example
+
+import lib/std std;
+
+fn greet(name: str) -> void {
+    std.print("Hi " + name);
+}
+
+fn greet(times: i32) -> void {       // function overloading
+    let i: i32 = 0;
+    while (i < times) {
+        std.print("Hi!");
+        i += 1;                      // compound assignment
+    }
+}
 
 fn main() -> i32 {
-    // Print something
-    print("Hello World!");
+    greet("Max");
+    greet(3);
 
-    // Exit program
-    exit(0);
+    let xs: []i32 = [1, 2, 3];
+    std.print(std.to_str(std.len(xs)));    // unified len/to_str
+
+    std.exit(0);
     return 0;
 }
-
-// Define a print function for macos silicon
-fn print(msg: str) -> void {
-    msg = msg + "\n";
-    mov(x0, 1);
-    mov(x1, msg);
-    mov(x2, len(msg));
-    mov(x16, 0x2000004);
-    syscall();
-}
-
-// Deffine an exit function for macos silicon
-fn exit(code: i32) -> void {
-    mov(x0, code);
-    mov(x16, 0x2000001);
-    syscall();
-}
 ```
-2. Build to an exectuable
+
+See [`docs/docs.md`](docs/docs.md) for the full language reference.
+
+---
+
+## Build the compiler from source
+
 ```sh
-novus your_file.nov
+go run cmd/novus/main.go --target=darwin/arm64 path/to/file.nov
 ```
 
-# Novus syntax and built in functions
-Take a look at novus syntax and built in functions [here](/mjdaws0n/novus/novus_docs.md)
-Take a look at novus libraries [here](/mjdaws0n/nox/registry.txt)
+### Cross-compilation toolchain notes
 
-## Existing projects in novus
-- Manifold Edge Remove - Fixes STL files so they can be 3d printed. Perfect for novus as it needs to be done quickly. Uses novus's window library for rendering a window.
-https://github.com/MJDaws0n/Manifold-Edge-Remover-V2
-
-# Build and run
-```sh
-go run cmd/novus/main.go --target=linux/amd64 example_old_lib_examples/example.nov
-```
-
-## Target output directories
-
-Novus writes artifacts to `build/<target>/` using these target directory names:
-
-- `darwin_arm64`
-- `linux_x86_64`
-- `linux_x86`
-- `linux_arm64`
-- `windows_x86_64`
-
-## Cross-compilation toolchain notes
-
-- `linux/amd64` and `linux/386` use NASM + `ld`.
-- `linux/arm64` needs `aarch64-linux-gnu-as` and `aarch64-linux-gnu-ld` when compiling from a non-ARM64 host.
+- `linux/amd64`, `linux/386` need NASM + `ld`.
+- `linux/arm64` needs `aarch64-linux-gnu-as` and `aarch64-linux-gnu-ld` when
+  the host is not arm64.
 - `windows/amd64` needs NASM + GoLink (or `link.exe`).
-- `darwin/arm64` linking requires macOS tooling (`as`/`ld`) or an installed Darwin cross-toolchain.
+- `darwin/arm64` needs Apple's `as`/`ld` (i.e. Xcode CLT) or a darwin cross
+  toolchain.
 
-See [`novus_docs.md`](./novus_docs.md) for full language/CLI reference and a complete platform section.
+Artifacts are written to `build/<target>/`. Valid target names:
+`darwin_arm64`, `linux_x86_64`, `linux_x86`, `linux_arm64`, `windows_x86_64`.
 
-## New example apps and libraries
+---
 
-A modern, reusable example set now lives in [`examples/`](./examples/):
+## Repository layout
 
-- Apps:
-  - `examples/apps/hello-matrix/main.nov`
-  - `examples/apps/dice-duel/main.nov`
-  - `examples/apps/string-lab/main.nov`
-  - `examples/apps/portable-sanity/main.nov`
-- Libraries:
-  - `examples/lib/core/main.nov`
-  - `examples/lib/game/main.nov`
-  - `examples/lib/term/main.nov`
+- `cmd/novus/` — compiler CLI entry point
+- `internal/` — lexer, parser, semantic analysis, IR, codegen
+- `docs/` — language and library reference
+- `docs/notes/` — developer notes / learning material
+- `vscode-novus/` — VS Code syntax extension
+- `examples/` — example apps and tiny libraries
 
-Build and run examples (Linux host):
+---
 
-```sh
-novus --target=linux/amd64 examples/apps/hello-matrix/main.nov
-./build/linux_x86_64/hello_matrix
-```
+## Related projects
 
-```sh
-novus --target=linux/amd64 examples/apps/dice-duel/main.nov
-./build/linux_x86_64/dice_duel
-```
-
-## Library documentation
-
-- Full library reference: [`docs/library-reference.md`](./docs/library-reference.md)
-- Example + cross-target matrix: [`docs/testing-matrix.md`](./docs/testing-matrix.md)
-
-## Reproducible test script
-
-Run the end-to-end example and cross-target checks:
-
-```sh
-chmod +x scripts/run-example-matrix.sh
-NOVUS_BIN=/home/max/.local/bin/novus ./scripts/run-example-matrix.sh
-```
+- **[Nox](https://github.com/MJDaws0n/Nox)** — the package manager
+- **[novus-std](https://github.com/MJDaws0n/novus-std)** — standard library
+- **[Todo-App](https://github.com/MJDaws0n/Todo-App)** and
+  **[stopwatch](https://github.com/MJDaws0n/stopwatch)** — example CLI apps
