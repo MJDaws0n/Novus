@@ -1159,3 +1159,102 @@ func TestDuplicateImportedFunctions_SameSignature(t *testing.T) {
 		}
 	}
 }
+
+func TestAliasedImportedFunctionBodiesResolveBuiltinOverloads(t *testing.T) {
+	src := "fn main() -> i32 { return repro.count_lines(\"a\\nb\"); }"
+	tokens, lexErrs := lexer.Lex(src)
+	if len(lexErrs) > 0 {
+		t.Fatalf("lex errors: %v", lexErrs)
+	}
+	prog, parseErrs := parser.Parse(tokens)
+	if len(parseErrs) > 0 {
+		t.Fatalf("parse errors: %v", parseErrs)
+	}
+
+	lenCall := &ast.CallExpr{
+		Callee: &ast.IdentExpr{Name: "len"},
+		Args:   []ast.Expr{&ast.IdentExpr{Name: "xs"}},
+	}
+	countFn := &ast.FnDecl{
+		Name: "count_lines",
+		Params: []*ast.Param{
+			{Name: "text", Type: &ast.TypeExpr{Name: "str"}},
+		},
+		ReturnType: &ast.TypeExpr{Name: "i32"},
+		Body: &ast.BlockStmt{
+			Stmts: []ast.Stmt{
+				&ast.LetStmt{
+					Name: "xs",
+					Type: &ast.TypeExpr{Name: "[]str"},
+					Value: &ast.CallExpr{
+						Callee: &ast.IdentExpr{Name: "split_lines_all"},
+						Args:   []ast.Expr{&ast.IdentExpr{Name: "text"}},
+					},
+				},
+				&ast.ReturnStmt{Value: lenCall},
+			},
+		},
+	}
+	splitFn := &ast.FnDecl{
+		Name: "split_lines_all",
+		Params: []*ast.Param{
+			{Name: "text", Type: &ast.TypeExpr{Name: "str"}},
+		},
+		ReturnType: &ast.TypeExpr{Name: "[]str"},
+		Body: &ast.BlockStmt{
+			Stmts: []ast.Stmt{
+				&ast.ReturnStmt{
+					Value: &ast.ArrayLitExpr{
+						Elems: []ast.Expr{
+							&ast.StringLitExpr{Value: "\"a\""},
+							&ast.StringLitExpr{Value: "\"b\""},
+						},
+					},
+				},
+			},
+		},
+	}
+	lenOverload := &ast.FnDecl{
+		Name: "len",
+		Params: []*ast.Param{
+			{Name: "arr", Type: &ast.TypeExpr{Name: "[]str"}},
+		},
+		ReturnType: &ast.TypeExpr{Name: "i32"},
+		Body: &ast.BlockStmt{
+			Stmts: []ast.Stmt{
+				&ast.ReturnStmt{Value: &ast.IntLitExpr{Value: "2"}},
+			},
+		},
+	}
+	lenOverloadI32 := &ast.FnDecl{
+		Name: "len",
+		Params: []*ast.Param{
+			{Name: "arr", Type: &ast.TypeExpr{Name: "[]i32"}},
+		},
+		ReturnType: &ast.TypeExpr{Name: "i32"},
+		Body: &ast.BlockStmt{
+			Stmts: []ast.Stmt{
+				&ast.ReturnStmt{Value: &ast.IntLitExpr{Value: "0"}},
+			},
+		},
+	}
+
+	prog.Functions = append([]*ast.FnDecl{countFn, splitFn, lenOverload, lenOverloadI32}, prog.Functions...)
+	importedFuncs := []semantic.ImportedFunc{
+		{Fn: countFn, Alias: "repro"},
+		{Fn: splitFn, Alias: "repro"},
+		{Fn: lenOverload, Alias: ""},
+		{Fn: lenOverloadI32, Alias: ""},
+	}
+
+	diags := semantic.AnalyzeWithImports(prog, importedFuncs)
+	for _, d := range diags {
+		if d.Severity == semantic.Error {
+			t.Fatalf("unexpected semantic error: %s", d.Error())
+		}
+	}
+
+	if lenCall.ResolvedCallee != "len._arr_str" {
+		t.Fatalf("expected len(xs) inside aliased imported body to resolve to len._arr_str, got %q", lenCall.ResolvedCallee)
+	}
+}

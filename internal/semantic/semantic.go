@@ -529,6 +529,7 @@ type Analyzer struct {
 	importedFuncs []ImportedFunc
 	importAliases map[string]bool      // set of known import aliases (for MemberExpr resolution)
 	importedFnSet map[*ast.FnDecl]bool // FnDecl pointers registered via imports (skip in prog.Functions pass)
+	importedFnAlias map[*ast.FnDecl]string
 }
 
 // Analyze runs semantic analysis on the given AST program and returns all
@@ -545,6 +546,7 @@ func AnalyzeWithImports(program *ast.Program, importedFuncs []ImportedFunc) []Di
 		importedFuncs: importedFuncs,
 		importAliases: make(map[string]bool),
 		importedFnSet: make(map[*ast.FnDecl]bool),
+		importedFnAlias: make(map[*ast.FnDecl]string),
 	}
 	a.injectBuiltins()
 	a.analyzeProgram(program)
@@ -665,6 +667,7 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 
 		// Track this FnDecl so the prog.Functions pass skips it.
 		a.importedFnSet[fn] = true
+		a.importedFnAlias[fn] = imp.Alias
 
 		if imp.Alias != "" {
 			// Namespaced import: register under "alias.funcName" so MemberExpr can resolve it.
@@ -839,15 +842,22 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 		if mangledName == "" {
 			mangledName = fn.Name
 		}
-		if sym := a.scope.lookupLocal(mangledName); sym == nil || (sym.Kind != SymFunc) {
-			continue
-		}
 		if a.importedFnSet[fn] {
+			lookupName := mangledName
+			if alias := a.importedFnAlias[fn]; alias != "" {
+				lookupName = alias + "." + mangledName
+			}
+			if sym := a.scope.lookupLocal(lookupName); sym == nil || sym.Kind != SymFunc {
+				continue
+			}
 			// Imported function bodies: analyze to resolve calls (sets
 			// ResolvedCallee for overloaded calls), but suppress errors
 			// since the function was type-checked in its own module context.
 			a.analyzeImportedFunctionBody(fn)
 		} else {
+			if sym := a.scope.lookupLocal(mangledName); sym == nil || (sym.Kind != SymFunc) {
+				continue
+			}
 			a.analyzeFunction(fn)
 		}
 	}
