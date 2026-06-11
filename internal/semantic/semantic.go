@@ -659,8 +659,12 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 		if mangledName == "" {
 			mangledName = fn.Name
 		}
-		// Apply overload mangling for imported functions with genuinely different signatures.
-		if len(importSignatures[fn.Name]) > 1 {
+		// Apply overload mangling for imported functions with genuinely different
+		// signatures, or when the name collides with a built-in intrinsic (the
+		// lowerer dispatches builtins by name, so an unmangled user `len` would
+		// be hijacked by the builtin handler).
+		_, isBuiltinName := builtinFuncTable[fn.Name]
+		if len(importSignatures[fn.Name]) > 1 || (isBuiltinName && mangledName == fn.Name) {
 			mangledName = funcMangle(fn.Name, paramTypeNames)
 		}
 		fn.MangledName = mangledName
@@ -775,9 +779,14 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 			}
 		}
 
-		// Compute the mangled name. Only overloaded functions get a suffix.
+		// Compute the mangled name. Overloaded functions get a suffix, and so
+		// do user functions that share a name with a built-in intrinsic —
+		// otherwise the lowerer's builtin handler (dispatched by name) would
+		// hijack calls meant for the user function, and the builtin would be
+		// erased from scope (breaking e.g. `len(s: str)` after a user defines
+		// `len(xs: []i32)`).
 		mangledName := fn.Name
-		if nameCount[fn.Name] > 1 {
+		if _, isBuiltinName := builtinFuncTable[fn.Name]; nameCount[fn.Name] > 1 || isBuiltinName {
 			mangledName = funcMangle(fn.Name, paramTypeNames)
 		}
 
@@ -1362,10 +1371,12 @@ func (a *Analyzer) analyzeCallExpr(e *ast.CallExpr) *Type {
 			// arrays we must route to a user overload.
 			builtinHandles := builtinAcceptsArgs(callee.Name, argTypes)
 			if !builtinHandles {
-				if overload := a.scope.lookupFunc(callee.Name, argTypes); overload != nil {
-					if overloadParamsMatch(overload, argTypes) {
-						sym = overload
-					}
+				overload := a.scope.lookupFunc(callee.Name, argTypes)
+				if overload != nil && overloadParamsMatch(overload, argTypes) {
+					sym = overload
+				} else {
+					a.error(e.Pos, fmt.Sprintf("builtin %q does not accept the given argument types and no matching overload was found", callee.Name))
+					return nil
 				}
 			}
 		}

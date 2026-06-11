@@ -147,6 +147,9 @@ func Generate(program *ast.Program, opts *Options) (*Result, error) {
 	case Arch_ARM64:
 		asmText = EmitARM64(irMod, target)
 	case Arch_x86:
+		if op := findFloatOp(irMod); op != "" {
+			return nil, fmt.Errorf("floating-point operations (%s) are not supported on 32-bit x86 targets", op)
+		}
 		asmText = EmitX86(irMod, target)
 	default:
 		return nil, fmt.Errorf("unsupported architecture for emission: %s", target.Arch)
@@ -306,4 +309,21 @@ func checkRegisterWarnings(mod *IRModule, target *Target) []string {
 	}
 
 	return warnings
+}
+
+// findFloatOp scans an IR module for floating-point opcodes and returns the
+// name of the first one found, or "" if there are none. Used to reject float
+// code on targets whose emitters do not support floating point (x86-32).
+func findFloatOp(mod *IRModule) string {
+for _, fn := range mod.Functions {
+for _, instr := range fn.Instrs {
+switch instr.Op {
+case IRFAdd, IRFSub, IRFMul, IRFDiv, IRFMod, IRFNeg,
+IRFCmpEq, IRFCmpNe, IRFCmpLt, IRFCmpLe, IRFCmpGt, IRFCmpGe,
+IRIntToFloat, IRFloatToInt:
+return instr.Op.String()
+}
+}
+}
+return ""
 }

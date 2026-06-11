@@ -3217,3 +3217,81 @@ func TestGC_MultipleFunctionsWithHeap(t *testing.T) {
 		t.Error("ARM64 should emit GC runtime when heap is used")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Floating-point emission tests
+// ---------------------------------------------------------------------------
+
+const floatSrc = `module test;
+fn main() -> i32 {
+let a: f64 = 7.5;
+let b: f64 = 2.5;
+let sum: f64 = a + b;
+let diff: f64 = a - b;
+let prod: f64 = a * b;
+let quot: f64 = a / b;
+let rem: f64 = a % 2.0;
+let neg: f64 = -a;
+if (sum > diff) { return 0; }
+if (prod == quot) { return 1; }
+if (rem != neg) { return 2; }
+if (a >= b) { return 3; }
+if (a <= b) { return 4; }
+if (b < a) { return 5; }
+return 6;
+}`
+
+func TestEmitX86_64GAS_FloatOps(t *testing.T) {
+prog := mustParse(t, floatSrc)
+target := linuxAMD64Target()
+mod := Lower(prog, target)
+asm := EmitX86_64(mod, target)
+
+for _, want := range []string{"addsd", "subsd", "mulsd", "divsd", "ucomisd", "cvttsd2si"} {
+if !strings.Contains(asm, want) {
+t.Errorf("expected %q in x86-64 GAS output for float source", want)
+}
+}
+}
+
+func TestEmitX86_64NASM_FloatOps(t *testing.T) {
+prog := mustParse(t, floatSrc)
+target := windowsAMD64Target()
+mod := Lower(prog, target)
+asm := EmitX86_64(mod, target)
+
+for _, want := range []string{"addsd", "subsd", "mulsd", "divsd", "ucomisd", "cvttsd2si"} {
+if !strings.Contains(asm, want) {
+t.Errorf("expected %q in x86-64 NASM output for float source", want)
+}
+}
+}
+
+func TestEmitARM64_FloatOps(t *testing.T) {
+prog := mustParse(t, floatSrc)
+target := darwinARM64Target()
+mod := Lower(prog, target)
+asm := EmitARM64(mod, target)
+
+for _, want := range []string{"fadd", "fsub", "fmul", "fdiv", "fcmp"} {
+if !strings.Contains(asm, want) {
+t.Errorf("expected %q in ARM64 output for float source", want)
+}
+}
+}
+
+func TestFindFloatOpRejectsX86_32(t *testing.T) {
+prog := mustParse(t, floatSrc)
+target := linuxX86Target()
+mod := Lower(prog, target)
+
+if op := findFloatOp(mod); op == "" {
+t.Error("expected findFloatOp to detect float opcodes for x86-32 rejection")
+}
+
+intProg := mustParse(t, `module test; fn main() -> i32 { let x: i32 = 1; return x; }`)
+intMod := Lower(intProg, target)
+if op := findFloatOp(intMod); op != "" {
+t.Errorf("expected no float ops in integer-only program, got %q", op)
+}
+}

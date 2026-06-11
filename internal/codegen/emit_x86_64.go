@@ -619,6 +619,40 @@ func (e *x86_64Emitter) emitGASInstr(fn *IRFunc, instr IRInstr) {
 	case IRData:
 		// handled in data section
 
+	// Floating-point arithmetic (f64 bit patterns stored in 64-bit GP slots)
+	case IRFAdd:
+		e.emitGASFBinOp(fn, instr, "addsd")
+	case IRFSub:
+		e.emitGASFBinOp(fn, instr, "subsd")
+	case IRFMul:
+		e.emitGASFBinOp(fn, instr, "mulsd")
+	case IRFDiv:
+		e.emitGASFBinOp(fn, instr, "divsd")
+	case IRFMod:
+		e.emitGASFMod(fn, instr)
+	case IRFNeg:
+		e.emitGASFNeg(fn, instr)
+
+	// Float comparison
+	case IRFCmpEq:
+		e.emitGASFCmp(fn, instr, "eq")
+	case IRFCmpNe:
+		e.emitGASFCmp(fn, instr, "ne")
+	case IRFCmpLt:
+		e.emitGASFCmp(fn, instr, "lt")
+	case IRFCmpLe:
+		e.emitGASFCmp(fn, instr, "le")
+	case IRFCmpGt:
+		e.emitGASFCmp(fn, instr, "gt")
+	case IRFCmpGe:
+		e.emitGASFCmp(fn, instr, "ge")
+
+	// Float ↔ int conversion
+	case IRIntToFloat:
+		e.emitGASIntToFloat(fn, instr)
+	case IRFloatToInt:
+		e.emitGASFloatToInt(fn, instr)
+
 	case IRGCCollect:
 		gcCollectSym := e.target.Sym("_novus_gc_collect")
 		w.WriteString(fmt.Sprintf("    call %s\n", gcCollectSym))
@@ -720,6 +754,113 @@ func (e *x86_64Emitter) emitGASCmp(fn *IRFunc, instr IRInstr, setcc string) {
 	w.WriteString(fmt.Sprintf("    cmpq %s, %%r10\n", src2))
 	w.WriteString(fmt.Sprintf("    %s %%r10b\n", setcc))
 	w.WriteString("    movzbq %r10b, %r10\n")
+	e.gasStoreToOperand(fn, instr.Dst, "%r10")
+}
+
+// ---------------------------------------------------------------------------
+// GAS floating-point helpers (SSE2).
+//
+// f64 values are stored as raw bit patterns in 64-bit GP registers / stack
+// slots (same convention as the ARM64 emitter). Scratch XMM registers:
+// xmm0, xmm1, xmm2 (caller-saved, safe to clobber).
+// ---------------------------------------------------------------------------
+
+// emitGASFBinOp handles addsd, subsd, mulsd, divsd.
+func (e *x86_64Emitter) emitGASFBinOp(fn *IRFunc, instr IRInstr, mnemonic string) {
+	w := e.b
+	src1 := e.gasLoadToReg(fn, instr.Src1, "%r10")
+	src2 := e.gasLoadToReg(fn, instr.Src2, "%r11")
+	w.WriteString(fmt.Sprintf("    movq %s, %%xmm0\n", src1))
+	w.WriteString(fmt.Sprintf("    movq %s, %%xmm1\n", src2))
+	w.WriteString(fmt.Sprintf("    %s %%xmm1, %%xmm0\n", mnemonic))
+	w.WriteString("    movq %xmm0, %r10\n")
+	e.gasStoreToOperand(fn, instr.Dst, "%r10")
+}
+
+// emitGASFMod handles fmod (a - trunc(a/b) * b).
+func (e *x86_64Emitter) emitGASFMod(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	src1 := e.gasLoadToReg(fn, instr.Src1, "%r10")
+	src2 := e.gasLoadToReg(fn, instr.Src2, "%r11")
+	w.WriteString(fmt.Sprintf("    movq %s, %%xmm0\n", src1)) // xmm0 = a
+	w.WriteString(fmt.Sprintf("    movq %s, %%xmm1\n", src2)) // xmm1 = b
+	w.WriteString("    movapd %xmm0, %xmm2\n")
+	w.WriteString("    divsd %xmm1, %xmm2\n")    // xmm2 = a / b
+	w.WriteString("    cvttsd2si %xmm2, %r11\n") // truncate toward zero
+	w.WriteString("    cvtsi2sd %r11, %xmm2\n")  // xmm2 = trunc(a/b)
+	w.WriteString("    mulsd %xmm1, %xmm2\n")    // xmm2 = trunc(a/b) * b
+	w.WriteString("    subsd %xmm2, %xmm0\n")    // xmm0 = a - trunc(a/b)*b
+	w.WriteString("    movq %xmm0, %r10\n")
+	e.gasStoreToOperand(fn, instr.Dst, "%r10")
+}
+
+// emitGASFNeg handles fneg (flip the sign bit).
+func (e *x86_64Emitter) emitGASFNeg(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	src := e.gasLoadToReg(fn, instr.Src1, "%r10")
+	if src != "%r10" {
+		w.WriteString(fmt.Sprintf("    movq %s, %%r10\n", src))
+	}
+	w.WriteString("    movabsq $-9223372036854775808, %r11\n") // 0x8000000000000000
+	w.WriteString("    xorq %r11, %r10\n")
+	e.gasStoreToOperand(fn, instr.Dst, "%r10")
+}
+
+// emitGASFCmp handles float comparisons via ucomisd.
+// cond is one of: eq, ne, lt, le, gt, ge. All comparisons are false for NaN
+// operands except ne, which is true.
+func (e *x86_64Emitter) emitGASFCmp(fn *IRFunc, instr IRInstr, cond string) {
+	w := e.b
+	src1 := e.gasLoadToReg(fn, instr.Src1, "%r10")
+	src2 := e.gasLoadToReg(fn, instr.Src2, "%r11")
+	w.WriteString(fmt.Sprintf("    movq %s, %%xmm0\n", src1))
+	w.WriteString(fmt.Sprintf("    movq %s, %%xmm1\n", src2))
+	switch cond {
+	case "eq":
+		// Equal and ordered: ZF=1 && PF=0.
+		w.WriteString("    ucomisd %xmm1, %xmm0\n")
+		w.WriteString("    sete %r10b\n")
+		w.WriteString("    setnp %r11b\n")
+		w.WriteString("    andb %r11b, %r10b\n")
+	case "ne":
+		// Not equal or unordered: ZF=0 || PF=1.
+		w.WriteString("    ucomisd %xmm1, %xmm0\n")
+		w.WriteString("    setne %r10b\n")
+		w.WriteString("    setp %r11b\n")
+		w.WriteString("    orb %r11b, %r10b\n")
+	case "lt":
+		// src1 < src2 ≡ src2 > src1 (seta is false on unordered).
+		w.WriteString("    ucomisd %xmm0, %xmm1\n")
+		w.WriteString("    seta %r10b\n")
+	case "le":
+		w.WriteString("    ucomisd %xmm0, %xmm1\n")
+		w.WriteString("    setae %r10b\n")
+	case "gt":
+		w.WriteString("    ucomisd %xmm1, %xmm0\n")
+		w.WriteString("    seta %r10b\n")
+	case "ge":
+		w.WriteString("    ucomisd %xmm1, %xmm0\n")
+		w.WriteString("    setae %r10b\n")
+	}
+	w.WriteString("    movzbq %r10b, %r10\n")
+	e.gasStoreToOperand(fn, instr.Dst, "%r10")
+}
+
+// emitGASIntToFloat: cvtsi2sd (signed i64 → f64).
+func (e *x86_64Emitter) emitGASIntToFloat(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	src := e.gasLoadToReg(fn, instr.Src1, "%r10")
+	w.WriteString(fmt.Sprintf("    cvtsi2sd %s, %%xmm0\n", src))
+	w.WriteString("    movq %xmm0, %r10\n")
+	e.gasStoreToOperand(fn, instr.Dst, "%r10")
+}
+
+// emitGASFloatToInt: cvttsd2si (f64 → signed i64, truncate toward zero).
+func (e *x86_64Emitter) emitGASFloatToInt(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	src := e.gasLoadToReg(fn, instr.Src1, "%r10")
+	w.WriteString(fmt.Sprintf("    movq %s, %%xmm0\n", src))
+	w.WriteString("    cvttsd2si %xmm0, %r10\n")
 	e.gasStoreToOperand(fn, instr.Dst, "%r10")
 }
 
@@ -1424,6 +1565,40 @@ func (e *x86_64Emitter) emitNASMInstr(fn *IRFunc, instr IRInstr) {
 
 	case IRGCCollect:
 		w.WriteString("    call _novus_gc_collect\n")
+
+	// Floating-point arithmetic (f64 bit patterns stored in 64-bit GP slots)
+	case IRFAdd:
+		e.emitNASMFBinOp(fn, instr, "addsd")
+	case IRFSub:
+		e.emitNASMFBinOp(fn, instr, "subsd")
+	case IRFMul:
+		e.emitNASMFBinOp(fn, instr, "mulsd")
+	case IRFDiv:
+		e.emitNASMFBinOp(fn, instr, "divsd")
+	case IRFMod:
+		e.emitNASMFMod(fn, instr)
+	case IRFNeg:
+		e.emitNASMFNeg(fn, instr)
+
+	// Float comparison
+	case IRFCmpEq:
+		e.emitNASMFCmp(fn, instr, "eq")
+	case IRFCmpNe:
+		e.emitNASMFCmp(fn, instr, "ne")
+	case IRFCmpLt:
+		e.emitNASMFCmp(fn, instr, "lt")
+	case IRFCmpLe:
+		e.emitNASMFCmp(fn, instr, "le")
+	case IRFCmpGt:
+		e.emitNASMFCmp(fn, instr, "gt")
+	case IRFCmpGe:
+		e.emitNASMFCmp(fn, instr, "ge")
+
+	// Float ↔ int conversion
+	case IRIntToFloat:
+		e.emitNASMIntToFloat(fn, instr)
+	case IRFloatToInt:
+		e.emitNASMFloatToInt(fn, instr)
 	}
 }
 
@@ -1448,6 +1623,110 @@ func (e *x86_64Emitter) emitNASMCmp(fn *IRFunc, instr IRInstr, setcc string) {
 	w.WriteString(fmt.Sprintf("    cmp r10, %s\n", src2))
 	w.WriteString(fmt.Sprintf("    %s r10b\n", setcc))
 	w.WriteString("    movzx r10, r10b\n")
+	e.nasmStoreToOperand(fn, instr.Dst, "r10")
+}
+
+// ---------------------------------------------------------------------------
+// NASM floating-point helpers (SSE2). Same conventions as the GAS helpers:
+// f64 values are raw bit patterns in 64-bit GP registers / stack slots.
+// ---------------------------------------------------------------------------
+
+// emitNASMFBinOp handles addsd, subsd, mulsd, divsd.
+func (e *x86_64Emitter) emitNASMFBinOp(fn *IRFunc, instr IRInstr, mnemonic string) {
+	w := e.b
+	src1 := e.nasmLoadToReg(fn, instr.Src1, "r10")
+	src2 := e.nasmLoadToReg(fn, instr.Src2, "r11")
+	w.WriteString(fmt.Sprintf("    movq xmm0, %s\n", src1))
+	w.WriteString(fmt.Sprintf("    movq xmm1, %s\n", src2))
+	w.WriteString(fmt.Sprintf("    %s xmm0, xmm1\n", mnemonic))
+	w.WriteString("    movq r10, xmm0\n")
+	e.nasmStoreToOperand(fn, instr.Dst, "r10")
+}
+
+// emitNASMFMod handles fmod (a - trunc(a/b) * b).
+func (e *x86_64Emitter) emitNASMFMod(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	src1 := e.nasmLoadToReg(fn, instr.Src1, "r10")
+	src2 := e.nasmLoadToReg(fn, instr.Src2, "r11")
+	w.WriteString(fmt.Sprintf("    movq xmm0, %s\n", src1)) // xmm0 = a
+	w.WriteString(fmt.Sprintf("    movq xmm1, %s\n", src2)) // xmm1 = b
+	w.WriteString("    movapd xmm2, xmm0\n")
+	w.WriteString("    divsd xmm2, xmm1\n")    // xmm2 = a / b
+	w.WriteString("    cvttsd2si r11, xmm2\n") // truncate toward zero
+	w.WriteString("    cvtsi2sd xmm2, r11\n")  // xmm2 = trunc(a/b)
+	w.WriteString("    mulsd xmm2, xmm1\n")    // xmm2 = trunc(a/b) * b
+	w.WriteString("    subsd xmm0, xmm2\n")    // xmm0 = a - trunc(a/b)*b
+	w.WriteString("    movq r10, xmm0\n")
+	e.nasmStoreToOperand(fn, instr.Dst, "r10")
+}
+
+// emitNASMFNeg handles fneg (flip the sign bit).
+func (e *x86_64Emitter) emitNASMFNeg(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	src := e.nasmLoadToReg(fn, instr.Src1, "r10")
+	if src != "r10" {
+		w.WriteString(fmt.Sprintf("    mov r10, %s\n", src))
+	}
+	w.WriteString("    mov r11, 0x8000000000000000\n")
+	w.WriteString("    xor r10, r11\n")
+	e.nasmStoreToOperand(fn, instr.Dst, "r10")
+}
+
+// emitNASMFCmp handles float comparisons via ucomisd.
+// cond is one of: eq, ne, lt, le, gt, ge. All comparisons are false for NaN
+// operands except ne, which is true.
+func (e *x86_64Emitter) emitNASMFCmp(fn *IRFunc, instr IRInstr, cond string) {
+	w := e.b
+	src1 := e.nasmLoadToReg(fn, instr.Src1, "r10")
+	src2 := e.nasmLoadToReg(fn, instr.Src2, "r11")
+	w.WriteString(fmt.Sprintf("    movq xmm0, %s\n", src1))
+	w.WriteString(fmt.Sprintf("    movq xmm1, %s\n", src2))
+	switch cond {
+	case "eq":
+		// Equal and ordered: ZF=1 && PF=0.
+		w.WriteString("    ucomisd xmm0, xmm1\n")
+		w.WriteString("    sete r10b\n")
+		w.WriteString("    setnp r11b\n")
+		w.WriteString("    and r10b, r11b\n")
+	case "ne":
+		// Not equal or unordered: ZF=0 || PF=1.
+		w.WriteString("    ucomisd xmm0, xmm1\n")
+		w.WriteString("    setne r10b\n")
+		w.WriteString("    setp r11b\n")
+		w.WriteString("    or r10b, r11b\n")
+	case "lt":
+		// src1 < src2 ≡ src2 > src1 (seta is false on unordered).
+		w.WriteString("    ucomisd xmm1, xmm0\n")
+		w.WriteString("    seta r10b\n")
+	case "le":
+		w.WriteString("    ucomisd xmm1, xmm0\n")
+		w.WriteString("    setae r10b\n")
+	case "gt":
+		w.WriteString("    ucomisd xmm0, xmm1\n")
+		w.WriteString("    seta r10b\n")
+	case "ge":
+		w.WriteString("    ucomisd xmm0, xmm1\n")
+		w.WriteString("    setae r10b\n")
+	}
+	w.WriteString("    movzx r10, r10b\n")
+	e.nasmStoreToOperand(fn, instr.Dst, "r10")
+}
+
+// emitNASMIntToFloat: cvtsi2sd (signed i64 → f64).
+func (e *x86_64Emitter) emitNASMIntToFloat(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	src := e.nasmLoadToReg(fn, instr.Src1, "r10")
+	w.WriteString(fmt.Sprintf("    cvtsi2sd xmm0, %s\n", src))
+	w.WriteString("    movq r10, xmm0\n")
+	e.nasmStoreToOperand(fn, instr.Dst, "r10")
+}
+
+// emitNASMFloatToInt: cvttsd2si (f64 → signed i64, truncate toward zero).
+func (e *x86_64Emitter) emitNASMFloatToInt(fn *IRFunc, instr IRInstr) {
+	w := e.b
+	src := e.nasmLoadToReg(fn, instr.Src1, "r10")
+	w.WriteString(fmt.Sprintf("    movq xmm0, %s\n", src))
+	w.WriteString("    cvttsd2si r10, xmm0\n")
 	e.nasmStoreToOperand(fn, instr.Dst, "r10")
 }
 
