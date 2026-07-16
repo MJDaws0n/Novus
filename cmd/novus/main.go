@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"novus/internal/ast"
 	"novus/internal/codegen"
 	"novus/internal/imports"
@@ -13,7 +14,7 @@ import (
 	"time"
 )
 
-const VERSION = "0.2.1"
+const VERSION = "0.2.2"
 
 var debugMode = false
 
@@ -399,6 +400,9 @@ func parseSize(s string) (int64, error) {
 	}
 	if n <= 0 {
 		return 0, fmt.Errorf("size must be positive")
+	}
+	if n > math.MaxInt64/multiplier {
+		return 0, fmt.Errorf("size too large")
 	}
 	return n * multiplier, nil
 }
