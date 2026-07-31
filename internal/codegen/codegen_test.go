@@ -413,6 +413,32 @@ func TestLowerStringCompareWithSingleQuotedLiteralUsesStringOperand(t *testing.T
 	}
 }
 
+func TestLowerSingleQuotedStringFunctionArgument(t *testing.T) {
+	src := `module test;
+	fn contains(s: str, needle: str) -> bool { return len(needle) > 0; }
+	fn main() -> i32 {
+		if (contains("word", '_')) { return 0; }
+		return 1;
+	}`
+	prog := mustParse(t, src)
+	mod := Lower(prog, linuxAMD64Target())
+	fn := mod.Functions[1]
+
+	for _, instr := range fn.Instrs {
+		if instr.Op != IRCall || instr.Src1.Label != "contains" {
+			continue
+		}
+		if len(instr.Args) != 2 {
+			t.Fatalf("expected two contains arguments, got %+v", instr.Args)
+		}
+		if instr.Args[1].Kind == OpImmediate {
+			t.Fatalf("single-quoted str argument was passed as an address-sized immediate: %+v", instr.Args[1])
+		}
+		return
+	}
+	t.Fatal("expected call to contains")
+}
+
 func TestLowerFunctionCall(t *testing.T) {
 	src := `module test;
 	fn add(a: i32, b: i32) -> i32 { return a + b; }
@@ -1921,14 +1947,14 @@ fn main() -> i32 {
 	}
 }
 
-func TestSingleQuotedStringComparison_AllReleaseTargets(t *testing.T) {
+func TestSingleQuotedStringFunctionArgument_AllReleaseTargets(t *testing.T) {
 	src := `module test;
-fn main() -> i32 {
-	let ch: str = "|";
-	if (ch == '|') {
-		return 1;
+	fn contains(s: str, needle: str) -> bool {
+		return s[0] == needle[0];
 	}
-	return 0;
+	fn main() -> i32 {
+		if (contains("_", '_')) { return 0; }
+		return 1;
 }`
 	prog := mustParse(t, src)
 
@@ -1952,18 +1978,20 @@ fn main() -> i32 {
 			}
 			mod := Lower(prog, target)
 
-			hasStringCompare := false
-			for _, instr := range mod.Functions[0].Instrs {
-				if instr.Op != IRStrCmpEq {
-					continue
-				}
-				hasStringCompare = true
-				if instr.Src1.Kind == OpImmediate || instr.Src2.Kind == OpImmediate {
-					t.Fatalf("single-quoted operand was not converted to a string: %+v", instr)
+			hasContainsCall := false
+			for _, fn := range mod.Functions {
+				for _, instr := range fn.Instrs {
+					if instr.Op != IRCall || instr.Src1.Label != "contains" {
+						continue
+					}
+					hasContainsCall = true
+					if len(instr.Args) != 2 || instr.Args[1].Kind == OpImmediate {
+						t.Fatalf("single-quoted str argument was not converted for call: %+v", instr.Args)
+					}
 				}
 			}
-			if !hasStringCompare {
-				t.Fatal("expected content-based string comparison")
+			if !hasContainsCall {
+				t.Fatal("expected call to contains")
 			}
 
 			var asm string
