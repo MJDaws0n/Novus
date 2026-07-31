@@ -1921,12 +1921,11 @@ fn main() -> i32 {
 	}
 }
 
-func TestStrCmpEq_AllTargets(t *testing.T) {
+func TestSingleQuotedStringComparison_AllReleaseTargets(t *testing.T) {
 	src := `module test;
 fn main() -> i32 {
-	let a: str = "hello";
-	let b: str = "hello";
-	if (a == b) {
+	let ch: str = "|";
+	if (ch == '|') {
 		return 1;
 	}
 	return 0;
@@ -1934,22 +1933,47 @@ fn main() -> i32 {
 	prog := mustParse(t, src)
 
 	targets := []struct {
-		name   string
-		target *Target
+		os   string
+		arch string
 	}{
-		{"linux_amd64", linuxAMD64Target()},
-		{"windows_amd64", windowsAMD64Target()},
-		{"darwin_arm64", darwinARM64Target()},
+		{"darwin", "amd64"},
+		{"darwin", "arm64"},
+		{"linux", "amd64"},
+		{"linux", "386"},
+		{"linux", "arm64"},
+		{"windows", "amd64"},
 	}
 
 	for _, tc := range targets {
-		t.Run(tc.name, func(t *testing.T) {
-			mod := Lower(prog, tc.target)
+		t.Run(tc.os+"_"+tc.arch, func(t *testing.T) {
+			target, err := ResolveTarget(tc.os, tc.arch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mod := Lower(prog, target)
+
+			hasStringCompare := false
+			for _, instr := range mod.Functions[0].Instrs {
+				if instr.Op != IRStrCmpEq {
+					continue
+				}
+				hasStringCompare = true
+				if instr.Src1.Kind == OpImmediate || instr.Src2.Kind == OpImmediate {
+					t.Fatalf("single-quoted operand was not converted to a string: %+v", instr)
+				}
+			}
+			if !hasStringCompare {
+				t.Fatal("expected content-based string comparison")
+			}
+
 			var asm string
-			if tc.target.Arch == Arch_ARM64 {
-				asm = EmitARM64(mod, tc.target)
-			} else {
-				asm = EmitX86_64(mod, tc.target)
+			switch target.Arch {
+			case Arch_ARM64:
+				asm = EmitARM64(mod, target)
+			case Arch_x86:
+				asm = EmitX86(mod, target)
+			default:
+				asm = EmitX86_64(mod, target)
 			}
 			if len(asm) == 0 {
 				t.Error("empty assembly output")
