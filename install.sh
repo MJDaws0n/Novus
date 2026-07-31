@@ -71,7 +71,7 @@ if ! curl -fsSL -o "$TMPFILE" "$DOWNLOAD_URL"; then
     exit 1
 fi
 
-chmod +x "$TMPFILE"
+chmod 755 "$TMPFILE"
 
 # Install
 echo "Installing to ${INSTALL_DIR}/${BINARY_NAME}..."
@@ -80,7 +80,7 @@ if [ -w "$INSTALL_DIR" ]; then
 else
     echo "(requires sudo)"
     sudo mv "$TMPFILE" "${INSTALL_DIR}/${BINARY_NAME}"
-    sudo chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
+    sudo chmod 755 "${INSTALL_DIR}/${BINARY_NAME}"
 fi
 
 # macOS: remove quarantine attribute
