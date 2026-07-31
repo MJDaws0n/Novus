@@ -245,6 +245,31 @@ func TestDeduplicateGlobals(t *testing.T) {
 	}
 }
 
+func TestDeduplicateGlobalsFromSharedProgram(t *testing.T) {
+	shared := &ast.Program{Globals: []*ast.GlobalVar{{Name: "runtime_state"}}}
+	r := &Resolver{resolved: make(map[string]*ImportedModule)}
+	r.allModules = []*ImportedModule{
+		{Path: "direct", Program: shared},
+		{Path: "transitive", Program: shared},
+	}
+
+	r.deduplicateModules()
+
+	totalGlobals := 0
+	for _, mod := range r.allModules {
+		totalGlobals += len(mod.Program.Globals)
+	}
+	if totalGlobals != 1 {
+		t.Errorf("expected one shared global after dedup, got %d", totalGlobals)
+	}
+	if len(r.allModules[0].Program.Globals) != 1 {
+		t.Error("expected the first shared module to retain the global")
+	}
+	if len(r.allModules[1].Program.Globals) != 0 {
+		t.Error("expected the duplicate shared module to drop the global")
+	}
+}
+
 // ===========================================================================
 // Bug 2: Cross-module globals included in merged program
 // ===========================================================================

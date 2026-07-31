@@ -657,6 +657,82 @@ func TestEmitX86_64GAS_LinuxEntryPoint(t *testing.T) {
 	}
 }
 
+func TestEmitX86_64GAS_LinuxCapturesRuntimeEnvp(t *testing.T) {
+	src := `module test;
+	let __novus_envp: u64 = 0;
+	fn main() -> i32 { return 0; }`
+	prog := mustParse(t, src)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	for _, expected := range []string{
+		"leaq 8(%rsi,%rdi,8), %rdx",
+		"leaq _g___novus_envp(%rip), %rax",
+		"movq %rdx, (%rax)",
+	} {
+		if !strings.Contains(asm, expected) {
+			t.Errorf("Linux x86_64 startup missing environment capture %q", expected)
+		}
+	}
+}
+
+func TestEmitX86_64GAS_DarwinCapturesRuntimeEnvp(t *testing.T) {
+	src := `module test;
+	let __novus_envp: u64 = 0;
+	fn main() -> i32 { return 0; }`
+	prog := mustParse(t, src)
+	target, _ := ResolveTarget("darwin", "amd64")
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
+
+	if !strings.Contains(asm, "movq __g___novus_envp@GOTPCREL(%rip), %r11") ||
+		!strings.Contains(asm, "movq %rdx, (%r11)") {
+		t.Error("Darwin x86_64 main missing environment capture")
+	}
+}
+
+func TestEmitARM64CapturesRuntimeEnvp(t *testing.T) {
+	src := `module test;
+	let __novus_envp: u64 = 0;
+	fn main() -> i32 { return 0; }`
+	prog := mustParse(t, src)
+
+	linuxTarget, _ := ResolveTarget("linux", "arm64")
+	linuxAsm := EmitARM64(Lower(prog, linuxTarget), linuxTarget)
+	for _, expected := range []string{
+		"add x2, x1, x0, lsl #3",
+		"adrp x9, _g___novus_envp",
+		"str x2, [x9]",
+	} {
+		if !strings.Contains(linuxAsm, expected) {
+			t.Errorf("Linux ARM64 startup missing environment capture %q", expected)
+		}
+	}
+
+	darwinTarget := darwinARM64Target()
+	darwinAsm := EmitARM64(Lower(prog, darwinTarget), darwinTarget)
+	if !strings.Contains(darwinAsm, "adrp x9, __g___novus_envp@PAGE") ||
+		!strings.Contains(darwinAsm, "str x2, [x9]") {
+		t.Error("Darwin ARM64 main missing environment capture")
+	}
+}
+
+func TestEmitX86CapturesRuntimeEnvp(t *testing.T) {
+	src := `module test;
+	let __novus_envp: u64 = 0;
+	fn main() -> i32 { return 0; }`
+	prog := mustParse(t, src)
+	target, _ := ResolveTarget("linux", "x86")
+	mod := Lower(prog, target)
+	asm := EmitX86(mod, target)
+
+	if !strings.Contains(asm, "leal 8(%esp,%eax,4), %edx") ||
+		!strings.Contains(asm, "movl %edx, _g___novus_envp") {
+		t.Error("Linux x86 startup missing environment capture")
+	}
+}
+
 func TestEmitX86_64GAS_MacOSSymbolPrefix(t *testing.T) {
 	src := `module test; fn main() -> i32 { return 0; }`
 	prog := mustParse(t, src)

@@ -153,6 +153,14 @@ func (e *arm64Emitter) emit() {
 		}
 		w.WriteString("    ldr x0, [sp]\n")
 		w.WriteString("    add x1, sp, #8\n")
+		if hasRuntimeEnvpGlobal(e.mod) {
+			envpSym := e.target.Sym(runtimeEnvpGlobal)
+			w.WriteString("    add x2, x1, x0, lsl #3\n")
+			w.WriteString("    add x2, x2, #8\n")
+			w.WriteString(fmt.Sprintf("    adrp x9, %s\n", envpSym))
+			w.WriteString(fmt.Sprintf("    add x9, x9, :lo12:%s\n", envpSym))
+			w.WriteString("    str x2, [x9]\n")
+		}
 		w.WriteString(fmt.Sprintf("    bl %s\n", entryFuncName))
 		w.WriteString("    mov x8, #93\n")
 		w.WriteString("    svc #0\n\n")
@@ -227,6 +235,12 @@ func (e *arm64Emitter) emitFunction(fn *IRFunc) {
 	w.WriteString("    mov x29, sp\n")
 	if frameSize > 0 {
 		e.emitSPAdj("sub", frameSize)
+	}
+	if fn.Name == "main" && e.target.OS == OS_Darwin && hasRuntimeEnvpGlobal(e.mod) {
+		envpSym := e.target.Sym(runtimeEnvpGlobal)
+		w.WriteString(fmt.Sprintf("    adrp x9, %s@PAGE\n", envpSym))
+		w.WriteString(fmt.Sprintf("    add x9, x9, %s@PAGEOFF\n", envpSym))
+		w.WriteString("    str x2, [x9]\n")
 	}
 
 	// Initialize GC stack bottom in main function (macOS entry).

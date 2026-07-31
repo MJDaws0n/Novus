@@ -130,6 +130,12 @@ func (e *x86Emitter) emit() {
 		w.WriteString("    movl %esp, _novus_gc_stack_bottom\n")
 		w.WriteString("    movl $256, _novus_gc_threshold\n")
 	}
+	if hasRuntimeEnvpGlobal(e.mod) {
+		envpSym := e.target.Sym(runtimeEnvpGlobal)
+		w.WriteString("    movl (%esp), %eax\n")
+		w.WriteString("    leal 8(%esp,%eax,4), %edx\n")
+		w.WriteString(fmt.Sprintf("    movl %%edx, %s\n", envpSym))
+	}
 	w.WriteString("    call main\n")
 	w.WriteString("    movl %eax, %ebx\n")
 	w.WriteString("    movl $1, %eax\n") // exit syscall

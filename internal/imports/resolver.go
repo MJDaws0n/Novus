@@ -360,7 +360,13 @@ func (r *Resolver) deduplicateModules() {
 				dedupedGlobals = append(dedupedGlobals, g)
 			}
 		}
-		mod.Program.Globals = dedupedGlobals
+		// Duplicate imports reuse the same parsed Program pointer. Mutating its
+		// Globals slice here would also mutate the earlier module entry and can
+		// erase every copy of a global. Give each module entry its own shallow
+		// Program copy before applying the filtered globals.
+		programCopy := *mod.Program
+		programCopy.Globals = dedupedGlobals
+		mod.Program = &programCopy
 	}
 }
 

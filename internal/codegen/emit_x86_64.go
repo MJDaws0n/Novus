@@ -180,6 +180,12 @@ func (e *x86_64Emitter) emitGAS() {
 		}
 		w.WriteString("    movq (%rsp), %rdi\n")
 		w.WriteString("    leaq 8(%rsp), %rsi\n")
+		if hasRuntimeEnvpGlobal(e.mod) {
+			envpSym := e.target.Sym(runtimeEnvpGlobal)
+			w.WriteString("    leaq 8(%rsi,%rdi,8), %rdx\n")
+			w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %%rax\n", envpSym))
+			w.WriteString("    movq %rdx, (%rax)\n")
+		}
 		w.WriteString(fmt.Sprintf("    call %s\n", entryFuncName))
 		w.WriteString("    movq %rax, %rdi\n")
 		w.WriteString("    movq $60, %rax\n")
@@ -226,6 +232,11 @@ func (e *x86_64Emitter) emitGASFunction(fn *IRFunc) {
 	w.WriteString("    movq %rsp, %rbp\n")
 	if frameSize > 0 {
 		w.WriteString(fmt.Sprintf("    subq $%d, %%rsp\n", frameSize))
+	}
+	if fn.Name == "main" && e.target.OS == OS_Darwin && hasRuntimeEnvpGlobal(e.mod) {
+		envpSym := e.target.Sym(runtimeEnvpGlobal)
+		w.WriteString(fmt.Sprintf("    movq %s@GOTPCREL(%%rip), %%r11\n", envpSym))
+		w.WriteString("    movq %rdx, (%r11)\n")
 	}
 
 	// GC init in main function (macOS entry — no _start).
