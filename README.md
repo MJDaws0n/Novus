@@ -100,6 +100,13 @@ See [`docs/docs.md`](docs/docs.md) for the full language reference.
 go run cmd/novus/main.go --target=darwin/arm64 path/to/file.nov
 ```
 
+To rebuild all compiler release binaries (the compiler itself is a Go
+program and cross-compiles without target SDKs):
+
+```sh
+./build-release.sh
+```
+
 ### Cross-compilation toolchain notes
 
 - `linux/amd64`, `linux/386` need NASM + `ld`.
