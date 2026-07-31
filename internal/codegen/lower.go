@@ -30,11 +30,12 @@ type Lowerer struct {
 	nextSlot int            // next slot index
 
 	// Type tracking for string-aware lowering.
-	varTypes       map[string]string // variable name → declared type (e.g. "str", "i32")
-	vregIsStr      map[int]bool      // vreg number → true if it holds a string pointer
-	vregIsFloat    map[int]bool      // vreg number → true if it holds a float64 (IEEE 754 bits)
-	vregIsUnsigned map[int]bool      // vreg number → true if it holds an unsigned integer
-	funcRetTypes   map[string]string // function name → return type (pre-scanned)
+	varTypes       map[string]string   // variable name → declared type (e.g. "str", "i32")
+	vregIsStr      map[int]bool        // vreg number → true if it holds a string pointer
+	vregIsFloat    map[int]bool        // vreg number → true if it holds a float64 (IEEE 754 bits)
+	vregIsUnsigned map[int]bool        // vreg number → true if it holds an unsigned integer
+	funcRetTypes   map[string]string   // function name → return type (pre-scanned)
+	funcParamTypes map[string][]string // function name → parameter types (pre-scanned)
 
 	// Loop context for break/continue.
 	loopBreakLabel    string
@@ -62,15 +63,22 @@ type funcOverloadEntry struct {
 func Lower(program *ast.Program, target *Target) *IRModule {
 	// Pre-scan function signatures to know return types.
 	funcRetTypes := map[string]string{}
+	funcParamTypes := map[string][]string{}
 	for _, fn := range program.Functions {
+		key := fn.MangledName
+		if key == "" {
+			key = fn.Name
+		}
 		if fn.ReturnType != nil {
-			// Use MangledName if set (for overloaded functions), otherwise plain Name.
-			key := fn.MangledName
-			if key == "" {
-				key = fn.Name
-			}
 			funcRetTypes[key] = fn.ReturnType.Name
 		}
+		paramTypes := make([]string, len(fn.Params))
+		for i, param := range fn.Params {
+			if param.Type != nil {
+				paramTypes[i] = param.Type.Name
+			}
+		}
+		funcParamTypes[key] = paramTypes
 	}
 
 	// Build overload resolution map: plain name → list of (mangledName, paramCount).
@@ -87,13 +95,14 @@ func Lower(program *ast.Program, target *Target) *IRModule {
 	}
 
 	l := &Lowerer{
-		module:        &IRModule{EntryFunc: "main"},
-		target:        target,
-		physRegs:      makePhysRegSet(),
-		funcRetTypes:  funcRetTypes,
-		globals:       map[string]string{},
-		globalTypes:   map[string]string{},
-		funcOverloads: funcOverloads,
+		module:         &IRModule{EntryFunc: "main"},
+		target:         target,
+		physRegs:       makePhysRegSet(),
+		funcRetTypes:   funcRetTypes,
+		funcParamTypes: funcParamTypes,
+		globals:        map[string]string{},
+		globalTypes:    map[string]string{},
+		funcOverloads:  funcOverloads,
 	}
 
 	// Process global variables.
@@ -1001,10 +1010,17 @@ func (l *Lowerer) lowerCallExpr(e *ast.CallExpr) Operand {
 		}
 	}
 
-	// Regular function call — lower arguments, emit call.
+	// Regular function call — lower arguments and coerce byte-like string
+	// values (single-quoted one-byte literals and string indexes) to pointers
+	// when the callee declares a str parameter.
 	var argOps []Operand
-	for _, arg := range e.Args {
-		argOps = append(argOps, l.lowerExpr(arg))
+	paramTypes := l.funcParamTypes[resolvedName]
+	for i, arg := range e.Args {
+		argOp := l.lowerExpr(arg)
+		if i < len(paramTypes) {
+			argOp = l.coerceAssignedValue(&ast.TypeExpr{Name: paramTypes[i]}, argOp)
+		}
+		argOps = append(argOps, argOp)
 	}
 
 	dst := l.freshVReg()
