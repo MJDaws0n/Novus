@@ -867,14 +867,25 @@ func (e *x86_64Emitter) emitGASFloatToInt(fn *IRFunc, instr IRInstr) {
 func (e *x86_64Emitter) emitGASCall(fn *IRFunc, instr IRInstr) {
 	w := e.b
 	argRegs := e.target.ArgRegs
-	stackArgs := 0
+	stackArgs := len(instr.Args) - len(argRegs)
+	if stackArgs < 0 {
+		stackArgs = 0
+	}
+
+	// The caller's stack is 16-byte aligned here. When the number of
+	// stack-passed arguments is odd, reserve padding before pushing them so
+	// the first overflow argument remains at 16(%rbp) in the callee. Padding
+	// after the arguments would be mistaken for argument 7.
+	needAlign := stackArgs%2 != 0
+	if needAlign {
+		w.WriteString("    subq $8, %rsp\n")
+	}
 
 	// Push excess args in reverse order.
-	if len(instr.Args) > len(argRegs) {
+	if stackArgs > 0 {
 		for i := len(instr.Args) - 1; i >= len(argRegs); i-- {
 			src := e.gasLoadToReg(fn, instr.Args[i], "%r10")
 			w.WriteString(fmt.Sprintf("    pushq %s\n", src))
-			stackArgs++
 		}
 	}
 
@@ -887,21 +898,16 @@ func (e *x86_64Emitter) emitGASCall(fn *IRFunc, instr IRInstr) {
 		}
 	}
 
-	// Stack alignment for SysV ABI (16-byte aligned before call).
-	needAlign := stackArgs%2 != 0
-	if needAlign {
-		w.WriteString("    subq $8, %rsp\n")
-	}
-
 	label := instr.Src1.Label
 	callTarget := e.target.Sym(label)
 	w.WriteString(fmt.Sprintf("    call %s\n", callTarget))
 
+	stackBytes := stackArgs * 8
 	if needAlign {
-		stackArgs++
+		stackBytes += 8
 	}
-	if stackArgs > 0 {
-		w.WriteString(fmt.Sprintf("    addq $%d, %%rsp\n", stackArgs*8))
+	if stackBytes > 0 {
+		w.WriteString(fmt.Sprintf("    addq $%d, %%rsp\n", stackBytes))
 	}
 
 	if instr.Dst.Kind != OpNone {

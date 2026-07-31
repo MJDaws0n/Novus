@@ -442,6 +442,38 @@ func TestLowerFunctionCall(t *testing.T) {
 	}
 }
 
+func TestEmitX86_64GAS_AlignsBeforeOverflowArguments(t *testing.T) {
+	src := `module test;
+	fn ninth(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, g: i32, h: i32, i: i32) -> i32 {
+		return i;
+	}
+	fn main() -> i32 { return ninth(1, 2, 3, 4, 5, 6, 7, 8, 9); }`
+	prog := mustParse(t, src)
+	mod := Lower(prog, linuxAMD64Target())
+	asm := EmitX86_64(mod, linuxAMD64Target())
+
+	callAt := strings.LastIndex(asm, "    call ninth\n")
+	if callAt < 0 {
+		t.Fatal("expected call to ninth in emitted assembly")
+	}
+	windowStart := strings.LastIndex(asm[:callAt], "    ## function main\n")
+	if windowStart < 0 {
+		t.Fatal("expected main function in emitted assembly")
+	}
+	callSetup := asm[windowStart:callAt]
+	paddingAt := strings.LastIndex(callSetup, "    subq $8, %rsp\n")
+	firstPushAt := strings.Index(callSetup, "    pushq ")
+	if paddingAt < 0 || firstPushAt < 0 {
+		t.Fatalf("expected alignment padding and overflow argument pushes before call:\n%s", callSetup)
+	}
+	if paddingAt > firstPushAt {
+		t.Fatalf("alignment padding must precede overflow arguments so argument 7 stays at 16(%%rbp):\n%s", callSetup)
+	}
+	if !strings.Contains(asm[callAt:], "    addq $32, %rsp\n") {
+		t.Fatal("expected caller to release three arguments plus alignment padding")
+	}
+}
+
 func TestLowerIfElse(t *testing.T) {
 	src := `module test; fn main() -> i32 {
 		let x: i32 = 1;
