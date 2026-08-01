@@ -1242,6 +1242,94 @@ func TestLowerMainModuleGlobalInFunction(t *testing.T) {
 	}
 }
 
+func TestLowerGlobalStringArrayInitializationAndAccess(t *testing.T) {
+	src := `module test;
+	let STAGES: []str = [
+		"+---+\n" + "|   |\n" + "|\n" + "=========\n",
+		"+---+\n" + "|   |\n" + "|   O\n" + "=========\n"
+	];
+	fn main() -> i32 { return len(STAGES[1]); }`
+	prog := mustParse(t, src)
+	mod := Lower(prog, linuxAMD64Target())
+	mainFn := mod.Functions[0]
+
+	wants := map[IROp]bool{
+		IRArrayNew:    false,
+		IRArrayAppend: false,
+		IRStoreGlobal: false,
+		IRLoadGlobal:  false,
+		IRArrayGet:    false,
+		IRStrLen:      false,
+	}
+	for _, instr := range mainFn.Instrs {
+		if _, ok := wants[instr.Op]; ok {
+			wants[instr.Op] = true
+		}
+		if instr.Op == IRStrIndex {
+			t.Fatalf("global []str access was lowered as string indexing: %s", instr)
+		}
+	}
+	for op, found := range wants {
+		if !found {
+			t.Errorf("expected %s while lowering global []str", op)
+		}
+	}
+}
+
+func TestLowerNestedGlobalStringArrayAccess(t *testing.T) {
+	src := `module test;
+	let GRID: [][]str = [["a"], ["bc"]];
+	fn main() -> i32 { return len(GRID[1][0]); }`
+	prog := mustParse(t, src)
+
+	targets := []struct {
+		os   string
+		arch string
+	}{
+		{"darwin", "amd64"},
+		{"darwin", "arm64"},
+		{"linux", "amd64"},
+		{"linux", "386"},
+		{"linux", "arm64"},
+		{"windows", "amd64"},
+	}
+
+	for _, tc := range targets {
+		t.Run(tc.os+"_"+tc.arch, func(t *testing.T) {
+			target, err := ResolveTarget(tc.os, tc.arch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mod := Lower(prog, target)
+			arrayGets := 0
+			for _, instr := range mod.Functions[0].Instrs {
+				if instr.Op == IRArrayGet {
+					arrayGets++
+				}
+				if instr.Op == IRStrIndex {
+					t.Fatalf("nested array access was lowered as string indexing: %s", instr)
+				}
+			}
+			if arrayGets != 2 {
+				t.Fatalf("expected two nested array gets, got %d", arrayGets)
+			}
+
+			var asm string
+			switch target.Arch {
+			case Arch_ARM64:
+				asm = EmitARM64(mod, target)
+			case Arch_x86:
+				asm = EmitX86(mod, target)
+			default:
+				asm = EmitX86_64(mod, target)
+			}
+			if asm == "" {
+				t.Fatal("expected assembly output")
+			}
+		})
+	}
+}
+
 // ===========================================================================
 // Bug 5: ARM64 getflag(carry) generates cset instruction
 // ===========================================================================

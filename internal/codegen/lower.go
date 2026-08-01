@@ -36,6 +36,7 @@ type Lowerer struct {
 	vregIsUnsigned map[int]bool        // vreg number → true if it holds an unsigned integer
 	funcRetTypes   map[string]string   // function name → return type (pre-scanned)
 	funcParamTypes map[string][]string // function name → parameter types (pre-scanned)
+	currentRetType string              // declared return type of the function being lowered
 
 	// Loop context for break/continue.
 	loopBreakLabel    string
@@ -47,6 +48,7 @@ type Lowerer struct {
 	// Global variables: maps variable name to its global label.
 	globals     map[string]string // name → assembly label
 	globalTypes map[string]string // name → type
+	globalInits []*ast.GlobalVar  // globals requiring runtime initialization
 
 	// Function overload resolution: maps plain function name → mangled entries.
 	// Used as a fallback when ResolvedCallee is not set (e.g. calls inside imported function bodies).
@@ -258,6 +260,11 @@ func (l *Lowerer) lowerGlobal(g *ast.GlobalVar) {
 
 	// Evaluate the initializer if it's a compile-time constant.
 	if g.Value != nil {
+		if strings.HasPrefix(typeName, "[]") {
+			// Arrays use the heap-backed runtime representation, so their data
+			// cannot be encoded in this scalar global slot at assembly time.
+			l.globalInits = append(l.globalInits, g)
+		}
 		switch v := g.Value.(type) {
 		case *ast.IntLitExpr:
 			val, err := strconv.ParseInt(v.Value, 0, 64)
@@ -274,11 +281,7 @@ func (l *Lowerer) lowerGlobal(g *ast.GlobalVar) {
 				irGlobal.InitImm = 1
 			}
 		case *ast.StringLitExpr:
-			raw := v.Value
-			if len(raw) >= 2 && (raw[0] == '"' || raw[0] == '\'') {
-				raw = raw[1 : len(raw)-1]
-			}
-			raw = unescapeString(raw)
+			raw := stringLiteralValue(v.Value)
 			idx := l.module.AddString(raw)
 			irGlobal.InitStr = idx
 		}
@@ -314,6 +317,7 @@ func (l *Lowerer) lowerFunction(fn *ast.FnDecl) {
 	l.vregIsStr = map[int]bool{}
 	l.vregIsFloat = map[int]bool{}
 	l.vregIsUnsigned = map[int]bool{}
+	l.currentRetType = typeExprName(fn.ReturnType)
 
 	// Function prologue label.
 	l.emit(IRInstr{Op: IRLabel, Dst: LabelOp(irName)})
@@ -356,6 +360,19 @@ func (l *Lowerer) lowerFunction(fn *ast.FnDecl) {
 				Op:   IRStore,
 				Dst:  l.slotMem(slot),
 				Src1: VReg(tmpReg),
+			})
+		}
+	}
+
+	// Heap-backed globals are constructed once at program entry. Emitters set
+	// up the allocator and GC before these first IR instructions in main.
+	if fn.Name == l.module.EntryFunc {
+		for _, g := range l.globalInits {
+			value := l.lowerExprForType(g.Value, typeExprName(g.Type))
+			l.emit(IRInstr{
+				Op:   IRStoreGlobal,
+				Dst:  LabelOp(l.globals[g.Name]),
+				Src1: value,
 			})
 		}
 	}
@@ -422,8 +439,7 @@ func (l *Lowerer) lowerLetStmt(s *ast.LetStmt) {
 	if s.Type != nil {
 		l.varTypes[s.Name] = s.Type.Name
 	}
-	valOp := l.lowerExpr(s.Value)
-	valOp = l.coerceAssignedValue(s.Type, valOp)
+	valOp := l.lowerExprForType(s.Value, typeExprName(s.Type))
 
 	l.emit(IRInstr{
 		Op:   IRStore,
@@ -433,18 +449,38 @@ func (l *Lowerer) lowerLetStmt(s *ast.LetStmt) {
 	_ = slot
 }
 
-func (l *Lowerer) coerceAssignedValue(targetType *ast.TypeExpr, valOp Operand) Operand {
+func (l *Lowerer) coerceValueToType(targetType string, valOp Operand) Operand {
 	// str locals/globals store pointers. If the assigned value is a raw byte
 	// (for example from str indexing), convert it into a 1-char string first.
-	if targetType != nil && targetType.Name == "str" && !l.operandIsStr(valOp) && valOp.Kind != OpNone {
+	if targetType == "str" && !l.operandIsStr(valOp) && valOp.Kind != OpNone {
 		return l.charToStr(valOp)
 	}
 	return valOp
 }
 
+func typeExprName(t *ast.TypeExpr) string {
+	if t == nil {
+		return ""
+	}
+	return t.Name
+}
+
+// lowerExprForType carries declared type context into expression lowering.
+// This makes nested array literals recursive and converts byte-form character
+// values when an array element or other destination requires a str pointer.
+func (l *Lowerer) lowerExprForType(expr ast.Expr, targetType string) Operand {
+	if array, ok := expr.(*ast.ArrayLitExpr); ok && strings.HasPrefix(targetType, "[]") {
+		return l.lowerArrayLitExprAs(array, strings.TrimPrefix(targetType, "[]"))
+	}
+	if literal, ok := expr.(*ast.StringLitExpr); ok && targetType == "str" {
+		return l.lowerStringLitAsString(literal)
+	}
+	return l.coerceValueToType(targetType, l.lowerExpr(expr))
+}
+
 func (l *Lowerer) lowerReturnStmt(s *ast.ReturnStmt) {
 	if s.Value != nil {
-		valOp := l.lowerExpr(s.Value)
+		valOp := l.lowerExprForType(s.Value, l.currentRetType)
 		l.emit(IRInstr{Op: IRRet, Src1: valOp})
 	} else {
 		l.emit(IRInstr{Op: IRRet})
@@ -535,39 +571,41 @@ func (l *Lowerer) lowerForStmt(s *ast.ForStmt) {
 }
 
 func (l *Lowerer) lowerAssignStmt(s *ast.AssignStmt) {
-	valOp := l.lowerExpr(s.Value)
-
 	switch target := s.Target.(type) {
 	case *ast.IdentExpr:
 		// Check if it's a physical register.
 		if l.physRegs[target.Name] {
+			valOp := l.lowerExpr(s.Value)
 			l.emit(IRInstr{Op: IRMov, Dst: PReg(target.Name), Src1: valOp})
 			return
 		}
 		// Local variable?
 		slot := l.varSlot(target.Name)
 		if slot >= 0 {
-			valOp = l.coerceAssignedValue(&ast.TypeExpr{Name: l.varTypes[target.Name]}, valOp)
+			valOp := l.lowerExprForType(s.Value, l.varTypes[target.Name])
 			l.emit(IRInstr{Op: IRStore, Dst: l.slotMem(slot), Src1: valOp})
 			return
 		}
 		// Global variable?
 		if label, ok := l.globals[target.Name]; ok {
-			valOp = l.coerceAssignedValue(&ast.TypeExpr{Name: l.globalTypes[target.Name]}, valOp)
+			valOp := l.lowerExprForType(s.Value, l.globalTypes[target.Name])
 			l.emit(IRInstr{Op: IRStoreGlobal, Dst: LabelOp(label), Src1: valOp})
 			return
 		}
 	case *ast.IndexExpr:
 		// Check if target is an array or string.
-		if ident, ok := target.Object.(*ast.IdentExpr); ok && l.varIsArray(ident.Name) {
+		objectType := l.exprType(target.Object)
+		if strings.HasPrefix(objectType, "[]") {
 			// arr[idx] = val → IRArraySet
 			baseOp := l.lowerExpr(target.Object)
 			idxOp := l.lowerExpr(target.Index)
+			valOp := l.lowerExprForType(s.Value, strings.TrimPrefix(objectType, "[]"))
 			l.emit(IRInstr{Op: IRArraySet, Dst: baseOp, Src1: idxOp, Src2: valOp})
 		} else {
 			// str[idx] = val → compute base+idx, store a single byte.
 			baseOp := l.lowerExpr(target.Object)
 			idxOp := l.lowerExpr(target.Index)
+			valOp := l.lowerExpr(s.Value)
 			addrReg := l.freshVReg()
 			l.emit(IRInstr{Op: IRAdd, Dst: VReg(addrReg), Src1: baseOp, Src2: idxOp})
 			l.emit(IRInstr{Op: IRStoreByte, Dst: VReg(addrReg), Src1: valOp})
@@ -652,12 +690,7 @@ func (l *Lowerer) lowerStringLit(e *ast.StringLitExpr) Operand {
 	// Strip quotes and handle escapes.
 	lexeme := e.Value
 	isSingleQuoted := len(lexeme) >= 2 && lexeme[0] == '\''
-
-	raw := lexeme
-	if len(raw) >= 2 && (raw[0] == '"' || raw[0] == '\'') {
-		raw = raw[1 : len(raw)-1]
-	}
-	raw = unescapeString(raw)
+	raw := stringLiteralValue(lexeme)
 
 	// Only single-quoted literals that decode to a single byte are treated as
 	// immediate byte values (used for comparisons with str_index results).
@@ -666,8 +699,19 @@ func (l *Lowerer) lowerStringLit(e *ast.StringLitExpr) Operand {
 		return Imm(int64(raw[0]))
 	}
 
-	idx := l.module.AddString(raw)
-	return StrRef(idx)
+	return l.lowerStringLitAsString(e)
+}
+
+func (l *Lowerer) lowerStringLitAsString(e *ast.StringLitExpr) Operand {
+	return StrRef(l.module.AddString(stringLiteralValue(e.Value)))
+}
+
+func stringLiteralValue(lexeme string) string {
+	raw := lexeme
+	if len(raw) >= 2 && (raw[0] == '"' || raw[0] == '\'') {
+		raw = raw[1 : len(raw)-1]
+	}
+	return unescapeString(raw)
 }
 
 func (l *Lowerer) lowerIdentExpr(e *ast.IdentExpr) Operand {
@@ -760,7 +804,47 @@ func (l *Lowerer) varIsFloat(name string) bool {
 // varIsArray reports whether a variable is an array type.
 func (l *Lowerer) varIsArray(name string) bool {
 	t := l.varTypes[name]
+	if t == "" {
+		t = l.globalTypes[name]
+	}
 	return len(t) > 2 && t[:2] == "[]"
+}
+
+// exprType returns the declared/static type needed to distinguish array
+// indexing from string byte indexing, including globals and nested arrays.
+func (l *Lowerer) exprType(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.IdentExpr:
+		if t := l.varTypes[e.Name]; t != "" {
+			return t
+		}
+		return l.globalTypes[e.Name]
+	case *ast.StringLitExpr:
+		return "str"
+	case *ast.IndexExpr:
+		objectType := l.exprType(e.Object)
+		if strings.HasPrefix(objectType, "[]") {
+			return strings.TrimPrefix(objectType, "[]")
+		}
+		if objectType == "str" {
+			return "str"
+		}
+	case *ast.GroupExpr:
+		return l.exprType(e.Expression)
+	case *ast.CallExpr:
+		name := e.ResolvedCallee
+		if name == "" {
+			if ident, ok := e.Callee.(*ast.IdentExpr); ok {
+				name = ident.Name
+			}
+		}
+		return l.funcRetTypes[name]
+	case *ast.ArrayLitExpr:
+		if len(e.Elems) > 0 {
+			return "[]" + l.exprType(e.Elems[0])
+		}
+	}
+	return ""
 }
 
 // operandIsUnsigned reports whether an operand holds an unsigned integer value.
@@ -1016,10 +1100,11 @@ func (l *Lowerer) lowerCallExpr(e *ast.CallExpr) Operand {
 	var argOps []Operand
 	paramTypes := l.funcParamTypes[resolvedName]
 	for i, arg := range e.Args {
-		argOp := l.lowerExpr(arg)
+		argType := ""
 		if i < len(paramTypes) {
-			argOp = l.coerceAssignedValue(&ast.TypeExpr{Name: paramTypes[i]}, argOp)
+			argType = paramTypes[i]
 		}
+		argOp := l.lowerExprForType(arg, argType)
 		argOps = append(argOps, argOp)
 	}
 
@@ -1045,15 +1130,16 @@ func (l *Lowerer) lowerCallExpr(e *ast.CallExpr) Operand {
 
 func (l *Lowerer) lowerIndexExpr(e *ast.IndexExpr) Operand {
 	// Determine if the object is an array or string.
-	if ident, ok := e.Object.(*ast.IdentExpr); ok && l.varIsArray(ident.Name) {
+	objectType := l.exprType(e.Object)
+	if strings.HasPrefix(objectType, "[]") {
 		// Array indexing: arr[i] → IRArrayGet
 		objOp := l.lowerExpr(e.Object)
 		idxOp := l.lowerExpr(e.Index)
 		dst := l.freshVReg()
 		l.emit(IRInstr{Op: IRArrayGet, Dst: VReg(dst), Src1: objOp, Src2: idxOp})
-		// Bug 5 fix: if element type is str, mark result vreg as string.
-		elemType := l.varTypes[ident.Name]
-		if len(elemType) > 2 && elemType[:2] == "[]" && elemType[2:] == "str" {
+		// Preserve string pointer metadata for []str indexing results.
+		elemType := strings.TrimPrefix(objectType, "[]")
+		if elemType == "str" {
 			l.vregIsStr[dst] = true
 		}
 		return VReg(dst)
@@ -1080,6 +1166,10 @@ func (l *Lowerer) lowerAddressOfExpr(e *ast.AddressOfExpr) Operand {
 }
 
 func (l *Lowerer) lowerArrayLitExpr(e *ast.ArrayLitExpr) Operand {
+	return l.lowerArrayLitExprAs(e, "")
+}
+
+func (l *Lowerer) lowerArrayLitExprAs(e *ast.ArrayLitExpr, elemType string) Operand {
 	// Create array with initial capacity = max(len(elems), 4).
 	cap := len(e.Elems)
 	if cap < 4 {
@@ -1089,7 +1179,7 @@ func (l *Lowerer) lowerArrayLitExpr(e *ast.ArrayLitExpr) Operand {
 	l.emit(IRInstr{Op: IRArrayNew, Dst: VReg(dst), Src1: Imm(8), Src2: Imm(int64(cap))})
 	// Append each initial element.
 	for _, elem := range e.Elems {
-		elemOp := l.lowerExpr(elem)
+		elemOp := l.lowerExprForType(elem, elemType)
 		l.emit(IRInstr{Op: IRArrayAppend, Dst: VReg(dst), Src1: elemOp})
 	}
 	return VReg(dst)
@@ -1286,7 +1376,8 @@ func (l *Lowerer) builtinAppend(e *ast.CallExpr) Operand {
 		return None()
 	}
 	arrOp := l.lowerExpr(e.Args[0])
-	valOp := l.lowerExpr(e.Args[1])
+	elemType := strings.TrimPrefix(l.exprType(e.Args[0]), "[]")
+	valOp := l.lowerExprForType(e.Args[1], elemType)
 	l.emit(IRInstr{Op: IRArrayAppend, Dst: arrOp, Src1: valOp})
 	return None()
 }
