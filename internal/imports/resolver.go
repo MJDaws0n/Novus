@@ -211,12 +211,33 @@ func (r *Resolver) resolveImport(imp *ast.ImportDecl, baseDir string, importerFi
 
 	// Check for duplicate file import.
 	if existing, ok := r.resolved[absPath]; ok {
-		// Same file already imported — that's OK, we just reuse the parsed module.
-		// But we still create a new ImportedModule entry for this import's alias/selection.
+		// Same file already imported — reuse its parsed program, but preserve the
+		// alias requested by this import. If this is the first time the module is
+		// seen under that alias, its transitive imports must also be replayed under
+		// the new alias. Otherwise a package imported transitively (for example net
+		// through http) cannot later be imported directly with its own namespace.
 		effectiveAlias := imp.Alias
 		if effectiveAlias == "" && rootAlias != "" {
 			effectiveAlias = rootAlias
 		}
+
+		aliasAlreadyResolved := false
+		for _, resolvedMod := range r.allModules {
+			if resolvedMod.FilePath == absPath && resolvedMod.Alias == effectiveAlias {
+				aliasAlreadyResolved = true
+				break
+			}
+		}
+
+		if !aliasAlreadyResolved {
+			importDir := filepath.Dir(absPath)
+			r.importStack = append(r.importStack, absPath)
+			for _, subImp := range existing.Program.Imports {
+				r.resolveImport(subImp, importDir, absPath, effectiveAlias)
+			}
+			r.importStack = r.importStack[:len(r.importStack)-1]
+		}
+
 		mod := &ImportedModule{
 			Path:      imp.Path,
 			FilePath:  absPath,
@@ -428,9 +449,9 @@ func (r *Resolver) GetModules() []*ImportedModule {
 // way that would create a true ambiguity.
 //
 // Allowed:
-//   • Same name + same signature from different files — duplicate import
+//   - Same name + same signature from different files — duplicate import
 //     (e.g. the same library transitively imported via two paths).
-//   • Same name + different signatures from any file(s) — function
+//   - Same name + different signatures from any file(s) — function
 //     overloading. The semantic analyser dispatches by argument types.
 //
 // Disallowed (and surfaced as a real error elsewhere): same name + same

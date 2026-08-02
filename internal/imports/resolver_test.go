@@ -417,6 +417,78 @@ func TestDeduplicateDiamondImports_WithGlobals(t *testing.T) {
 	}
 }
 
+func TestDuplicateTransitiveImportReplaysDependenciesUnderNewAlias(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.MkdirAll(dir+"/lib/http", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir+"/lib/net/platforms", 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(dir+"/lib/net/platforms/linux.nov", []byte(`module net_linux;
+fn net_open() -> i32 { return 1; }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+"/lib/net/main.nov", []byte(`module net_main;
+import platforms/linux;
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+"/lib/http/main.nov", []byte(`module http_main;
+import ../net;
+fn http_open() -> i32 { return net_open(); }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rootFile := dir + "/main.nov"
+	if err := os.WriteFile(rootFile, []byte(`module main;
+import lib/http http;
+import lib/net net;
+fn main() -> i32 { return net.net_open() + http.http_open(); }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	content, err := os.ReadFile(rootFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens, lexErrs := lexer.Lex(string(content))
+	if len(lexErrs) > 0 {
+		t.Fatalf("lex errors: %v", lexErrs)
+	}
+	prog, parseErrs := parser.Parse(tokens)
+	if len(parseErrs) > 0 {
+		t.Fatalf("parse errors: %v", parseErrs)
+	}
+
+	resolver := NewResolver(rootFile)
+	_, resolveErrs := resolver.Resolve(prog, rootFile)
+	if len(resolveErrs) > 0 {
+		t.Fatalf("resolve errors: %v", resolveErrs)
+	}
+
+	aliases := map[string]bool{}
+	for _, mod := range resolver.GetModules() {
+		for _, fn := range mod.Functions {
+			if fn.Name == "net_open" {
+				aliases[mod.Alias] = true
+			}
+		}
+	}
+
+	if !aliases["http"] {
+		t.Error("expected transitive net_open to be available under the http alias")
+	}
+	if !aliases["net"] {
+		t.Error("expected directly re-imported net_open to be available under the net alias")
+	}
+}
+
 func TestMaxImportDepthGuard(t *testing.T) {
 	// The maxImportDepth constant should be defined and reasonable.
 	if maxImportDepth < 16 {
