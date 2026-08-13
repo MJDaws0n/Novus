@@ -926,6 +926,109 @@ func TestEmitARM64_MacOSPageDirectives(t *testing.T) {
 	}
 }
 
+func TestEmitPhysicalRegisterMovesDoNotClobberPreparedRegisters(t *testing.T) {
+	for _, op := range []IROp{IRMov, IRSetReg} {
+		opName := op.String()
+
+		t.Run("x86_64_GAS_"+opName, func(t *testing.T) {
+			for _, targetName := range []string{"linux", "darwin"} {
+				t.Run(targetName, func(t *testing.T) {
+					target, err := ResolveTarget(targetName, "amd64")
+					if err != nil {
+						t.Fatal(err)
+					}
+					mod := &IRModule{EntryFunc: "probe", Functions: []*IRFunc{{
+						Name: "probe",
+						Instrs: []IRInstr{
+							{Op: op, Dst: PReg("r10"), Src1: VReg(0)},
+							{Op: op, Dst: PReg("r8"), Src1: VReg(1)},
+							{Op: IRRet, Src1: Imm(0)},
+						},
+					}}}
+					asm := EmitX86_64(mod, target)
+					if !strings.Contains(asm, "movq -8(%rbp), %r10") {
+						t.Fatalf("first physical-register move was not direct:\n%s", asm)
+					}
+					if !strings.Contains(asm, "movq -16(%rbp), %r8") {
+						t.Fatalf("second physical-register move was not direct:\n%s", asm)
+					}
+					if strings.Contains(asm, "movq -16(%rbp), %r10") {
+						t.Fatalf("second move clobbered the prepared r10 value:\n%s", asm)
+					}
+				})
+			}
+		})
+
+		t.Run("x86_64_NASM_"+opName, func(t *testing.T) {
+			target := windowsAMD64Target()
+			mod := &IRModule{EntryFunc: "probe", Functions: []*IRFunc{{
+				Name: "probe",
+				Instrs: []IRInstr{
+					{Op: op, Dst: PReg("r10"), Src1: VReg(0)},
+					{Op: op, Dst: PReg("r8"), Src1: VReg(1)},
+					{Op: IRRet, Src1: Imm(0)},
+				},
+			}}}
+			asm := EmitX86_64(mod, target)
+			if !strings.Contains(asm, "mov r10, qword [rbp-8]") {
+				t.Fatalf("first physical-register move was not direct:\n%s", asm)
+			}
+			if !strings.Contains(asm, "mov r8, qword [rbp-16]") {
+				t.Fatalf("second physical-register move was not direct:\n%s", asm)
+			}
+			if strings.Contains(asm, "mov r10, qword [rbp-16]") {
+				t.Fatalf("second move clobbered the prepared r10 value:\n%s", asm)
+			}
+		})
+
+		t.Run("ARM64_"+opName, func(t *testing.T) {
+			for _, targetName := range []string{"linux", "darwin"} {
+				t.Run(targetName, func(t *testing.T) {
+					target, err := ResolveTarget(targetName, "arm64")
+					if err != nil {
+						t.Fatal(err)
+					}
+					mod := &IRModule{EntryFunc: "probe", Functions: []*IRFunc{{
+						Name: "probe",
+						Instrs: []IRInstr{
+							{Op: op, Dst: PReg("x11"), Src1: VReg(0)},
+							{Op: op, Dst: PReg("x8"), Src1: VReg(1)},
+							{Op: IRRet, Src1: Imm(0)},
+						},
+					}}}
+					asm := EmitARM64(mod, target)
+					if !strings.Contains(asm, "ldur x11, [x29, #-8]") {
+						t.Fatalf("first physical-register move was not direct:\n%s", asm)
+					}
+					if !strings.Contains(asm, "ldur x8, [x29, #-16]") {
+						t.Fatalf("second physical-register move was not direct:\n%s", asm)
+					}
+					if strings.Contains(asm, "ldur x11, [x29, #-16]") {
+						t.Fatalf("second move clobbered the prepared x11 value:\n%s", asm)
+					}
+				})
+			}
+		})
+
+		t.Run("x86_32_"+opName, func(t *testing.T) {
+			target := linuxX86Target()
+			mod := &IRModule{EntryFunc: "probe", Functions: []*IRFunc{{
+				Name: "probe",
+				Instrs: []IRInstr{
+					{Op: op, Dst: PReg("ecx"), Src1: VReg(0)},
+					{Op: op, Dst: PReg("edx"), Src1: VReg(1)},
+					{Op: IRRet, Src1: Imm(0)},
+				},
+			}}}
+			asm := EmitX86(mod, target)
+			if !strings.Contains(asm, "movl -4(%ebp), %ecx") ||
+				!strings.Contains(asm, "movl -8(%ebp), %edx") {
+				t.Fatalf("32-bit physical-register moves were not direct:\n%s", asm)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Integration: Generate (full pipeline, asm-only)
 // ---------------------------------------------------------------------------
@@ -3490,56 +3593,56 @@ return 6;
 }`
 
 func TestEmitX86_64GAS_FloatOps(t *testing.T) {
-prog := mustParse(t, floatSrc)
-target := linuxAMD64Target()
-mod := Lower(prog, target)
-asm := EmitX86_64(mod, target)
+	prog := mustParse(t, floatSrc)
+	target := linuxAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
 
-for _, want := range []string{"addsd", "subsd", "mulsd", "divsd", "ucomisd", "cvttsd2si"} {
-if !strings.Contains(asm, want) {
-t.Errorf("expected %q in x86-64 GAS output for float source", want)
-}
-}
+	for _, want := range []string{"addsd", "subsd", "mulsd", "divsd", "ucomisd", "cvttsd2si"} {
+		if !strings.Contains(asm, want) {
+			t.Errorf("expected %q in x86-64 GAS output for float source", want)
+		}
+	}
 }
 
 func TestEmitX86_64NASM_FloatOps(t *testing.T) {
-prog := mustParse(t, floatSrc)
-target := windowsAMD64Target()
-mod := Lower(prog, target)
-asm := EmitX86_64(mod, target)
+	prog := mustParse(t, floatSrc)
+	target := windowsAMD64Target()
+	mod := Lower(prog, target)
+	asm := EmitX86_64(mod, target)
 
-for _, want := range []string{"addsd", "subsd", "mulsd", "divsd", "ucomisd", "cvttsd2si"} {
-if !strings.Contains(asm, want) {
-t.Errorf("expected %q in x86-64 NASM output for float source", want)
-}
-}
+	for _, want := range []string{"addsd", "subsd", "mulsd", "divsd", "ucomisd", "cvttsd2si"} {
+		if !strings.Contains(asm, want) {
+			t.Errorf("expected %q in x86-64 NASM output for float source", want)
+		}
+	}
 }
 
 func TestEmitARM64_FloatOps(t *testing.T) {
-prog := mustParse(t, floatSrc)
-target := darwinARM64Target()
-mod := Lower(prog, target)
-asm := EmitARM64(mod, target)
+	prog := mustParse(t, floatSrc)
+	target := darwinARM64Target()
+	mod := Lower(prog, target)
+	asm := EmitARM64(mod, target)
 
-for _, want := range []string{"fadd", "fsub", "fmul", "fdiv", "fcmp"} {
-if !strings.Contains(asm, want) {
-t.Errorf("expected %q in ARM64 output for float source", want)
-}
-}
+	for _, want := range []string{"fadd", "fsub", "fmul", "fdiv", "fcmp"} {
+		if !strings.Contains(asm, want) {
+			t.Errorf("expected %q in ARM64 output for float source", want)
+		}
+	}
 }
 
 func TestFindFloatOpRejectsX86_32(t *testing.T) {
-prog := mustParse(t, floatSrc)
-target := linuxX86Target()
-mod := Lower(prog, target)
+	prog := mustParse(t, floatSrc)
+	target := linuxX86Target()
+	mod := Lower(prog, target)
 
-if op := findFloatOp(mod); op == "" {
-t.Error("expected findFloatOp to detect float opcodes for x86-32 rejection")
-}
+	if op := findFloatOp(mod); op == "" {
+		t.Error("expected findFloatOp to detect float opcodes for x86-32 rejection")
+	}
 
-intProg := mustParse(t, `module test; fn main() -> i32 { let x: i32 = 1; return x; }`)
-intMod := Lower(intProg, target)
-if op := findFloatOp(intMod); op != "" {
-t.Errorf("expected no float ops in integer-only program, got %q", op)
-}
+	intProg := mustParse(t, `module test; fn main() -> i32 { let x: i32 = 1; return x; }`)
+	intMod := Lower(intProg, target)
+	if op := findFloatOp(intMod); op != "" {
+		t.Errorf("expected no float ops in integer-only program, got %q", op)
+	}
 }

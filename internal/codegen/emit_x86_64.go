@@ -341,6 +341,39 @@ func (e *x86_64Emitter) gasStoreToOperand(fn *IRFunc, dst Operand, reg string) {
 	}
 }
 
+// emitGASMove writes physical-register destinations directly. Raw assembly
+// code relies on values already placed in syscall registers surviving later
+// mov() calls. Loading every source through %r10 used to turn sequences such
+// as mov(r10, optionPtr); mov(r8, 4) into r10=4 immediately before syscall.
+func (e *x86_64Emitter) emitGASMove(fn *IRFunc, dst, src Operand) {
+	if dst.Kind != OpPhysReg {
+		loaded := e.gasLoadToReg(fn, src, "%r10")
+		e.gasStoreToOperand(fn, dst, loaded)
+		return
+	}
+
+	w := e.b
+	dstReg := fmt.Sprintf("%%%s", promoteReg(dst.PhysReg))
+	switch src.Kind {
+	case OpPhysReg:
+		srcReg := fmt.Sprintf("%%%s", promoteReg(src.PhysReg))
+		if srcReg != dstReg {
+			w.WriteString(fmt.Sprintf("    movq %s, %s\n", srcReg, dstReg))
+		}
+	case OpImmediate:
+		w.WriteString(fmt.Sprintf("    movq $%d, %s\n", src.Imm, dstReg))
+	case OpVirtReg:
+		w.WriteString(fmt.Sprintf("    movq %d(%%rbp), %s\n", e.vregOffset(fn, src.Reg), dstReg))
+	case OpStringRef:
+		sym := e.target.Sym(e.mod.Strings[src.Imm].Label)
+		w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %s\n", sym, dstReg))
+	case OpMemory:
+		w.WriteString(fmt.Sprintf("    movq %d(%%%s), %s\n", src.MemOffset, promoteReg(src.MemBase), dstReg))
+	case OpLabel:
+		w.WriteString(fmt.Sprintf("    movq %s, %s\n", src.Label, dstReg))
+	}
+}
+
 // ---------------------------------------------------------------------------
 // GAS instruction emission
 // ---------------------------------------------------------------------------
@@ -360,15 +393,7 @@ func (e *x86_64Emitter) emitGASInstr(fn *IRFunc, instr IRInstr) {
 		}
 
 	case IRMov:
-		src := e.gasLoadToReg(fn, instr.Src1, "%r10")
-		if instr.Dst.Kind == OpPhysReg {
-			promoted := fmt.Sprintf("%%%s", promoteReg(instr.Dst.PhysReg))
-			if src != promoted {
-				w.WriteString(fmt.Sprintf("    movq %s, %s\n", src, promoted))
-			}
-		} else {
-			e.gasStoreToOperand(fn, instr.Dst, src)
-		}
+		e.emitGASMove(fn, instr.Dst, instr.Src1)
 
 	case IRLea:
 		// lea loads an address into a register.
@@ -549,8 +574,7 @@ func (e *x86_64Emitter) emitGASInstr(fn *IRFunc, instr IRInstr) {
 		w.WriteString("    nop\n")
 
 	case IRSetReg:
-		src := e.gasLoadToReg(fn, instr.Src1, "%r10")
-		e.gasStoreToOperand(fn, instr.Dst, src)
+		e.emitGASMove(fn, instr.Dst, instr.Src1)
 
 	case IRGetReg:
 		src := e.gasLoadToReg(fn, instr.Src1, "%r10")
@@ -973,17 +997,17 @@ func (e *x86_64Emitter) emitGASStrConcat(fn *IRFunc, instr IRInstr) {
 	w.WriteString(fmt.Sprintf("%s:\n", len2Done))
 
 	// Allocate len1 + len2 + 1 via GC allocator.
-	w.WriteString("    popq %rcx\n") // restore len1
-	w.WriteString("    pushq %r10\n") // save s1
-	w.WriteString("    pushq %r11\n") // save s2
-	w.WriteString("    pushq %rcx\n") // save len1
-	w.WriteString("    pushq %rdx\n") // save len2
+	w.WriteString("    popq %rcx\n")               // restore len1
+	w.WriteString("    pushq %r10\n")              // save s1
+	w.WriteString("    pushq %r11\n")              // save s2
+	w.WriteString("    pushq %rcx\n")              // save len1
+	w.WriteString("    pushq %rdx\n")              // save len2
 	w.WriteString("    leaq 1(%rcx,%rdx), %rdi\n") // rdi = len1+len2+1
 	w.WriteString(fmt.Sprintf("    call %s\n", gcAllocSym))
-	w.WriteString("    popq %rdx\n")  // restore len2
-	w.WriteString("    popq %rcx\n")  // restore len1
-	w.WriteString("    popq %r11\n")  // restore s2
-	w.WriteString("    popq %r10\n")  // restore s1
+	w.WriteString("    popq %rdx\n") // restore len2
+	w.WriteString("    popq %rcx\n") // restore len1
+	w.WriteString("    popq %r11\n") // restore s2
+	w.WriteString("    popq %r10\n") // restore s1
 	// rax = allocated buffer.
 	w.WriteString("    movq %rax, %rdi\n") // rdi = write cursor
 
@@ -1208,17 +1232,17 @@ func (e *x86_64Emitter) emitNASMFunction(fn *IRFunc) {
 	// Call __getmainargs from msvcrt.dll to populate them.
 	if fn.Name == "main" && fn.ParamCount >= 2 && e.target.OS == OS_Windows {
 		w.WriteString("    ; --- Windows argc/argv setup via __getmainargs ---\n")
-		w.WriteString("    sub rsp, 48\n")                                     // shadow space (32) + 5th arg (8) + align (8)
-		w.WriteString("    lea rcx, [rel _novus_win_argc]\n")                  // &argc
-		w.WriteString("    lea rdx, [rel _novus_win_argv]\n")                  // &argv
-		w.WriteString("    lea r8, [rel _novus_win_envp]\n")                   // &envp
-		w.WriteString("    xor r9, r9\n")                                      // expand_wildcards = 0
-		w.WriteString("    lea rax, [rel _novus_win_newmode]\n")               // &new_mode
-		w.WriteString("    mov qword [rsp+32], rax\n")                         // 5th arg on stack
+		w.WriteString("    sub rsp, 48\n")                       // shadow space (32) + 5th arg (8) + align (8)
+		w.WriteString("    lea rcx, [rel _novus_win_argc]\n")    // &argc
+		w.WriteString("    lea rdx, [rel _novus_win_argv]\n")    // &argv
+		w.WriteString("    lea r8, [rel _novus_win_envp]\n")     // &envp
+		w.WriteString("    xor r9, r9\n")                        // expand_wildcards = 0
+		w.WriteString("    lea rax, [rel _novus_win_newmode]\n") // &new_mode
+		w.WriteString("    mov qword [rsp+32], rax\n")           // 5th arg on stack
 		w.WriteString("    call __getmainargs\n")
 		w.WriteString("    add rsp, 48\n")
-		w.WriteString("    mov ecx, dword [rel _novus_win_argc]\n")            // argc -> rcx
-		w.WriteString("    mov rdx, qword [rel _novus_win_argv]\n")            // argv -> rdx
+		w.WriteString("    mov ecx, dword [rel _novus_win_argc]\n") // argc -> rcx
+		w.WriteString("    mov rdx, qword [rel _novus_win_argv]\n") // argv -> rdx
 		w.WriteString("    ; --- End Windows argc/argv setup ---\n")
 	}
 
@@ -1277,6 +1301,41 @@ func (e *x86_64Emitter) nasmStoreToOperand(fn *IRFunc, dst Operand, reg string) 
 	}
 }
 
+// emitNASMMove is the NASM equivalent of emitGASMove. Keep compiler scratch
+// registers out of explicit physical-register assignments so a later move
+// cannot silently overwrite a value prepared for native code or an API call.
+func (e *x86_64Emitter) emitNASMMove(fn *IRFunc, dst, src Operand) {
+	if dst.Kind != OpPhysReg {
+		loaded := e.nasmLoadToReg(fn, src, "r10")
+		e.nasmStoreToOperand(fn, dst, loaded)
+		return
+	}
+
+	w := e.b
+	dstReg := promoteReg(dst.PhysReg)
+	switch src.Kind {
+	case OpPhysReg:
+		srcReg := promoteReg(src.PhysReg)
+		if srcReg != dstReg {
+			w.WriteString(fmt.Sprintf("    mov %s, %s\n", dstReg, srcReg))
+		}
+	case OpImmediate:
+		w.WriteString(fmt.Sprintf("    mov %s, %d\n", dstReg, src.Imm))
+	case OpVirtReg:
+		w.WriteString(fmt.Sprintf("    mov %s, qword [rbp%+d]\n", dstReg, e.vregOffset(fn, src.Reg)))
+	case OpStringRef:
+		w.WriteString(fmt.Sprintf("    lea %s, [rel %s]\n", dstReg, e.mod.Strings[src.Imm].Label))
+	case OpMemory:
+		if src.MemBase != "" {
+			w.WriteString(fmt.Sprintf("    mov %s, qword [%s%+d]\n", dstReg, src.MemBase, src.MemOffset))
+		} else {
+			w.WriteString(fmt.Sprintf("    mov %s, %d\n", dstReg, src.MemOffset))
+		}
+	case OpLabel:
+		w.WriteString(fmt.Sprintf("    mov %s, %s\n", dstReg, src.Label))
+	}
+}
+
 func (e *x86_64Emitter) nasmSpillIfNeeded(fn *IRFunc, op Operand, reg string) {
 	if op.Kind == OpVirtReg {
 		off := e.vregOffset(fn, op.Reg)
@@ -1302,8 +1361,7 @@ func (e *x86_64Emitter) emitNASMInstr(fn *IRFunc, instr IRInstr) {
 		}
 
 	case IRMov:
-		src := e.nasmLoadToReg(fn, instr.Src1, "r10")
-		e.nasmStoreToOperand(fn, instr.Dst, src)
+		e.emitNASMMove(fn, instr.Dst, instr.Src1)
 
 	case IRLea:
 		scratch := "r10"
@@ -1511,8 +1569,7 @@ func (e *x86_64Emitter) emitNASMInstr(fn *IRFunc, instr IRInstr) {
 		w.WriteString("    nop\n")
 
 	case IRSetReg:
-		src := e.nasmLoadToReg(fn, instr.Src1, "r10")
-		e.nasmStoreToOperand(fn, instr.Dst, src)
+		e.emitNASMMove(fn, instr.Dst, instr.Src1)
 
 	case IRGetReg:
 		src := e.nasmLoadToReg(fn, instr.Src1, "r10")
@@ -1904,13 +1961,13 @@ func (e *x86_64Emitter) emitNASMStrConcat(fn *IRFunc, instr IRInstr) {
 	w.WriteString(fmt.Sprintf("%s:\n", len2Done))
 
 	// Allocate via GC allocator. On Windows, first arg is rcx.
-	w.WriteString("    pop rcx\n")   // len1
-	w.WriteString("    push r10\n")  // save s1
-	w.WriteString("    push r11\n")  // save s2
-	w.WriteString("    push rcx\n")  // save len1
-	w.WriteString("    push rdx\n")  // save len2
+	w.WriteString("    pop rcx\n")              // len1
+	w.WriteString("    push r10\n")             // save s1
+	w.WriteString("    push r11\n")             // save s2
+	w.WriteString("    push rcx\n")             // save len1
+	w.WriteString("    push rdx\n")             // save len2
 	w.WriteString("    lea rcx, [rcx+rdx+1]\n") // size = len1+len2+1
-	w.WriteString("    sub rsp, 32\n") // shadow space
+	w.WriteString("    sub rsp, 32\n")          // shadow space
 	w.WriteString("    call _novus_gc_alloc\n")
 	w.WriteString("    add rsp, 32\n")
 	w.WriteString("    pop rdx\n")
@@ -1961,10 +2018,10 @@ func (e *x86_64Emitter) emitGASArrayNew(fn *IRFunc, instr IRInstr) {
 	w.WriteString(fmt.Sprintf("    movq $%d, %%rdi\n", totalSize))
 	w.WriteString(fmt.Sprintf("    call %s\n", gcAllocSym))
 	// rax = allocated block.
-	w.WriteString("    leaq 24(%rax), %r10\n")                       // r10 = data start
-	w.WriteString("    movq %r10, (%rax)\n")                         // header[0] = data_ptr
-	w.WriteString("    movq $0, 8(%rax)\n")                          // header[8] = len = 0
-	w.WriteString(fmt.Sprintf("    movq $%d, 16(%%rax)\n", cap))    // header[16] = cap
+	w.WriteString("    leaq 24(%rax), %r10\n")                   // r10 = data start
+	w.WriteString("    movq %r10, (%rax)\n")                     // header[0] = data_ptr
+	w.WriteString("    movq $0, 8(%rax)\n")                      // header[8] = len = 0
+	w.WriteString(fmt.Sprintf("    movq $%d, 16(%%rax)\n", cap)) // header[16] = cap
 	e.gasStoreToOperand(fn, instr.Dst, "%rax")
 }
 
@@ -2028,11 +2085,11 @@ func (e *x86_64Emitter) emitGASArrayAppend(fn *IRFunc, instr IRInstr) {
 	w.WriteString(fmt.Sprintf("    call %s\n", gcAllocSym))
 	// rax = new data block.
 
-	w.WriteString("    popq %rdi\n")  // new_cap
-	w.WriteString("    popq %rcx\n")  // len
-	w.WriteString("    popq %r11\n")  // val
+	w.WriteString("    popq %rdi\n")      // new_cap
+	w.WriteString("    popq %rcx\n")      // len
+	w.WriteString("    popq %r11\n")      // val
 	w.WriteString("    movq %rax, %r8\n") // r8 = new data
-	w.WriteString("    popq %r10\n")  // arrPtr
+	w.WriteString("    popq %r10\n")      // arrPtr
 
 	// Copy old data to new data.
 	w.WriteString("    pushq %rsi\n")
@@ -2095,13 +2152,13 @@ func (e *x86_64Emitter) emitNASMArrayNew(fn *IRFunc, instr IRInstr) {
 	// Allocate header (24 bytes) + data (cap*8 bytes) via GC allocator.
 	totalSize := 24 + cap*8
 	w.WriteString(fmt.Sprintf("    mov rcx, %d\n", totalSize)) // Windows: first arg in rcx
-	w.WriteString("    sub rsp, 32\n") // shadow space
+	w.WriteString("    sub rsp, 32\n")                         // shadow space
 	w.WriteString("    call _novus_gc_alloc\n")
 	w.WriteString("    add rsp, 32\n")
 	// rax = header pointer.
-	w.WriteString("    lea r10, [rax+24]\n") // data starts after header
-	w.WriteString("    mov [rax], r10\n")    // header.data_ptr
-	w.WriteString("    mov qword [rax+8], 0\n")  // header.len = 0
+	w.WriteString("    lea r10, [rax+24]\n")                        // data starts after header
+	w.WriteString("    mov [rax], r10\n")                           // header.data_ptr
+	w.WriteString("    mov qword [rax+8], 0\n")                     // header.len = 0
 	w.WriteString(fmt.Sprintf("    mov qword [rax+16], %d\n", cap)) // header.cap
 	e.nasmStoreToOperand(fn, instr.Dst, "rax")
 }
@@ -2163,19 +2220,19 @@ func (e *x86_64Emitter) emitNASMArrayAppend(fn *IRFunc, instr IRInstr) {
 	w.WriteString("    push rdi\n") // new_cap
 
 	// Allocate new data block: new_cap * 8 via GC allocator.
-	w.WriteString("    mov rcx, rdi\n")    // rcx = new_cap (Windows first arg)
-	w.WriteString("    shl rcx, 3\n")      // rcx = new_cap * 8
-	w.WriteString("    sub rsp, 32\n")     // shadow space
+	w.WriteString("    mov rcx, rdi\n") // rcx = new_cap (Windows first arg)
+	w.WriteString("    shl rcx, 3\n")   // rcx = new_cap * 8
+	w.WriteString("    sub rsp, 32\n")  // shadow space
 	w.WriteString("    call _novus_gc_alloc\n")
 	w.WriteString("    add rsp, 32\n")
 	// rax = new data block.
 
 	// Restore saved values.
-	w.WriteString("    pop rdi\n")  // new_cap
-	w.WriteString("    pop rcx\n")  // len
-	w.WriteString("    pop r11\n")  // val
+	w.WriteString("    pop rdi\n")     // new_cap
+	w.WriteString("    pop rcx\n")     // len
+	w.WriteString("    pop r11\n")     // val
 	w.WriteString("    mov r8, rax\n") // r8 = new data
-	w.WriteString("    pop r10\n")  // arrPtr
+	w.WriteString("    pop r10\n")     // arrPtr
 
 	// Copy old data to new data.
 	w.WriteString("    push rsi\n")
@@ -2199,11 +2256,11 @@ func (e *x86_64Emitter) emitNASMArrayAppend(fn *IRFunc, instr IRInstr) {
 
 	// --- NO GROW ---
 	w.WriteString(fmt.Sprintf("%s:\n", noGrowLabel))
-	w.WriteString("    mov rdi, [r10]\n")        // data_ptr
-	w.WriteString("    mov rcx, [r10+8]\n")      // len (reload)
-	w.WriteString("    mov [rdi+rcx*8], r11\n")  // data[len] = val
+	w.WriteString("    mov rdi, [r10]\n")       // data_ptr
+	w.WriteString("    mov rcx, [r10+8]\n")     // len (reload)
+	w.WriteString("    mov [rdi+rcx*8], r11\n") // data[len] = val
 	w.WriteString("    inc rcx\n")
-	w.WriteString("    mov [r10+8], rcx\n")      // len++
+	w.WriteString("    mov [r10+8], rcx\n") // len++
 	w.WriteString("    pop rcx\n")
 	w.WriteString("    pop rdi\n")
 }
@@ -2317,9 +2374,9 @@ func (e *x86_64Emitter) emitNASMGCRuntime() {
 	// table[count] = {ptr, size, 0}
 	w.WriteString("    lea rax, [rel _novus_gc_table]\n")
 	w.WriteString("    imul r8, rbx, 24\n")
-	w.WriteString("    add rax, r8\n")       // rax = &table[count]
-	w.WriteString("    mov [rax], rcx\n")    // ptr
-	w.WriteString("    mov [rax+8], rdx\n")  // size
+	w.WriteString("    add rax, r8\n")           // rax = &table[count]
+	w.WriteString("    mov [rax], rcx\n")        // ptr
+	w.WriteString("    mov [rax+8], rdx\n")      // size
 	w.WriteString("    mov qword [rax+16], 0\n") // mark = 0
 	// count++
 	w.WriteString("    inc rbx\n")
@@ -2371,11 +2428,11 @@ func (e *x86_64Emitter) emitNASMGCRuntime() {
 	w.WriteString("    cmp rbx, rcx\n")
 	w.WriteString("    jge .gcc_next_word\n")
 	w.WriteString("    imul rax, rbx, 24\n")
-	w.WriteString("    mov r15, [rsi+rax]\n")   // entry.ptr
+	w.WriteString("    mov r15, [rsi+rax]\n") // entry.ptr
 	w.WriteString("    cmp r14, r15\n")
 	w.WriteString("    jb .gcc_next_entry\n")
 	w.WriteString("    mov rdi, [rsi+rax+8]\n") // entry.size
-	w.WriteString("    add rdi, r15\n")          // entry.ptr + entry.size
+	w.WriteString("    add rdi, r15\n")         // entry.ptr + entry.size
 	w.WriteString("    cmp r14, rdi\n")
 	w.WriteString("    jae .gcc_next_entry\n")
 	// Mark it.
@@ -2417,8 +2474,8 @@ func (e *x86_64Emitter) emitNASMGCRuntime() {
 
 	// Transitive marking — scan contents of marked allocations.
 	w.WriteString(".gcc_trans:\n")
-	w.WriteString("    xor rbx, rbx\n")          // i = 0
-	w.WriteString("    xor rdi, rdi\n")           // changed = 0
+	w.WriteString("    xor rbx, rbx\n") // i = 0
+	w.WriteString("    xor rdi, rdi\n") // changed = 0
 	w.WriteString(".gcc_trans_loop:\n")
 	w.WriteString("    lea rsi, [rel _novus_gc_table]\n")
 	w.WriteString("    lea rax, [rel _novus_gc_count]\n")
@@ -2428,19 +2485,19 @@ func (e *x86_64Emitter) emitNASMGCRuntime() {
 	w.WriteString("    imul rax, rbx, 24\n")
 	w.WriteString("    cmp qword [rsi+rax+16], 0\n") // marked?
 	w.WriteString("    je .gcc_trans_next\n")
-	w.WriteString("    mov r8, [rsi+rax]\n")       // ptr
-	w.WriteString("    mov r9, [rsi+rax+8]\n")     // size
-	w.WriteString("    xor r10, r10\n")            // offset = 0
+	w.WriteString("    mov r8, [rsi+rax]\n")   // ptr
+	w.WriteString("    mov r9, [rsi+rax+8]\n") // size
+	w.WriteString("    xor r10, r10\n")        // offset = 0
 	w.WriteString(".gcc_trans_scan:\n")
 	w.WriteString("    lea r11, [r10+8]\n")
 	w.WriteString("    cmp r11, r9\n")
 	w.WriteString("    jg .gcc_trans_next\n")
-	w.WriteString("    mov r14, [r8+r10]\n")        // potential interior ptr
+	w.WriteString("    mov r14, [r8+r10]\n") // potential interior ptr
 	w.WriteString("    push rbx\n")
 	w.WriteString("    push r10\n")
 	w.WriteString("    push r9\n")
 	w.WriteString("    push r8\n")
-	w.WriteString("    xor rbx, rbx\n")             // j = 0
+	w.WriteString("    xor rbx, rbx\n") // j = 0
 	w.WriteString(".gcc_trans_match:\n")
 	w.WriteString("    lea rsi, [rel _novus_gc_table]\n")
 	w.WriteString("    lea rax, [rel _novus_gc_count]\n")
@@ -2450,15 +2507,15 @@ func (e *x86_64Emitter) emitNASMGCRuntime() {
 	w.WriteString("    imul rax, rbx, 24\n")
 	w.WriteString("    cmp qword [rsi+rax+16], 0\n") // already marked?
 	w.WriteString("    jne .gcc_trans_match_next\n")
-	w.WriteString("    mov r15, [rsi+rax]\n")        // entry.ptr
+	w.WriteString("    mov r15, [rsi+rax]\n") // entry.ptr
 	w.WriteString("    cmp r14, r15\n")
 	w.WriteString("    jb .gcc_trans_match_next\n")
-	w.WriteString("    mov r11, [rsi+rax+8]\n")      // entry.size
+	w.WriteString("    mov r11, [rsi+rax+8]\n") // entry.size
 	w.WriteString("    add r11, r15\n")
 	w.WriteString("    cmp r14, r11\n")
 	w.WriteString("    jae .gcc_trans_match_next\n")
 	w.WriteString("    mov qword [rsi+rax+16], 1\n") // mark
-	w.WriteString("    mov rdi, 1\n")                 // changed = true (rdi kept across iter)
+	w.WriteString("    mov rdi, 1\n")                // changed = true (rdi kept across iter)
 	w.WriteString(".gcc_trans_match_next:\n")
 	w.WriteString("    inc rbx\n")
 	w.WriteString("    jmp .gcc_trans_match\n")
@@ -2481,8 +2538,8 @@ func (e *x86_64Emitter) emitNASMGCRuntime() {
 	w.WriteString("    lea rsi, [rel _novus_gc_table]\n")
 	w.WriteString("    lea rax, [rel _novus_gc_count]\n")
 	w.WriteString("    mov rcx, [rax]\n")
-	w.WriteString("    xor rbx, rbx\n")   // read index
-	w.WriteString("    xor rdi, rdi\n")   // write index
+	w.WriteString("    xor rbx, rbx\n") // read index
+	w.WriteString("    xor rdi, rdi\n") // write index
 	w.WriteString(".gcc_sweep_loop:\n")
 	w.WriteString("    cmp rbx, rcx\n")
 	w.WriteString("    jge .gcc_sweep_done\n")
@@ -2495,10 +2552,10 @@ func (e *x86_64Emitter) emitNASMGCRuntime() {
 	w.WriteString("    cmp r15, 16\n")
 	w.WriteString("    jl .gcc_sweep_skip\n")
 	w.WriteString("    lea rax, [rel _novus_gc_freelist]\n")
-	w.WriteString("    mov r8, [rax]\n")     // old head
-	w.WriteString("    mov [r14], r8\n")     // block.next = old head
-	w.WriteString("    mov [r14+8], r15\n")  // block.size = size
-	w.WriteString("    mov [rax], r14\n")    // freelist = block
+	w.WriteString("    mov r8, [rax]\n")    // old head
+	w.WriteString("    mov [r14], r8\n")    // block.next = old head
+	w.WriteString("    mov [r14+8], r15\n") // block.size = size
+	w.WriteString("    mov [rax], r14\n")   // freelist = block
 	w.WriteString(".gcc_sweep_skip:\n")
 	w.WriteString("    inc rbx\n")
 	w.WriteString("    jmp .gcc_sweep_loop\n")
@@ -2562,9 +2619,9 @@ func (e *x86_64Emitter) emitNASMGCRuntime() {
 	w.WriteString("    jmp .gca_fl_loop\n")
 	w.WriteString(".gca_fl_hit:\n")
 	// Unlink from free list.
-	w.WriteString("    mov rax, [rdi]\n")   // rax = block.next
-	w.WriteString("    mov [rbx], rax\n")   // prev.next = block.next
-	w.WriteString("    mov rax, rdi\n")     // return block
+	w.WriteString("    mov rax, [rdi]\n") // rax = block.next
+	w.WriteString("    mov [rbx], rax\n") // prev.next = block.next
+	w.WriteString("    mov rax, rdi\n")   // return block
 	w.WriteString("    jmp .gca_register\n")
 
 	// Free list miss — bump allocate.
@@ -2615,7 +2672,7 @@ func (e *x86_64Emitter) emitNASMGCRuntime() {
 
 	// Register allocation.
 	w.WriteString(".gca_register:\n")
-	w.WriteString("    push rax\n")   // save result
+	w.WriteString("    push rax\n")     // save result
 	w.WriteString("    mov rcx, rax\n") // ptr (Windows ABI: first arg)
 	w.WriteString("    mov rdx, rsi\n") // size (Windows ABI: second arg)
 	w.WriteString("    sub rsp, 32\n")  // shadow space
@@ -2656,11 +2713,11 @@ func (e *x86_64Emitter) emitGASGCRuntime() {
 	w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %%rdx\n", gcTable))
 	w.WriteString("    imulq $24, %rcx, %r8\n")
 	w.WriteString("    addq %r8, %rdx\n")
-	w.WriteString("    movq %rdi, (%rdx)\n")       // ptr
-	w.WriteString("    movq %rsi, 8(%rdx)\n")      // size
-	w.WriteString("    movq $0, 16(%rdx)\n")       // mark = 0
+	w.WriteString("    movq %rdi, (%rdx)\n")  // ptr
+	w.WriteString("    movq %rsi, 8(%rdx)\n") // size
+	w.WriteString("    movq $0, 16(%rdx)\n")  // mark = 0
 	w.WriteString("    incq %rcx\n")
-	w.WriteString("    movq %rcx, (%rax)\n")       // count++
+	w.WriteString("    movq %rcx, (%rax)\n") // count++
 	w.WriteString(".Lgcreg_done_gas:\n")
 	w.WriteString("    popq %rbp\n")
 	w.WriteString("    ret\n")
@@ -2712,14 +2769,14 @@ func (e *x86_64Emitter) emitGASGCRuntime() {
 	w.WriteString("    cmpq %r12, %rcx\n")
 	w.WriteString("    jge .Lgc_next_word_gas\n")
 	w.WriteString("    imulq $24, %rcx, %rax\n")
-	w.WriteString("    movq (%r13,%rax), %rsi\n")   // entry.ptr
+	w.WriteString("    movq (%r13,%rax), %rsi\n") // entry.ptr
 	w.WriteString("    cmpq %rsi, %rbx\n")
-	w.WriteString("    jb .Lgc_match_next_gas\n")   // value < ptr
-	w.WriteString("    movq 8(%r13,%rax), %rdi\n")  // entry.size
-	w.WriteString("    addq %rsi, %rdi\n")           // end = ptr+size
+	w.WriteString("    jb .Lgc_match_next_gas\n")  // value < ptr
+	w.WriteString("    movq 8(%r13,%rax), %rdi\n") // entry.size
+	w.WriteString("    addq %rsi, %rdi\n")         // end = ptr+size
 	w.WriteString("    cmpq %rdi, %rbx\n")
-	w.WriteString("    jae .Lgc_match_next_gas\n")  // value >= end
-	w.WriteString("    movq $1, 16(%r13,%rax)\n") // mark
+	w.WriteString("    jae .Lgc_match_next_gas\n") // value >= end
+	w.WriteString("    movq $1, 16(%r13,%rax)\n")  // mark
 	w.WriteString("    jmp .Lgc_next_word_gas\n")
 	w.WriteString(".Lgc_match_next_gas:\n")
 	w.WriteString("    incq %rcx\n")
@@ -2745,10 +2802,10 @@ func (e *x86_64Emitter) emitGASGCRuntime() {
 		w.WriteString("    cmpq %r12, %rcx\n")
 		w.WriteString(fmt.Sprintf("    jge %s\n", nextLabel))
 		w.WriteString("    imulq $24, %rcx, %rax\n")
-		w.WriteString("    movq (%r13,%rax), %rsi\n")   // entry.ptr
+		w.WriteString("    movq (%r13,%rax), %rsi\n") // entry.ptr
 		w.WriteString("    cmpq %rsi, %rbx\n")
 		w.WriteString(fmt.Sprintf("    jb %s\n", matchNext))
-		w.WriteString("    movq 8(%r13,%rax), %rdi\n")  // entry.size
+		w.WriteString("    movq 8(%r13,%rax), %rdi\n") // entry.size
 		w.WriteString("    addq %rsi, %rdi\n")
 		w.WriteString("    cmpq %rdi, %rbx\n")
 		w.WriteString(fmt.Sprintf("    jae %s\n", matchNext))
@@ -2762,44 +2819,44 @@ func (e *x86_64Emitter) emitGASGCRuntime() {
 
 	// Phase 2c: Transitive marking — scan contents of marked allocations.
 	w.WriteString(".Lgc_trans_gas:\n")
-	w.WriteString("    xorq %rcx, %rcx\n")       // i = 0
-	w.WriteString("    xorq %rsi, %rsi\n")        // changed = 0
+	w.WriteString("    xorq %rcx, %rcx\n") // i = 0
+	w.WriteString("    xorq %rsi, %rsi\n") // changed = 0
 	w.WriteString(".Lgc_trans_loop_gas:\n")
 	w.WriteString("    cmpq %r12, %rcx\n")
 	w.WriteString("    jge .Lgc_trans_check_gas\n")
 	w.WriteString("    imulq $24, %rcx, %rax\n")
 	w.WriteString("    cmpq $0, 16(%r13,%rax)\n") // marked?
 	w.WriteString("    je .Lgc_trans_next_gas\n")
-	w.WriteString("    movq (%r13,%rax), %r8\n")   // ptr
-	w.WriteString("    movq 8(%r13,%rax), %r9\n")  // size
-	w.WriteString("    xorq %r10, %r10\n")         // offset = 0
+	w.WriteString("    movq (%r13,%rax), %r8\n")  // ptr
+	w.WriteString("    movq 8(%r13,%rax), %r9\n") // size
+	w.WriteString("    xorq %r10, %r10\n")        // offset = 0
 	w.WriteString(".Lgc_trans_scan_gas:\n")
 	w.WriteString("    leaq 8(%r10), %r11\n")
 	w.WriteString("    cmpq %r9, %r11\n")
 	w.WriteString("    jg .Lgc_trans_next_gas\n")
-	w.WriteString("    movq (%r8,%r10), %rbx\n")   // potential ptr
-	w.WriteString("    pushq %rcx\n")               // save i
-	w.WriteString("    xorq %rcx, %rcx\n")          // j = 0
+	w.WriteString("    movq (%r8,%r10), %rbx\n") // potential ptr
+	w.WriteString("    pushq %rcx\n")            // save i
+	w.WriteString("    xorq %rcx, %rcx\n")       // j = 0
 	w.WriteString(".Lgc_trans_match_gas:\n")
 	w.WriteString("    cmpq %r12, %rcx\n")
 	w.WriteString("    jge .Lgc_trans_scan_next_gas\n")
 	w.WriteString("    imulq $24, %rcx, %rax\n")
-	w.WriteString("    cmpq $0, 16(%r13,%rax)\n")  // already marked?
+	w.WriteString("    cmpq $0, 16(%r13,%rax)\n") // already marked?
 	w.WriteString("    jne .Lgc_trans_match_next_gas\n")
-	w.WriteString("    movq (%r13,%rax), %rdi\n")   // entry.ptr
+	w.WriteString("    movq (%r13,%rax), %rdi\n") // entry.ptr
 	w.WriteString("    cmpq %rdi, %rbx\n")
 	w.WriteString("    jb .Lgc_trans_match_next_gas\n")
-	w.WriteString("    movq 8(%r13,%rax), %r11\n")  // entry.size
-	w.WriteString("    addq %rdi, %r11\n")           // end = ptr+size
+	w.WriteString("    movq 8(%r13,%rax), %r11\n") // entry.size
+	w.WriteString("    addq %rdi, %r11\n")         // end = ptr+size
 	w.WriteString("    cmpq %r11, %rbx\n")
 	w.WriteString("    jae .Lgc_trans_match_next_gas\n")
-	w.WriteString("    movq $1, 16(%r13,%rax)\n")   // mark it
-	w.WriteString("    movq $1, %rsi\n")             // changed = true
+	w.WriteString("    movq $1, 16(%r13,%rax)\n") // mark it
+	w.WriteString("    movq $1, %rsi\n")          // changed = true
 	w.WriteString(".Lgc_trans_match_next_gas:\n")
 	w.WriteString("    incq %rcx\n")
 	w.WriteString("    jmp .Lgc_trans_match_gas\n")
 	w.WriteString(".Lgc_trans_scan_next_gas:\n")
-	w.WriteString("    popq %rcx\n")                 // restore i
+	w.WriteString("    popq %rcx\n") // restore i
 	w.WriteString("    addq $8, %r10\n")
 	w.WriteString("    jmp .Lgc_trans_scan_gas\n")
 	w.WriteString(".Lgc_trans_next_gas:\n")
@@ -2822,14 +2879,14 @@ func (e *x86_64Emitter) emitGASGCRuntime() {
 	w.WriteString("    jnz .Lgc_sweep_keep_gas\n")
 
 	// Unmarked: add to free list.
-	w.WriteString("    movq (%r13,%rax), %rbx\n")    // ptr
-	w.WriteString("    movq 8(%r13,%rax), %r8\n")    // size
+	w.WriteString("    movq (%r13,%rax), %rbx\n") // ptr
+	w.WriteString("    movq 8(%r13,%rax), %r8\n") // size
 	w.WriteString("    cmpq $16, %r8\n")
 	w.WriteString("    jl .Lgc_sweep_skip_gas\n")
-	w.WriteString("    movq (%r14), %r9\n")           // old head
-	w.WriteString("    movq %r9, (%rbx)\n")           // block.next = old head
-	w.WriteString("    movq %r8, 8(%rbx)\n")          // block.size = size
-	w.WriteString("    movq %rbx, (%r14)\n")          // freelist = block
+	w.WriteString("    movq (%r14), %r9\n")  // old head
+	w.WriteString("    movq %r9, (%rbx)\n")  // block.next = old head
+	w.WriteString("    movq %r8, 8(%rbx)\n") // block.size = size
+	w.WriteString("    movq %rbx, (%r14)\n") // freelist = block
 	w.WriteString(".Lgc_sweep_skip_gas:\n")
 	w.WriteString("    incq %rcx\n")
 	w.WriteString("    jmp .Lgc_sweep_gas\n")
@@ -2840,10 +2897,10 @@ func (e *x86_64Emitter) emitGASGCRuntime() {
 	w.WriteString("    je .Lgc_sweep_keep_skip_gas\n")
 	w.WriteString("    imulq $24, %rdx, %rbx\n")
 	w.WriteString("    movq (%r13,%rax), %r8\n")
-	w.WriteString("    movq %r8, (%r13,%rbx)\n")     // copy ptr
+	w.WriteString("    movq %r8, (%r13,%rbx)\n") // copy ptr
 	w.WriteString("    movq 8(%r13,%rax), %r8\n")
-	w.WriteString("    movq %r8, 8(%r13,%rbx)\n")    // copy size
-	w.WriteString("    movq $0, 16(%r13,%rbx)\n")    // clear mark
+	w.WriteString("    movq %r8, 8(%r13,%rbx)\n") // copy size
+	w.WriteString("    movq $0, 16(%r13,%rbx)\n") // clear mark
 	w.WriteString(".Lgc_sweep_keep_skip_gas:\n")
 	w.WriteString("    incq %rdx\n")
 	w.WriteString("    incq %rcx\n")
@@ -2900,21 +2957,21 @@ func (e *x86_64Emitter) emitGASGCRuntime() {
 	w.WriteString("    jz .Lgca_bump_gas\n")
 	w.WriteString("    cmpq %r12, 8(%rax)\n")
 	w.WriteString("    jge .Lgca_fl_found_gas\n")
-	w.WriteString("    movq %rax, %rbx\n")    // prev = current
-	w.WriteString("    movq (%rax), %rax\n")  // current = next
+	w.WriteString("    movq %rax, %rbx\n")   // prev = current
+	w.WriteString("    movq (%rax), %rax\n") // current = next
 	w.WriteString("    jmp .Lgca_fl_loop_gas\n")
 
 	// Found free block.
 	w.WriteString(".Lgca_fl_found_gas:\n")
-	w.WriteString("    movq (%rax), %rcx\n")  // next
-	w.WriteString("    movq %rcx, (%rbx)\n")  // unlink
-	w.WriteString("    movq %rax, %rbx\n")    // save block ptr
+	w.WriteString("    movq (%rax), %rcx\n") // next
+	w.WriteString("    movq %rcx, (%rbx)\n") // unlink
+	w.WriteString("    movq %rax, %rbx\n")   // save block ptr
 	// Register.
 	w.WriteString("    movq %rbx, %rdi\n")
 	w.WriteString("    movq %r12, %rsi\n")
 	w.WriteString("    pushq %rbx\n")
 	w.WriteString(fmt.Sprintf("    call %s\n", gcRegSym))
-	w.WriteString("    popq %rax\n")          // return block
+	w.WriteString("    popq %rax\n") // return block
 	w.WriteString("    jmp .Lgca_ret_gas\n")
 
 	// Bump allocate.
