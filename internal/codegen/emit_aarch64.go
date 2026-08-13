@@ -295,14 +295,7 @@ func (e *arm64Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		}
 
 	case IRMov:
-		dst := e.dstReg(fn, instr.Dst, "x10")
-		if instr.Src1.Kind == OpImmediate {
-			e.loadImm(dst, instr.Src1.Imm)
-		} else {
-			src := e.loadToReg(fn, instr.Src1, "x11")
-			w.WriteString(fmt.Sprintf("    mov %s, %s\n", dst, src))
-		}
-		e.spillIfNeeded(fn, instr.Dst, dst)
+		e.emitMove(fn, instr.Dst, instr.Src1)
 
 	case IRLea:
 		dst := e.dstReg(fn, instr.Dst, "x10")
@@ -468,14 +461,7 @@ func (e *arm64Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		w.WriteString("    nop\n")
 
 	case IRSetReg:
-		dst := e.dstReg(fn, instr.Dst, "x10")
-		if instr.Src1.Kind == OpImmediate {
-			e.loadImm(dst, instr.Src1.Imm)
-		} else {
-			src := e.loadToReg(fn, instr.Src1, "x11")
-			w.WriteString(fmt.Sprintf("    mov %s, %s\n", dst, src))
-		}
-		e.spillIfNeeded(fn, instr.Dst, dst)
+		e.emitMove(fn, instr.Dst, instr.Src1)
 
 	case IRGetReg:
 		src := e.loadToReg(fn, instr.Src1, "x11")
@@ -679,7 +665,7 @@ func (e *arm64Emitter) emitFMod(fn *IRFunc, instr IRInstr) {
 	src2 := e.loadToReg(fn, instr.Src2, "x12")
 	w.WriteString(fmt.Sprintf("    fmov d1, %s\n", src1))
 	w.WriteString(fmt.Sprintf("    fmov d2, %s\n", src2))
-	w.WriteString("    fdiv d3, d1, d2\n")     // d3 = a / b
+	w.WriteString("    fdiv d3, d1, d2\n")      // d3 = a / b
 	w.WriteString("    frintz d3, d3\n")        // d3 = trunc(d3) — round toward zero
 	w.WriteString("    fmsub d0, d3, d2, d1\n") // d0 = d1 - d3*d2 = a - trunc(a/b)*b
 	dst := e.dstReg(fn, instr.Dst, "x10")
@@ -1056,8 +1042,8 @@ func (e *arm64Emitter) emitGCRuntime() {
 	w.WriteString("    add x12, x12, x14\n") // x12 = &table[count]
 
 	// Store entry: {ptr, size, mark=0}.
-	w.WriteString("    str x0, [x12, #0]\n")  // ptr
-	w.WriteString("    str x1, [x12, #8]\n")  // size
+	w.WriteString("    str x0, [x12, #0]\n")   // ptr
+	w.WriteString("    str x1, [x12, #8]\n")   // size
 	w.WriteString("    str xzr, [x12, #16]\n") // mark = 0
 
 	// Increment count.
@@ -1097,8 +1083,8 @@ func (e *arm64Emitter) emitGCRuntime() {
 	w.WriteString("    b.ge .Lgc_scan\n")
 	w.WriteString("    mov x22, #24\n")
 	w.WriteString("    mul x23, x21, x22\n")
-	w.WriteString("    add x24, x20, x23\n")       // x24 = &table[i]
-	w.WriteString("    str xzr, [x24, #16]\n")     // table[i].mark = 0
+	w.WriteString("    add x24, x20, x23\n")   // x24 = &table[i]
+	w.WriteString("    str xzr, [x24, #16]\n") // table[i].mark = 0
 	w.WriteString("    add x21, x21, #1\n")
 	w.WriteString("    b .Lgc_clear\n")
 
@@ -1108,7 +1094,7 @@ func (e *arm64Emitter) emitGCRuntime() {
 	w.WriteString(".Lgc_scan:\n")
 	w.WriteString("    mov x21, sp\n") // x21 = scan cursor (current sp)
 	e.emitLoadGlobal("x9", gcStackBot)
-	w.WriteString("    ldr x22, [x9]\n") // x22 = stack_bottom
+	w.WriteString("    ldr x22, [x9]\n")              // x22 = stack_bottom
 	w.WriteString("    cbz x22, .Lgc_scan_globals\n") // skip if not set
 
 	w.WriteString(".Lgc_scan_loop:\n")
@@ -1123,14 +1109,14 @@ func (e *arm64Emitter) emitGCRuntime() {
 	w.WriteString("    b.ge .Lgc_next_word\n")
 	w.WriteString("    mov x10, #24\n")
 	w.WriteString("    mul x11, x9, x10\n")
-	w.WriteString("    add x12, x20, x11\n")     // x12 = &table[j]
-	w.WriteString("    ldr x13, [x12, #0]\n")     // x13 = table[j].ptr
+	w.WriteString("    add x12, x20, x11\n")  // x12 = &table[j]
+	w.WriteString("    ldr x13, [x12, #0]\n") // x13 = table[j].ptr
 	w.WriteString("    cmp x23, x13\n")
-	w.WriteString("    b.lo .Lgc_match_next\n")    // value < ptr → skip
-	w.WriteString("    ldr x14, [x12, #8]\n")     // x14 = table[j].size
-	w.WriteString("    add x14, x13, x14\n")      // x14 = ptr + size
+	w.WriteString("    b.lo .Lgc_match_next\n") // value < ptr → skip
+	w.WriteString("    ldr x14, [x12, #8]\n")   // x14 = table[j].size
+	w.WriteString("    add x14, x13, x14\n")    // x14 = ptr + size
 	w.WriteString("    cmp x23, x14\n")
-	w.WriteString("    b.hs .Lgc_match_next\n")    // value >= ptr+size → skip
+	w.WriteString("    b.hs .Lgc_match_next\n") // value >= ptr+size → skip
 	// Match found — mark this entry.
 	w.WriteString("    mov x14, #1\n")
 	w.WriteString("    str x14, [x12, #16]\n") // table[j].mark = 1
@@ -1166,8 +1152,8 @@ func (e *arm64Emitter) emitGCRuntime() {
 		w.WriteString("    ldr x13, [x12, #0]\n")
 		w.WriteString("    cmp x23, x13\n")
 		w.WriteString(fmt.Sprintf("    b.lo %s\n", matchNext))
-		w.WriteString("    ldr x14, [x12, #8]\n")     // size
-		w.WriteString("    add x14, x13, x14\n")      // end = ptr + size
+		w.WriteString("    ldr x14, [x12, #8]\n") // size
+		w.WriteString("    add x14, x13, x14\n")  // end = ptr + size
 		w.WriteString("    cmp x23, x14\n")
 		w.WriteString(fmt.Sprintf("    b.hs %s\n", matchNext))
 		w.WriteString("    mov x14, #1\n")
@@ -1182,46 +1168,46 @@ func (e *arm64Emitter) emitGCRuntime() {
 	// Phase 2c: Transitive marking — scan contents of marked allocations
 	// for interior pointers (e.g., array headers contain data_ptr).
 	w.WriteString(".Lgc_transitive:\n")
-	w.WriteString("    mov x21, #0\n")       // i = 0
-	w.WriteString("    mov x9, #0\n")        // changed = 0
+	w.WriteString("    mov x21, #0\n") // i = 0
+	w.WriteString("    mov x9, #0\n")  // changed = 0
 	w.WriteString(".Lgc_trans_loop:\n")
 	w.WriteString("    cmp x21, x19\n")
 	w.WriteString("    b.ge .Lgc_trans_check\n")
 	w.WriteString("    mov x10, #24\n")
 	w.WriteString("    mul x11, x21, x10\n")
-	w.WriteString("    add x12, x20, x11\n")     // &table[i]
-	w.WriteString("    ldr x13, [x12, #16]\n")   // mark
+	w.WriteString("    add x12, x20, x11\n")        // &table[i]
+	w.WriteString("    ldr x13, [x12, #16]\n")      // mark
 	w.WriteString("    cbz x13, .Lgc_trans_next\n") // skip unmarked
 	// Scan contents of this marked allocation.
-	w.WriteString("    ldr x14, [x12, #0]\n")    // ptr
-	w.WriteString("    ldr x15, [x12, #8]\n")    // size
-	w.WriteString("    mov x16, #0\n")           // offset = 0
+	w.WriteString("    ldr x14, [x12, #0]\n") // ptr
+	w.WriteString("    ldr x15, [x12, #8]\n") // size
+	w.WriteString("    mov x16, #0\n")        // offset = 0
 	w.WriteString(".Lgc_trans_scan:\n")
 	w.WriteString("    add x17, x16, #8\n")
 	w.WriteString("    cmp x17, x15\n")
-	w.WriteString("    b.gt .Lgc_trans_next\n")   // offset+8 > size → done
-	w.WriteString("    ldr x23, [x14, x16]\n")   // potential interior pointer
+	w.WriteString("    b.gt .Lgc_trans_next\n") // offset+8 > size → done
+	w.WriteString("    ldr x23, [x14, x16]\n")  // potential interior pointer
 	// Check against all table entries.
-	w.WriteString("    mov x24, #0\n")            // j = 0
+	w.WriteString("    mov x24, #0\n") // j = 0
 	w.WriteString(".Lgc_trans_match:\n")
 	w.WriteString("    cmp x24, x19\n")
 	w.WriteString("    b.ge .Lgc_trans_scan_next\n")
 	w.WriteString("    mov x10, #24\n")
 	w.WriteString("    mul x11, x24, x10\n")
-	w.WriteString("    add x25, x20, x11\n")     // &table[j]
-	w.WriteString("    ldr x26, [x25, #16]\n")   // already marked?
+	w.WriteString("    add x25, x20, x11\n")               // &table[j]
+	w.WriteString("    ldr x26, [x25, #16]\n")             // already marked?
 	w.WriteString("    cbnz x26, .Lgc_trans_match_next\n") // skip if already marked
-	w.WriteString("    ldr x26, [x25, #0]\n")    // entry.ptr
+	w.WriteString("    ldr x26, [x25, #0]\n")              // entry.ptr
 	w.WriteString("    cmp x23, x26\n")
 	w.WriteString("    b.lo .Lgc_trans_match_next\n")
-	w.WriteString("    ldr x27, [x25, #8]\n")    // entry.size
-	w.WriteString("    add x27, x26, x27\n")     // end
+	w.WriteString("    ldr x27, [x25, #8]\n") // entry.size
+	w.WriteString("    add x27, x26, x27\n")  // end
 	w.WriteString("    cmp x23, x27\n")
 	w.WriteString("    b.hs .Lgc_trans_match_next\n")
 	// Mark it and set changed flag.
 	w.WriteString("    mov x26, #1\n")
 	w.WriteString("    str x26, [x25, #16]\n")
-	w.WriteString("    mov x9, #1\n")            // changed = true
+	w.WriteString("    mov x9, #1\n") // changed = true
 	w.WriteString(".Lgc_trans_match_next:\n")
 	w.WriteString("    add x24, x24, #1\n")
 	w.WriteString("    b .Lgc_trans_match\n")
@@ -1236,9 +1222,9 @@ func (e *arm64Emitter) emitGCRuntime() {
 	w.WriteString("    cbnz x9, .Lgc_transitive\n")
 
 	// Phase 3: Sweep — free unmarked objects, compact table.
-	w.WriteString("    mov x21, #0\n")         // i = 0 (read index)
-	w.WriteString("    mov x22, #0\n")         // write index
-	e.emitLoadGlobal("x9", gcFreelist)         // x9 = &freelist
+	w.WriteString("    mov x21, #0\n") // i = 0 (read index)
+	w.WriteString("    mov x22, #0\n") // write index
+	e.emitLoadGlobal("x9", gcFreelist) // x9 = &freelist
 
 	w.WriteString(".Lgc_sweep:\n")
 	w.WriteString("    cmp x21, x19\n")
@@ -1251,16 +1237,16 @@ func (e *arm64Emitter) emitGCRuntime() {
 	w.WriteString("    cbnz x13, .Lgc_sweep_keep\n")
 
 	// Unmarked: add to free list.
-	w.WriteString("    ldr x14, [x12, #0]\n")  // x14 = ptr
-	w.WriteString("    ldr x15, [x12, #8]\n")  // x15 = size
+	w.WriteString("    ldr x14, [x12, #0]\n") // x14 = ptr
+	w.WriteString("    ldr x15, [x12, #8]\n") // x15 = size
 	// Only add to free list if size >= 16 (min useful block).
 	w.WriteString("    cmp x15, #16\n")
 	w.WriteString("    b.lt .Lgc_sweep_skip\n")
 	// Free block layout: [next(8), size(8)].
-	w.WriteString("    ldr x16, [x9]\n")       // x16 = old freelist head
-	w.WriteString("    str x16, [x14, #0]\n")  // block.next = old head
-	w.WriteString("    str x15, [x14, #8]\n")  // block.size = size
-	w.WriteString("    str x14, [x9]\n")       // freelist = block
+	w.WriteString("    ldr x16, [x9]\n")      // x16 = old freelist head
+	w.WriteString("    str x16, [x14, #0]\n") // block.next = old head
+	w.WriteString("    str x15, [x14, #8]\n") // block.size = size
+	w.WriteString("    str x14, [x9]\n")      // freelist = block
 
 	w.WriteString(".Lgc_sweep_skip:\n")
 	w.WriteString("    add x21, x21, #1\n")
@@ -1273,11 +1259,11 @@ func (e *arm64Emitter) emitGCRuntime() {
 	// Copy entry from read[i] to write[j].
 	w.WriteString("    mov x10, #24\n")
 	w.WriteString("    mul x11, x22, x10\n")
-	w.WriteString("    add x13, x20, x11\n")  // x13 = &table[j]
+	w.WriteString("    add x13, x20, x11\n") // x13 = &table[j]
 	w.WriteString("    ldr x14, [x12, #0]\n")
 	w.WriteString("    str x14, [x13, #0]\n") // copy ptr
 	w.WriteString("    ldr x14, [x12, #8]\n")
-	w.WriteString("    str x14, [x13, #8]\n") // copy size
+	w.WriteString("    str x14, [x13, #8]\n")  // copy size
 	w.WriteString("    str xzr, [x13, #16]\n") // clear mark
 
 	w.WriteString(".Lgc_sweep_keep_skip:\n")
@@ -1337,27 +1323,27 @@ func (e *arm64Emitter) emitGCRuntime() {
 	// Try free list: find a block >= requested size.
 	w.WriteString(".Lgca_try_free:\n")
 	e.emitLoadGlobal("x9", gcFreelist)
-	w.WriteString("    mov x20, x9\n")          // x20 = &prev_ptr (starts at &freelist)
-	w.WriteString("    ldr x10, [x9]\n")         // x10 = current block
+	w.WriteString("    mov x20, x9\n")   // x20 = &prev_ptr (starts at &freelist)
+	w.WriteString("    ldr x10, [x9]\n") // x10 = current block
 	w.WriteString(".Lgca_fl_loop:\n")
-	w.WriteString("    cbz x10, .Lgca_bump\n")   // end of list → bump allocate
-	w.WriteString("    ldr x11, [x10, #8]\n")    // x11 = block.size
+	w.WriteString("    cbz x10, .Lgca_bump\n") // end of list → bump allocate
+	w.WriteString("    ldr x11, [x10, #8]\n")  // x11 = block.size
 	w.WriteString("    cmp x11, x19\n")
-	w.WriteString("    b.ge .Lgca_fl_found\n")   // block big enough
-	w.WriteString("    mov x20, x10\n")           // prev = current
-	w.WriteString("    ldr x10, [x10, #0]\n")    // current = current.next
+	w.WriteString("    b.ge .Lgca_fl_found\n") // block big enough
+	w.WriteString("    mov x20, x10\n")        // prev = current
+	w.WriteString("    ldr x10, [x10, #0]\n")  // current = current.next
 	w.WriteString("    b .Lgca_fl_loop\n")
 
 	// Found a suitable free block — unlink from list.
 	w.WriteString(".Lgca_fl_found:\n")
-	w.WriteString("    ldr x11, [x10, #0]\n")    // x11 = block.next
-	w.WriteString("    str x11, [x20]\n")         // prev.next = block.next (unlink)
-	w.WriteString("    mov x20, x10\n")           // save block ptr in callee-safe x20
+	w.WriteString("    ldr x11, [x10, #0]\n") // x11 = block.next
+	w.WriteString("    str x11, [x20]\n")     // prev.next = block.next (unlink)
+	w.WriteString("    mov x20, x10\n")       // save block ptr in callee-safe x20
 	// Register in GC table.
-	w.WriteString("    mov x0, x20\n")            // ptr
-	w.WriteString("    mov x1, x19\n")            // size
+	w.WriteString("    mov x0, x20\n") // ptr
+	w.WriteString("    mov x1, x19\n") // size
 	w.WriteString(fmt.Sprintf("    bl %s\n", gcRegSym))
-	w.WriteString("    mov x0, x20\n")            // return the block
+	w.WriteString("    mov x0, x20\n") // return the block
 	w.WriteString("    b .Lgca_ret\n")
 
 	// Bump allocate.
@@ -1365,10 +1351,10 @@ func (e *arm64Emitter) emitGCRuntime() {
 	w.WriteString("    mov x0, x19\n")
 	w.WriteString(fmt.Sprintf("    bl %s\n", allocSym))
 	// x0 = allocated pointer. Register with GC.
-	w.WriteString("    mov x20, x0\n")            // save pointer
-	w.WriteString("    mov x1, x19\n")             // size
+	w.WriteString("    mov x20, x0\n") // save pointer
+	w.WriteString("    mov x1, x19\n") // size
 	w.WriteString(fmt.Sprintf("    bl %s\n", gcRegSym))
-	w.WriteString("    mov x0, x20\n")             // restore pointer
+	w.WriteString("    mov x0, x20\n") // restore pointer
 
 	w.WriteString(".Lgca_ret:\n")
 	w.WriteString("    ldp x19, x20, [sp], #16\n")
@@ -1720,6 +1706,42 @@ func (e *arm64Emitter) loadStringAddr(dst string, idx int) {
 // ---------------------------------------------------------------------------
 // Register management helpers
 // ---------------------------------------------------------------------------
+
+// emitMove avoids using an unrelated physical register as an intermediate
+// when the destination is itself a physical register. This keeps values that
+// raw syscall/API setup code has already placed in x9-x17 intact.
+func (e *arm64Emitter) emitMove(fn *IRFunc, dst, src Operand) {
+	if dst.Kind != OpPhysReg {
+		dstReg := e.dstReg(fn, dst, "x10")
+		if src.Kind == OpImmediate {
+			e.loadImm(dstReg, src.Imm)
+		} else {
+			srcReg := e.loadToReg(fn, src, "x11")
+			e.b.WriteString(fmt.Sprintf("    mov %s, %s\n", dstReg, srcReg))
+		}
+		e.spillIfNeeded(fn, dst, dstReg)
+		return
+	}
+
+	dstReg := e.mapPhysReg(dst.PhysReg)
+	switch src.Kind {
+	case OpPhysReg:
+		srcReg := e.mapPhysReg(src.PhysReg)
+		if srcReg != dstReg {
+			e.b.WriteString(fmt.Sprintf("    mov %s, %s\n", dstReg, srcReg))
+		}
+	case OpImmediate:
+		e.loadImm(dstReg, src.Imm)
+	case OpVirtReg:
+		e.emitLoadMem(dstReg, "x29", e.vregOffset(fn, src.Reg))
+	case OpStringRef:
+		e.loadStringAddr(dstReg, int(src.Imm))
+	case OpMemory:
+		e.emitLoadMem(dstReg, src.MemBase, int(src.MemOffset))
+	case OpLabel:
+		e.b.WriteString(fmt.Sprintf("    mov %s, %s\n", dstReg, src.Label))
+	}
+}
 
 // ensureReg returns the register name for an operand.
 // For VRegs: loads from stack into scratch; for imm: loads into scratch.
