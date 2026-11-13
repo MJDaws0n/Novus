@@ -533,6 +533,8 @@ type Analyzer struct {
 	sourceFile      string
 	currentClass    *classInfo
 	classInstance   bool
+	fileFunctions   map[string]*Scope
+	classSourceIDs  map[string]int
 	classes         map[string]map[string]*classInfo
 	classDecls      map[*ast.ClassDecl]*classInfo
 	classMethods    []classMethodBody
@@ -627,6 +629,14 @@ func (a *Analyzer) injectBuiltins() {
 func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 	prog.ClassGlobals, prog.ClassFunctions, prog.Startup = nil, nil, nil
 	a.collectClasses(prog)
+	a.fileFunctions = make(map[string]*Scope)
+	a.classSourceIDs = make(map[string]int)
+	for _, class := range prog.Classes {
+		if class.SourceFile == prog.SourceFile || a.classSourceIDs[class.SourceFile] != 0 {
+			continue
+		}
+		a.classSourceIDs[class.SourceFile] = len(a.classSourceIDs) + 1
+	}
 	a.collectClassMembers(prog)
 
 	// Register imported functions in scope.
@@ -688,6 +698,10 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 		_, isBuiltinName := builtinFuncTable[fn.Name]
 		if len(importSignatures[fn.Name]) > 1 || (isBuiltinName && mangledName == fn.Name) {
 			mangledName = funcMangle(fn.Name, paramTypeNames)
+		}
+		if id := a.classSourceIDs[fn.SourceFile]; id != 0 {
+			mangledName = a.classHelperLabel(id, fn, paramTypeNames)
+			a.defineFileFunction(fn, mangledName, paramTypes, defaults, defaultCount, retType)
 		}
 		fn.MangledName = mangledName
 
@@ -872,6 +886,7 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 		})
 	}
 
+	a.analyzeClassHelpers(prog)
 	a.analyzeClassBodies(prog)
 
 	// Second pass — analyse each function body.
@@ -893,7 +908,14 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 			// Imported function bodies: analyze to resolve calls (sets
 			// ResolvedCallee for overloaded calls), but suppress errors
 			// since the function was type-checked in its own module context.
-			a.analyzeImportedFunctionBody(fn)
+			if fileScope := a.fileFunctions[fn.SourceFile]; fileScope != nil {
+				savedScope := a.scope
+				a.scope = fileScope
+				a.analyzeFunction(fn)
+				a.scope = savedScope
+			} else {
+				a.analyzeImportedFunctionBody(fn)
+			}
 		} else {
 			if sym := a.scope.lookupLocal(mangledName); sym == nil || (sym.Kind != SymFunc) {
 				continue

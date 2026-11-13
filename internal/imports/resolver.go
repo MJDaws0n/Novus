@@ -134,10 +134,23 @@ func (r *Resolver) Resolve(prog *ast.Program, sourceFile string) (*ast.Program, 
 
 	// Emit each class declaration once, even through multiple aliases.
 	seenPrograms := make(map[string]bool)
+	exported := make(map[*ast.FnDecl]bool)
+	for _, mod := range r.allModules {
+		for _, fn := range mod.Functions {
+			exported[fn] = true
+		}
+	}
 	// Add all imported functions (in import order, depth-first).
 	for _, mod := range r.allModules {
 		if !seenPrograms[mod.FilePath] {
 			merged.Classes = append(merged.Classes, mod.Program.Classes...)
+			if len(mod.Program.Classes) != 0 {
+				for _, fn := range mod.Program.Functions {
+					if fn.Name != "main" && !exported[fn] {
+						merged.ClassHelpers = append(merged.ClassHelpers, fn)
+					}
+				}
+			}
 			seenPrograms[mod.FilePath] = true
 		}
 		for _, fn := range mod.Functions {

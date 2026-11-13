@@ -1,7 +1,7 @@
 module classes;
 
-import ball geometry;
-import ball same;
+import ball[Ball] geometry;
+import ball[Ball] same;
 import alternate[Ball];
 import wrapper[Wrapper];
 
