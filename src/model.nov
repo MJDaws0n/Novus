@@ -1236,6 +1236,7 @@ fn initialize_compiler() -> void {
     MapStrSemanticbuiltininfo_put(map_751, "getflag", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeBool));
     MapStrSemanticbuiltininfo_put(map_751, "load8", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeI32));
     MapStrSemanticbuiltininfo_put(map_751, "store_byte", make_SemanticBuiltinInfo_99(2, CompilerState.semantic_TypeVoid));
+    MapStrSemanticbuiltininfo_put(map_751, "store_word", make_SemanticBuiltinInfo_99(2, CompilerState.semantic_TypeVoid));
     MapStrSemanticbuiltininfo_put(map_751, "load32", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeI32));
     MapStrSemanticbuiltininfo_put(map_751, "load64", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeI64));
     MapStrSemanticbuiltininfo_put(map_751, "len", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeI32));

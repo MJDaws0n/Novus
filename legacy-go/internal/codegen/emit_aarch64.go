@@ -19,6 +19,7 @@ import (
 // EmitARM64 converts an IRModule to ARM64 assembly text.
 func EmitARM64(mod *IRModule, target *Target) string {
 	target.EnsureHeapDefaults()
+	mod = withWindowsArgs(mod, target)
 	mod = withCollector(mod, target)
 	e := &arm64Emitter{
 		mod:    mod,
@@ -251,9 +252,6 @@ func (e *arm64Emitter) emitFunction(fn *IRFunc) {
 	}
 
 	// Initialize GC stack bottom in main function (macOS entry).
-	if fn.Name == "main" && e.target.OS == OS_Windows && fn.ParamCount >= 2 {
-		e.emitWinMainArgs()
-	}
 	if fn.Name == "main" && e.target.OS != OS_Linux && e.usesHeap() {
 		gcStackBot := e.target.Sym("_novus_gc_stack_bottom")
 		e.emitLoadGlobal("x9", gcStackBot)
@@ -263,6 +261,10 @@ func (e *arm64Emitter) emitFunction(fn *IRFunc) {
 		e.emitLoadGlobal("x9", gcThreshold)
 		w.WriteString("    mov x10, #256\n")
 		w.WriteString("    str x10, [x9]\n")
+	}
+
+	if fn.Name == "main" && e.target.OS == OS_Windows && fn.ParamCount >= 2 {
+		e.emitWinMainArgs()
 	}
 
 	for i := 0; i < len(fn.Instrs); i++ {

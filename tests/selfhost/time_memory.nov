@@ -7,5 +7,10 @@ fn main() -> i32 {
     print(format_signed(tick));
     print(i32_to_str(item.value));
     if (item.value != 0) { return 1; }
+    let buffer: str = make_buffer(24);
+    memset(ptr(buffer), 90, 24);
+    store_word(ptr(buffer) + 8, 81985529216486895);
+    if (load64(ptr(buffer) + 8) != 81985529216486895) { return 2; }
+    if (byte_at(buffer, 7) != 90 || byte_at(buffer, 16) != 90) { return 3; }
     return 0;
 }

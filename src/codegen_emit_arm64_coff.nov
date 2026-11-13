@@ -21,18 +21,5 @@ fn codegen_arm64Emitter_emitWindowsHeapAllocator(e: CodegenArm64Emitter) -> void
 }
 
 fn codegen_arm64Emitter_emitWinMainArgs(e: CodegenArm64Emitter) -> void {
-    let w: StringBuilder = e.b;
-    w.append("    sub sp, sp, #48\n");
-    w.append("    stp xzr, xzr, [sp]\n");
-    w.append("    stp xzr, xzr, [sp, #16]\n");
-    w.append("    str xzr, [sp, #32]\n");
-    w.append("    mov x0, sp\n");
-    w.append("    add x1, sp, #8\n");
-    w.append("    add x2, sp, #16\n");
-    w.append("    mov x3, xzr\n");
-    w.append("    add x4, sp, #32\n");
-    w.append(("    bl " + codegen_Target_Sym(e.target, "__getmainargs") + "\n"));
-    w.append("    ldr w0, [sp]\n");
-    w.append("    ldr x1, [sp, #8]\n");
-    w.append("    add sp, sp, #48\n");
+    e.b.append("    bl _novus_windows_args\n    ldr x1, [x0]\n    ldr x0, [x0, #8]\n    sub x0, x0, #1\n");
 }

@@ -1340,6 +1340,7 @@ func (l *Lowerer) builtinHandlers() map[string]builtinHandler {
 		"len":           l.builtinLen,
 		"load8":         l.builtinLoad8,
 		"store_byte":    l.builtinStoreByte,
+		"store_word":    l.builtinStoreWord,
 		"load32":        l.builtinLoad32,
 		"load64":        l.builtinLoad64,
 		"win_call":      l.builtinWinCall,
@@ -1579,6 +1580,17 @@ func (l *Lowerer) builtinStoreByte(e *ast.CallExpr) Operand {
 	addrOp := l.lowerExpr(e.Args[0])
 	valOp := l.lowerExpr(e.Args[1])
 	l.emit(IRInstr{Op: IRStoreByte, Dst: addrOp, Src1: valOp})
+	return None()
+}
+
+// store_word writes one native pointer-width word to a raw address.
+func (l *Lowerer) builtinStoreWord(e *ast.CallExpr) Operand {
+	if len(e.Args) != 2 {
+		return None()
+	}
+	address := l.lowerExpr(e.Args[0])
+	value := l.lowerExpr(e.Args[1])
+	l.emit(IRInstr{Op: IRStore, Src1: value, Src2: address})
 	return None()
 }
 

@@ -203,7 +203,7 @@ func (tc *Toolchain) linkWindows() error {
 		}
 		args := []string{"/machine:arm64", "/entry:main", "/subsystem:console", "/out:" + tc.ExeFile, tc.ObjFile}
 		if tc.WindowsAPI {
-			args = append(args, "kernel32.lib", "user32.lib", "gdi32.lib", "msvcrt.lib", "urlmon.lib")
+			args = append(args, "kernel32.lib", "user32.lib", "gdi32.lib", "msvcrt.lib", "urlmon.lib", "shell32.lib")
 		}
 		return tc.runCmd(exec.Command(linker, args...), "link (Windows ARM64)")
 	}
@@ -219,7 +219,7 @@ func (tc *Toolchain) linkWindows() error {
 	if golinkBin != "" {
 		cmd := exec.Command(golinkBin, "/entry", "main", "/console",
 			tc.ObjFile,
-			"kernel32.dll", "user32.dll", "gdi32.dll", "msvcrt.dll", "urlmon.dll")
+			"kernel32.dll", "user32.dll", "gdi32.dll", "msvcrt.dll", "urlmon.dll", "shell32.dll")
 		return tc.runCmd(cmd, "link (golink)")
 	}
 
@@ -231,7 +231,7 @@ func (tc *Toolchain) linkWindows() error {
 			"/SUBSYSTEM:CONSOLE",
 			fmt.Sprintf("/OUT:%s", tc.ExeFile),
 			tc.ObjFile,
-			"kernel32.lib", "user32.lib", "gdi32.lib", "msvcrt.lib", "urlmon.lib",
+			"kernel32.lib", "user32.lib", "gdi32.lib", "msvcrt.lib", "urlmon.lib", "shell32.lib",
 		)
 		return tc.runCmd(cmd, "link (msvc)")
 	}

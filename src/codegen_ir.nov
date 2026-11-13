@@ -103,7 +103,7 @@ fn codegen_IRModule_AddString(m: CodegenIRModule, value: ByteBuffer) -> i32 {
         let count_359: i32 = len(items_357);
         for (let index_358: i32 = 0; index_358 < count_359; index_358++) {
             let i: i32 = index_358;
-            let s: CodegenIRStringConst = copy_CodegenIRStringConst(items_357[index_358]);
+            let s: CodegenIRStringConst = items_357[index_358];
             if (s.Value.equals(value)) {
                 return i;
             }
@@ -123,7 +123,7 @@ fn codegen_IRModule_DebugDump(m: CodegenIRModule) -> str {
         let count_362: i32 = len(items_360);
         for (let index_361: i32 = 0; index_361 < count_362; index_361++) {
             let i: i32 = index_361;
-            let str_value: CodegenIRStringConst = copy_CodegenIRStringConst(items_360[index_361]);
+            let str_value: CodegenIRStringConst = items_360[index_361];
             s.append(("  .str[" + runtime_string_i32(i) + "] " + str_value.Label + " = " + codegen_gasQuoteString(str_value.Value) + "\n"));
         }
     }
@@ -137,7 +137,7 @@ fn codegen_IRModule_DebugDump(m: CodegenIRModule) -> str {
                 let items_366: []CodegenIRInstr = fn_value.Instrs;
                 let count_368: i32 = len(items_366);
                 for (let index_367: i32 = 0; index_367 < count_368; index_367++) {
-                    let instr: CodegenIRInstr = copy_CodegenIRInstr(items_366[index_367]);
+                    let instr: CodegenIRInstr = items_366[index_367];
                     s.append(("  " + codegen_IRInstr_String(instr) + "\n"));
                 }
             }

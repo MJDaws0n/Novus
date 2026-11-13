@@ -6,6 +6,7 @@ import runtime;
 // EmitARM64 converts an IRModule to ARM64 assembly text.
 fn codegen_EmitARM64(mod: CodegenIRModule, target: CodegenTarget) -> str {
     codegen_Target_EnsureHeapDefaults(target);
+    mod = codegen_withWindowsArgs(mod, target);
     mod = codegen_withCollector(mod, target);
     let e: CodegenArm64Emitter = make_CodegenArm64Emitter_9(mod, target, make_StringBuilder_8());
     codegen_arm64Emitter_emit(e);
@@ -240,9 +241,6 @@ fn codegen_arm64Emitter_emitFunction(e: CodegenArm64Emitter, fn_value: CodegenIR
         w.append(("    add x9, x9, " + envpSym + "@PAGEOFF\n"));
         w.append("    str x2, [x9]\n");
     }
-    if ((((fn_value.Name == "main") && (e.target.OS == 2)) && (fn_value.ParamCount >= 2))) {
-        codegen_arm64Emitter_emitWinMainArgs(e);
-    }
     if ((((fn_value.Name == "main") && (e.target.OS != 0)) && codegen_arm64Emitter_usesHeap(e))) {
         let gcStackBot: str = codegen_Target_Sym(e.target, "_novus_gc_stack_bottom");
         codegen_arm64Emitter_emitLoadGlobal(e, "x9", gcStackBot);
@@ -253,6 +251,10 @@ fn codegen_arm64Emitter_emitFunction(e: CodegenArm64Emitter, fn_value: CodegenIR
         w.append("    mov x10, #256\n");
         w.append("    str x10, [x9]\n");
     }
+    if ((((fn_value.Name == "main") && (e.target.OS == 2)) && (fn_value.ParamCount >= 2))) {
+        codegen_arm64Emitter_emitWinMainArgs(e);
+    }
+
     {
         let i: i32 = 0;
         for (; (i < len(fn_value.Instrs)); i++) {

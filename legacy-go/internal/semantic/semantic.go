@@ -475,6 +475,7 @@ var builtinFuncTable = map[string]builtinInfo{
 	"getflag":    {Arity: 1, ReturnType: TypeBool},  // read CPU flag → bool
 	"load8":      {Arity: 1, ReturnType: TypeI32},   // load byte from address → i32
 	"store_byte": {Arity: 2, ReturnType: TypeVoid},  // store low byte to raw address
+	"store_word": {Arity: 2, ReturnType: TypeVoid},  // store one pointer-width native word
 	"load32":     {Arity: 1, ReturnType: TypeI32},   // load 32-bit int from address → i32
 	"load64":     {Arity: 1, ReturnType: TypeI64},   // load 64-bit int from address → i64
 	"len":        {Arity: 1, ReturnType: TypeI32},   // string length → i32

@@ -15,9 +15,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--bootstrap", help="Existing Go bootstrap executable")
 parser.add_argument("--target", help="Native host target, e.g. linux/amd64")
 parser.add_argument("--test-only", help="Test an existing Novus compiler")
+parser.add_argument("--package", action="store_true", help="Copy the verified native compiler into dist/")
 args = parser.parse_args()
 host_os = {"Darwin": "darwin", "Linux": "linux", "Windows": "windows"}[platform.system()]
-host_arch = {"aarch64": "arm64", "arm64": "arm64", "AMD64": "amd64", "x86_64": "amd64", "i686": "x86"}[platform.machine()]
+host_arch = {"aarch64": "arm64", "arm64": "arm64", "amd64": "amd64", "x86_64": "amd64", "i686": "x86"}[platform.machine().lower()]
 target = args.target or f"{host_os}/{host_arch}"
 target_os, target_arch = target.split("/")
 artifact_arch = {"amd64": "x86_64", "386": "x86"}.get(target_arch, target_arch)
@@ -26,7 +27,7 @@ output = ROOT / "build" / f"{target_os}_{artifact_arch}"
 work = ROOT / "build" / "selfhost" / f"{target_os}_{artifact_arch}"
 work.mkdir(parents=True, exist_ok=True)
 report = {"target": target, "stages": [], "tests": []}
-flags = [f"--target={target}", "--heap-size=512m", "--gc-entries=2097152"]
+flags = [f"--target={target}", "--heap-size=1g", "--gc-entries=8388608"]
 
 def run(command, name, timeout=600, expected=0, cwd=ROOT, env=None):
     started = time.perf_counter()
@@ -94,6 +95,18 @@ try:
         report["tests"].append({"name": name, "passed": True, "seconds": elapsed})
         record()
         print(f"PASS {name}", flush=True)
+    run([compiler, f"--target={target}", "--gc-entries=1024", "tests/selfhost/gc_graph.nov"], "gc-small-table-build")
+    run([output / ("gc_graph" + extension)], "gc-small-table-run", timeout=60)
+    report["tests"].append({"name": "gc-small-table", "passed": True})
     report["passed"] = True
+    if args.package:
+        release_arch = "386" if target_arch in ("386", "x86") else target_arch
+        destination = ROOT / "dist" / f"novus-{target_os}-{release_arch}{extension}"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(destination.name + ".new")
+        shutil.copy2(compiler, temporary)
+        temporary.replace(destination)
+        report["artifact"] = str(destination.relative_to(ROOT))
+        print(f"Packaged {destination}", flush=True)
 finally:
     record()

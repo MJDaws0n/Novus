@@ -1,7 +1,5 @@
 package codegen
 
-import "fmt"
-
 func (e *arm64Emitter) emitWindowsHeapAllocator() {
 	w := e.b
 	w.WriteString("\n.p2align 2\n_novus_heap_alloc:\n")
@@ -20,19 +18,5 @@ func (e *arm64Emitter) emitWindowsHeapAllocator() {
 }
 
 func (e *arm64Emitter) emitWinMainArgs() {
-	// Reserve five zeroed slots for the UCRT outputs and startup information.
-	w := e.b
-	w.WriteString("    sub sp, sp, #48\n")
-	w.WriteString("    stp xzr, xzr, [sp]\n")
-	w.WriteString("    stp xzr, xzr, [sp, #16]\n")
-	w.WriteString("    str xzr, [sp, #32]\n")
-	w.WriteString("    mov x0, sp\n")
-	w.WriteString("    add x1, sp, #8\n")
-	w.WriteString("    add x2, sp, #16\n")
-	w.WriteString("    mov x3, xzr\n")
-	w.WriteString("    add x4, sp, #32\n")
-	w.WriteString(fmt.Sprintf("    bl %s\n", e.target.Sym("__getmainargs")))
-	w.WriteString("    ldr w0, [sp]\n")
-	w.WriteString("    ldr x1, [sp, #8]\n")
-	w.WriteString("    add sp, sp, #48\n")
+	e.b.WriteString("    bl _novus_windows_args\n    ldr x1, [x0]\n    ldr x0, [x0, #8]\n    sub x0, x0, #1\n")
 }

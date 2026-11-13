@@ -41,9 +41,10 @@ fn codegen_withCollector(mod: CodegenIRModule, target: CodegenTarget) -> Codegen
         word = assigned_330;
         load = assigned_331;
     }
-    let source: str = runtime_strings_ReplaceAll("fn _novus_gc_word_store(address: WORD, value: WORD) -> void {\n    for (let byte_index: WORD = 0; byte_index < WORDSIZE; byte_index++) {\n        store_byte(address + byte_index, (value >> (byte_index * 8)) & 255);\n    }\n}\nfn _novus_gc_round(bytes: WORD) -> WORD {\n    let size: WORD = MARKOFFSET;\n    while (size < bytes) { size *= 2; }\n    return size;\n}\nfn _novus_gc_bin(bytes: WORD) -> WORD {\n    let index: WORD = 0;\n    while (bytes > 1) { bytes = bytes >> 1; index++; }\n    return index;\n}\nfn _novus_gc_take(free_list: WORD, bytes: WORD) -> WORD {\n    let slot: WORD = free_list + _novus_gc_bin(bytes) * WORDSIZE;\n    let address: WORD = LOAD(slot);\n    if (address != 0) { _novus_gc_word_store(slot, LOAD(address)); }\n    return address;\n}\nfn _novus_gc_swap(table: WORD, first: WORD, second: WORD) -> void {\n    let left: WORD = table + first * ENTRYSIZE;\n    let right: WORD = table + second * ENTRYSIZE;\n    for (let offset: WORD = 0; offset < ENTRYSIZE; offset += WORDSIZE) {\n        let value: WORD = LOAD(left + offset);\n        _novus_gc_word_store(left + offset, LOAD(right + offset));\n        _novus_gc_word_store(right + offset, value);\n    }\n}\nfn _novus_gc_sift(table: WORD, root_index: WORD, size: WORD) -> void {\n    while (root_index * 2 + 1 < size) {\n        let child: WORD = root_index * 2 + 1;\n        if (child + 1 < size && LOAD(table + child * ENTRYSIZE) < LOAD(table + (child + 1) * ENTRYSIZE)) { child++; }\n        if (LOAD(table + root_index * ENTRYSIZE) >= LOAD(table + child * ENTRYSIZE)) { return; }\n        _novus_gc_swap(table, root_index, child);\n        root_index = child;\n    }\n}\nfn _novus_gc_mark(table: WORD, size: WORD, queue: WORD, candidate: WORD) -> void {\n    if (size == 0 || candidate < LOAD(table)) { return; }\n    let last: WORD = table + (size - 1) * ENTRYSIZE;\n    if (candidate >= LOAD(last) + LOAD(last + WORDSIZE)) { return; }\n    let low: WORD = 0;\n    let high: WORD = size;\n    while (low < high) {\n        let middle: WORD = low + (high - low) / 2;\n        if (LOAD(table + middle * ENTRYSIZE) <= candidate) { low = middle + 1; }\n        else { high = middle; }\n    }\n    if (low == 0) { return; }\n    let entry: WORD = table + (low - 1) * ENTRYSIZE;\n    if (candidate >= LOAD(entry) + LOAD(entry + WORDSIZE) || LOAD(entry + MARKOFFSET) != 0) { return; }\n    _novus_gc_word_store(entry + MARKOFFSET, 1);\n    let queued: WORD = LOAD(queue);\n    _novus_gc_word_store(queue + (queued + 1) * WORDSIZE, low - 1);\n    _novus_gc_word_store(queue, queued + 1);\n}\nfn _novus_gc_trace(table: WORD, size: WORD, roots: WORD, root_count: WORD, stack_low: WORD, stack_high: WORD, free_list: WORD, queue: WORD) -> WORD {\n    if (size == 0) { return 0; }\n    for (let i: WORD = 0; i < size; i++) { _novus_gc_word_store(table + i * ENTRYSIZE + MARKOFFSET, 0); }\n    let heap_root: WORD = size / 2;\n    while (heap_root > 0) { heap_root--; _novus_gc_sift(table, heap_root, size); }\n    let end: WORD = size;\n    while (end > 1) { end--; _novus_gc_swap(table, 0, end); _novus_gc_sift(table, 0, end); }\n    _novus_gc_word_store(queue, 0);\n    if (stack_high != 0) {\n        for (let cursor: WORD = stack_low; cursor < stack_high; cursor += WORDSIZE) { _novus_gc_mark(table, size, queue, LOAD(cursor)); }\n    }\n    for (let i: WORD = 0; i < root_count; i++) { _novus_gc_mark(table, size, queue, LOAD(LOAD(roots + i * WORDSIZE))); }\n    let cursor: WORD = 0;\n    while (cursor < LOAD(queue)) {\n        let entry: WORD = table + LOAD(queue + (cursor + 1) * WORDSIZE) * ENTRYSIZE;\n        let address: WORD = LOAD(entry);\n        let bytes: WORD = LOAD(entry + WORDSIZE);\n        for (let offset: WORD = 0; offset + WORDSIZE <= bytes; offset += WORDSIZE) { _novus_gc_mark(table, size, queue, LOAD(address + offset)); }\n        cursor++;\n    }\n    let kept: WORD = 0;\n    for (let i: WORD = 0; i < size; i++) {\n        let entry: WORD = table + i * ENTRYSIZE;\n        let address: WORD = LOAD(entry);\n        let bytes: WORD = LOAD(entry + WORDSIZE);\n        if (LOAD(entry + MARKOFFSET) != 0) {\n            let destination: WORD = table + kept * ENTRYSIZE;\n            _novus_gc_word_store(destination, address);\n            _novus_gc_word_store(destination + WORDSIZE, bytes);\n            _novus_gc_word_store(destination + MARKOFFSET, 0);\n            kept++;\n        } else if (bytes >= MARKOFFSET) {\n            let slot: WORD = free_list + _novus_gc_bin(bytes) * WORDSIZE;\n            _novus_gc_word_store(address, LOAD(slot));\n            _novus_gc_word_store(address + WORDSIZE, bytes);\n            _novus_gc_word_store(slot, address);\n        }\n    }\n    return kept;\n}\n", "WORDSIZE", (runtime_string_i32(target.PtrSize)));
+    let source: str = runtime_strings_ReplaceAll("fn _novus_gc_round(bytes: WORD) -> WORD {\n    let size: WORD = MARKOFFSET;\n    while (size < bytes) { size *= 2; }\n    return size;\n}\nfn _novus_gc_bin(bytes: WORD) -> WORD {\n    let index: WORD = 0;\n    while (bytes > 1) { bytes = bytes >> 1; index++; }\n    return index;\n}\nfn _novus_gc_take(free_list: WORD, bytes: WORD) -> WORD {\n    let slot: WORD = free_list + _novus_gc_bin(bytes) * WORDSIZE;\n    let address: WORD = LOAD(slot);\n    if (address != 0) { store_word(slot, LOAD(address)); }\n    return address;\n}\nfn _novus_gc_swap(table: WORD, first: WORD, second: WORD) -> void {\n    let left: WORD = table + first * ENTRYSIZE;\n    let right: WORD = table + second * ENTRYSIZE;\n    for (let offset: WORD = 0; offset < ENTRYSIZE; offset += WORDSIZE) {\n        let value: WORD = LOAD(left + offset);\n        store_word(left + offset, LOAD(right + offset));\n        store_word(right + offset, value);\n    }\n}\nfn _novus_gc_sift(table: WORD, root_index: WORD, size: WORD) -> void {\n    while (root_index * 2 + 1 < size) {\n        let child: WORD = root_index * 2 + 1;\n        if (child + 1 < size && LOAD(table + child * ENTRYSIZE) < LOAD(table + (child + 1) * ENTRYSIZE)) { child++; }\n        if (LOAD(table + root_index * ENTRYSIZE) >= LOAD(table + child * ENTRYSIZE)) { return; }\n        _novus_gc_swap(table, root_index, child);\n        root_index = child;\n    }\n}\nfn _novus_gc_index(table: WORD, size: WORD, pages: WORD) -> void {\n    store_word(pages, 0);\n    for (let i: WORD = 0; i < 65536; i++) { store_word(pages + WORDSIZE + i * ENTRYSIZE, 0); }\n    for (let i: WORD = 0; i < size; i++) {\n        let entry: WORD = table + i * ENTRYSIZE;\n        let first: WORD = LOAD(entry) / 4096;\n        let last: WORD = (LOAD(entry) + LOAD(entry + WORDSIZE) - 1) / 4096;\n        for (let page: WORD = first; page <= last; page++) {\n            let key: WORD = page + 1;\n            let bucket: WORD = page & 65535;\n            let probes: WORD = 0;\n            let slot: WORD = pages + WORDSIZE + bucket * ENTRYSIZE;\n            while (LOAD(slot) != 0 && LOAD(slot) != key) {\n                bucket = (bucket + 1) & 65535;\n                slot = pages + WORDSIZE + bucket * ENTRYSIZE;\n                probes++;\n                if (probes == 65536) { store_word(pages, 1); return; }\n            }\n            if (LOAD(slot) == 0) {\n                store_word(slot, key);\n                store_word(slot + WORDSIZE, i);\n            }\n            store_word(slot + MARKOFFSET, i + 1);\n        }\n    }\n}\nfn _novus_gc_mark(table: WORD, size: WORD, queue: WORD, candidate: WORD) -> void {\n    if (size == 0 || candidate < LOAD(table)) { return; }\n    let last: WORD = table + (size - 1) * ENTRYSIZE;\n    if (candidate >= LOAD(last) + LOAD(last + WORDSIZE)) { return; }\n    let low: WORD = 0;\n    let high: WORD = size;\n    let pages: WORD = queue + PAGEOFFSET;\n    if (LOAD(pages) == 0) {\n        let page: WORD = candidate / 4096;\n        let bucket: WORD = page & 65535;\n        let slot: WORD = pages + WORDSIZE + bucket * ENTRYSIZE;\n        while (LOAD(slot) != page + 1) {\n            if (LOAD(slot) == 0) { return; }\n            bucket = (bucket + 1) & 65535;\n            slot = pages + WORDSIZE + bucket * ENTRYSIZE;\n        }\n        low = LOAD(slot + WORDSIZE);\n        high = LOAD(slot + MARKOFFSET);\n    }\n    while (low < high) {\n        let middle: WORD = low + (high - low) / 2;\n        if (LOAD(table + middle * ENTRYSIZE) <= candidate) { low = middle + 1; }\n        else { high = middle; }\n    }\n    if (low == 0) { return; }\n    let entry: WORD = table + (low - 1) * ENTRYSIZE;\n    if (candidate >= LOAD(entry) + LOAD(entry + WORDSIZE) || LOAD(entry + MARKOFFSET) != 0) { return; }\n    store_word(entry + MARKOFFSET, 1);\n    let queued: WORD = LOAD(queue);\n    store_word(queue + (queued + 1) * WORDSIZE, low - 1);\n    store_word(queue, queued + 1);\n}\nfn _novus_gc_trace(table: WORD, size: WORD, roots: WORD, root_count: WORD, stack_low: WORD, stack_high: WORD, free_list: WORD, queue: WORD) -> WORD {\n    if (size == 0) { return 0; }\n    for (let i: WORD = 0; i < size; i++) { store_word(table + i * ENTRYSIZE + MARKOFFSET, 0); }\n    let heap_root: WORD = size / 2;\n    while (heap_root > 0) { heap_root--; _novus_gc_sift(table, heap_root, size); }\n    let end: WORD = size;\n    while (end > 1) { end--; _novus_gc_swap(table, 0, end); _novus_gc_sift(table, 0, end); }\n    _novus_gc_index(table, size, queue + PAGEOFFSET);\n    store_word(queue, 0);\n    if (stack_high != 0) {\n        for (let cursor: WORD = stack_low; cursor < stack_high; cursor += WORDSIZE) { _novus_gc_mark(table, size, queue, LOAD(cursor)); }\n    }\n    for (let i: WORD = 0; i < root_count; i++) { _novus_gc_mark(table, size, queue, LOAD(LOAD(roots + i * WORDSIZE))); }\n    let cursor: WORD = 0;\n    while (cursor < LOAD(queue)) {\n        let entry: WORD = table + LOAD(queue + (cursor + 1) * WORDSIZE) * ENTRYSIZE;\n        let address: WORD = LOAD(entry);\n        let bytes: WORD = LOAD(entry + WORDSIZE);\n        for (let offset: WORD = 0; offset + WORDSIZE <= bytes; offset += WORDSIZE) { _novus_gc_mark(table, size, queue, LOAD(address + offset)); }\n        cursor++;\n    }\n    let kept: WORD = 0;\n    for (let i: WORD = 0; i < size; i++) {\n        let entry: WORD = table + i * ENTRYSIZE;\n        let address: WORD = LOAD(entry);\n        let bytes: WORD = LOAD(entry + WORDSIZE);\n        if (LOAD(entry + MARKOFFSET) != 0) {\n            let destination: WORD = table + kept * ENTRYSIZE;\n            store_word(destination, address);\n            store_word(destination + WORDSIZE, bytes);\n            store_word(destination + MARKOFFSET, 0);\n            kept++;\n        } else if (bytes >= MARKOFFSET) {\n            let slot: WORD = free_list + _novus_gc_bin(bytes) * WORDSIZE;\n            store_word(address, LOAD(slot));\n            store_word(address + WORDSIZE, bytes);\n            store_word(slot, address);\n        }\n    }\n    return kept;\n}\n", "WORDSIZE", (runtime_string_i32(target.PtrSize)));
     source = runtime_strings_ReplaceAll(source, "ENTRYSIZE", (runtime_string_i32((target.PtrSize * 3))));
     source = runtime_strings_ReplaceAll(source, "MARKOFFSET", (runtime_string_i32((target.PtrSize * 2))));
+    source = runtime_strings_ReplaceAll(source, "PAGEOFFSET", runtime_string_i32((target.GCEntries + 1) * target.PtrSize));
     source = runtime_strings_ReplaceAll(source, "WORD", word);
     source = runtime_strings_ReplaceAll(source, "LOAD", load);
     let result_332: ResultArraylexertokenArraylexerlexerror = lexer_Lex(source);
@@ -63,17 +64,9 @@ fn codegen_withCollector(mod: CodegenIRModule, target: CodegenTarget) -> Codegen
                 let count_339: i32 = len(items_337);
                 for (let index_338: i32 = 0; index_338 < count_339; index_338++) {
                     let i: i32 = index_338;
-                    let operands: []CodegenOperand = [fn_value.Instrs[i].Dst, fn_value.Instrs[i].Src1, fn_value.Instrs[i].Src2];
-                    {
-                        let items_340: []CodegenOperand = operands;
-                        let count_342: i32 = len(items_340);
-                        for (let index_341: i32 = 0; index_341 < count_342; index_341++) {
-                            let operand: CodegenOperand = items_340[index_341];
-                            if (((operand.Kind == 5) && runtime_strings_HasPrefix(operand.Label, ".L"))) {
-                                operand.Label = (".Lgc_runtime" + runtime_substring(operand.Label, 2, len(operand.Label)));
-                            }
-                        }
-                    }
+                    fn_value.Instrs[i].Dst = codegen_collectorOperand(fn_value.Instrs[i].Dst);
+                    fn_value.Instrs[i].Src1 = codegen_collectorOperand(fn_value.Instrs[i].Src1);
+                    fn_value.Instrs[i].Src2 = codegen_collectorOperand(fn_value.Instrs[i].Src2);
                 }
             }
             result.Functions = append_Codegenirfunc(result.Functions, fn_value);
@@ -96,7 +89,7 @@ fn codegen_collectorData(mod: CodegenIRModule, target: CodegenTarget) -> str {
                 out.append((("    dq " + codegen_Target_Sym(target, global.Name)) + "\n"));
             }
         }
-        out.append(("section .bss\n" + queue + ": resb " + runtime_string_i32((((target.GCEntries + 1)) * target.PtrSize)) + "\nsection .text\n"));
+        out.append(("section .bss\n" + queue + ": resb " + runtime_string_i32((target.GCEntries + 1 + 65536 * 3 + 1) * target.PtrSize) + "\nsection .text\n"));
     } else {
         let section: str = ".data\n";
         let text: str = ".text\n";
@@ -117,7 +110,7 @@ fn codegen_collectorData(mod: CodegenIRModule, target: CodegenTarget) -> str {
                 out.append((((("    " + directive) + " ") + codegen_Target_Sym(target, global.Name)) + "\n"));
             }
         }
-        out.append((".lcomm " + queue + ", " + runtime_string_i32((((target.GCEntries + 1)) * target.PtrSize)) + "\n" + text));
+        out.append((".lcomm " + queue + ", " + runtime_string_i32((target.GCEntries + 1 + 65536 * 3 + 1) * target.PtrSize) + "\n" + text));
     }
     return out.text();
 }
@@ -218,4 +211,41 @@ fn codegen_x86Emitter_emitFastCollector(e: CodegenX86Emitter) -> void {
     w.append(("    pushl $" + runtime_string_i32(len(e.mod.Globals)) + "\n"));
     w.append("    pushl $_novus_gc_roots\n    pushl _novus_gc_count\n    pushl $_novus_gc_table\n    call _novus_gc_trace\n    addl $32, %esp\n");
     w.append("    movl %eax, _novus_gc_count\n    leal 256(,%eax,2), %eax\n    movl %eax, _novus_gc_threshold\n    popal\n    ret\n");
+}
+
+fn codegen_collectorOperand(operand: CodegenOperand) -> CodegenOperand {
+    if (operand.Kind == 5 && starts_with(operand.Label, ".L")) {
+        return codegen_LabelOp(".Lgc_runtime" + substr(operand.Label, 2));
+    }
+    return copy_CodegenOperand(operand);
+}
+
+fn codegen_withWindowsArgs(mod: CodegenIRModule, target: CodegenTarget) -> CodegenIRModule {
+    if (target.OS != 2) { return mod; }
+    let needed: bool = false;
+    for (let i: i32 = 0; i < len(mod.Functions); i++) {
+        let value: CodegenIRFunc = mod.Functions[i];
+        if (value.Name == "_novus_windows_args") { return mod; }
+        if (value.Name == "main" && value.ParamCount >= 2) { needed = true; }
+    }
+    if (!needed) { return mod; }
+    let source: str = "fn _novus_windows_args() -> []u64 {\n    let count: i32 = 0;\n    win_call(\"GetCommandLineW\");\n    let command: u64 = getreg(rax);\n    win_call(\"CommandLineToArgvW\", command, &count);\n    let wide: u64 = getreg(rax);\n    if (wide == 0) { win_call(\"ExitProcess\", 71); }\n    let arguments: []u64 = [];\n    for (let i: i32 = 0; i < count; i++) {\n        let value: u64 = load64(wide + i * 8);\n        win_call(\"WideCharToMultiByte\", 65001, 0, value, -1, 0, 0, 0, 0);\n        let size: i32 = getreg(rax);\n        if (size <= 0) { win_call(\"ExitProcess\", 71); }\n        let buffer: u64 = _novus_gc_alloc(size);\n        win_call(\"WideCharToMultiByte\", 65001, 0, value, -1, buffer, size, 0, 0);\n        let copied: i32 = getreg(rax);\n        if (copied <= 0) { win_call(\"ExitProcess\", 71); }\n        array_append(arguments, buffer);\n    }\n    array_append(arguments, 0);\n    win_call(\"LocalFree\", wide);\n    return arguments;\n}\n";
+    let program: AstNode = parser_Parse(lexer_Lex(source).value0).value0;
+    let runtime: CodegenIRModule = codegen_Lower(program, target);
+    let result: CodegenIRModule = copy_CodegenIRModule(mod);
+    result.Functions = extend_Codegenirfunc([], mod.Functions);
+    for (let i: i32 = 0; i < len(runtime.Functions); i++) {
+        let value: CodegenIRFunc = runtime.Functions[i];
+        for (let j: i32 = 0; j < len(value.Instrs); j++) {
+            value.Instrs[j].Dst = codegen_windowsOperand(value.Instrs[j].Dst);
+            value.Instrs[j].Src1 = codegen_windowsOperand(value.Instrs[j].Src1);
+            value.Instrs[j].Src2 = codegen_windowsOperand(value.Instrs[j].Src2);
+        }
+        array_append(result.Functions, value);
+    }
+    return result;
+}
+fn codegen_windowsOperand(value: CodegenOperand) -> CodegenOperand {
+    if (value.Kind == 5 && starts_with(value.Label, ".L")) { return codegen_LabelOp(".Lwin_args" + substr(value.Label, 2)); }
+    return copy_CodegenOperand(value);
 }

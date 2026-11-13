@@ -242,7 +242,7 @@ fn codegen_Lowerer_freshLabel(l: CodegenLowerer, prefix: str) -> str {
 }
 
 fn codegen_Lowerer_emit(l: CodegenLowerer, instr: CodegenIRInstr) -> void {
-    codegen_IRFunc_Emit(l.fn_value, copy_CodegenIRInstr(instr));
+    codegen_IRFunc_Emit(l.fn_value, instr);
 }
 
 fn codegen_Lowerer_emitComment(l: CodegenLowerer, text: str) -> void {
@@ -938,7 +938,13 @@ fn codegen_Lowerer_lowerUnaryExpr(l: CodegenLowerer, e: AstNode) -> CodegenOpera
             return copy_CodegenOperand(operand);
         }
     }
-    return copy_CodegenOperand(codegen_VReg(dst));
+    let result: CodegenOperand = codegen_VReg(dst);
+    if (e.Op != "!") {
+        let kind: str = codegen_Lowerer_exprType(l, e.Operand);
+        codegen_Lowerer_markOperandType(l, result, kind);
+        return codegen_Lowerer_coerceValueToType(l, kind, result);
+    }
+    return result;
 }
 
 // operandIsStr reports whether an operand holds a string pointer.
@@ -1322,6 +1328,7 @@ fn codegen_Lowerer_lowerCallExpr(l: CodegenLowerer, e: AstNode) -> CodegenOperan
     if (calleeName == "len") { return codegen_Lowerer_builtinLen(l, e); }
     if (calleeName == "load8") { return codegen_Lowerer_builtinLoad8(l, e); }
     if (calleeName == "store_byte") { return codegen_Lowerer_builtinStoreByte(l, e); }
+    if (calleeName == "store_word") { return codegen_Lowerer_builtinStoreWord(l, e); }
     if (calleeName == "load32") { return codegen_Lowerer_builtinLoad32(l, e); }
     if (calleeName == "load64") { return codegen_Lowerer_builtinLoad64(l, e); }
     if (calleeName == "win_call") { return codegen_Lowerer_builtinWinCall(l, e); }
@@ -1651,6 +1658,14 @@ fn codegen_Lowerer_builtinLoad8(l: CodegenLowerer, e: AstNode) -> CodegenOperand
 }
 
 // store_byte(addr, value) — store the low byte of value to a raw memory address.
+fn codegen_Lowerer_builtinStoreWord(l: CodegenLowerer, e: AstNode) -> CodegenOperand {
+    if (len(e.Args) != 2) { return codegen_None(); }
+    let address: CodegenOperand = codegen_Lowerer_lowerExpr(l, e.Args[0]);
+    let value: CodegenOperand = codegen_Lowerer_lowerExpr(l, e.Args[1]);
+    codegen_Lowerer_emit(l, make_CodegenIRInstr_3(3, copy_CodegenOperand(value), copy_CodegenOperand(address)));
+    return codegen_None();
+}
+
 fn codegen_Lowerer_builtinStoreByte(l: CodegenLowerer, e: AstNode) -> CodegenOperand {
     if ((len(e.Args) != 2)) {
         return copy_CodegenOperand(codegen_None());

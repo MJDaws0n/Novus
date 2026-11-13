@@ -24,6 +24,7 @@ import (
 
 func EmitX86_64(mod *IRModule, target *Target) string {
 	target.EnsureHeapDefaults()
+	mod = withWindowsArgs(mod, target)
 	mod = withCollector(mod, target)
 	e := &x86_64Emitter{
 		mod:    mod,
@@ -1218,19 +1219,7 @@ func (e *x86_64Emitter) emitNASM() {
 
 	// Collect all Windows API functions used by win_call and emit extern declarations.
 	winExterns := e.collectWinCallExterns()
-	if e.needsWinMainArgs() {
-		// Add __getmainargs from msvcrt.dll for Windows argc/argv setup.
-		found := false
-		for _, name := range winExterns {
-			if name == "__getmainargs" {
-				found = true
-				break
-			}
-		}
-		if !found {
-			winExterns = append(winExterns, "__getmainargs")
-		}
-	}
+
 	if len(winExterns) > 0 {
 		for _, name := range winExterns {
 			w.WriteString(fmt.Sprintf("extern %s\n", name))
@@ -1277,19 +1266,7 @@ func (e *x86_64Emitter) emitNASMFunction(fn *IRFunc) {
 	// On Windows, the entry point doesn't receive argc/argv in registers.
 	// Call __getmainargs from msvcrt.dll to populate them.
 	if fn.Name == "main" && fn.ParamCount >= 2 && e.target.OS == OS_Windows {
-		w.WriteString("    ; --- Windows argc/argv setup via __getmainargs ---\n")
-		w.WriteString("    sub rsp, 48\n")                       // shadow space (32) + 5th arg (8) + align (8)
-		w.WriteString("    lea rcx, [rel _novus_win_argc]\n")    // &argc
-		w.WriteString("    lea rdx, [rel _novus_win_argv]\n")    // &argv
-		w.WriteString("    lea r8, [rel _novus_win_envp]\n")     // &envp
-		w.WriteString("    xor r9, r9\n")                        // expand_wildcards = 0
-		w.WriteString("    lea rax, [rel _novus_win_newmode]\n") // &new_mode
-		w.WriteString("    mov qword [rsp+32], rax\n")           // 5th arg on stack
-		w.WriteString("    call __getmainargs\n")
-		w.WriteString("    add rsp, 48\n")
-		w.WriteString("    mov ecx, dword [rel _novus_win_argc]\n") // argc -> rcx
-		w.WriteString("    mov rdx, qword [rel _novus_win_argv]\n") // argv -> rdx
-		w.WriteString("    ; --- End Windows argc/argv setup ---\n")
+		w.WriteString("    sub rsp, 32\n    call _novus_windows_args\n    add rsp, 32\n    mov rcx, [rax+8]\n    dec rcx\n    mov rdx, [rax]\n")
 	}
 
 	for _, instr := range fn.Instrs {

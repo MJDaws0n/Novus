@@ -5,6 +5,7 @@ import runtime;
 
 fn codegen_EmitX86_64(mod: CodegenIRModule, target: CodegenTarget) -> str {
     codegen_Target_EnsureHeapDefaults(target);
+    mod = codegen_withWindowsArgs(mod, target);
     mod = codegen_withCollector(mod, target);
     let e: CodegenX86_64Emitter = make_CodegenX86_64Emitter_11(mod, target, make_StringBuilder_8());
     codegen_x86_64Emitter_emit(e);
@@ -1117,23 +1118,7 @@ fn codegen_x86_64Emitter_emitNASM(e: CodegenX86_64Emitter) -> void {
         w.append("\n");
     }
     let winExterns: []str = codegen_x86_64Emitter_collectWinCallExterns(e);
-    if (codegen_x86_64Emitter_needsWinMainArgs(e)) {
-        let found: bool = false;
-        {
-            let items_279: []str = winExterns;
-            let count_281: i32 = len(items_279);
-            for (let index_280: i32 = 0; index_280 < count_281; index_280++) {
-                let name: str = items_279[index_280];
-                if ((name == "__getmainargs")) {
-                    found = true;
-                    break;
-                }
-            }
-        }
-        if (!(found)) {
-            winExterns = append_Str(winExterns, "__getmainargs");
-        }
-    }
+
     if ((len(winExterns) > 0)) {
         {
             let items_282: []str = winExterns;
@@ -1185,19 +1170,7 @@ fn codegen_x86_64Emitter_emitNASMFunction(e: CodegenX86_64Emitter, fn_value: Cod
         w.append("    mov qword [rax], 256\n");
     }
     if ((((fn_value.Name == "main") && (fn_value.ParamCount >= 2)) && (e.target.OS == 2))) {
-        w.append("    ; --- Windows argc/argv setup via __getmainargs ---\n");
-        w.append("    sub rsp, 48\n");
-        w.append("    lea rcx, [rel _novus_win_argc]\n");
-        w.append("    lea rdx, [rel _novus_win_argv]\n");
-        w.append("    lea r8, [rel _novus_win_envp]\n");
-        w.append("    xor r9, r9\n");
-        w.append("    lea rax, [rel _novus_win_newmode]\n");
-        w.append("    mov qword [rsp+32], rax\n");
-        w.append("    call __getmainargs\n");
-        w.append("    add rsp, 48\n");
-        w.append("    mov ecx, dword [rel _novus_win_argc]\n");
-        w.append("    mov rdx, qword [rel _novus_win_argv]\n");
-        w.append("    ; --- End Windows argc/argv setup ---\n");
+        w.append("    sub rsp, 32\n    call _novus_windows_args\n    add rsp, 32\n    mov rcx, [rax+8]\n    dec rcx\n    mov rdx, [rax]\n");
     }
     {
         let items_291: []CodegenIRInstr = fn_value.Instrs;
@@ -2440,6 +2413,9 @@ fn codegen_gasQuoteString(value: ByteBuffer) -> str {
         let ch: i32 = value.get(i);
         if (ch == 34) { result.append("\\\""); }
         else if (ch == 92) { result.append("\\\\"); }
+        else if (ch == 10) { result.append("\\n"); }
+        else if (ch == 13) { result.append("\\r"); }
+        else if (ch == 9) { result.append("\\t"); }
         else if (ch < 32 || ch > 126) { result.append("\\" + format_unsigned(i32_to_u64(ch), 8, 3)); }
         else { result.append_byte(ch); }
     }

@@ -55,10 +55,32 @@ jobs:
           choco install nasm --yes --no-progress
           "$env:ProgramFiles\NASM" >> $env:GITHUB_PATH
       - name: Bootstrap, reproduce, and test
-        run: python scripts/bootstrap.py --target=${{ matrix.target }}
+        run: python scripts/bootstrap.py --package --target=${{ matrix.target }}
+      - name: Save verified release binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ strategy.job-index }}
+          path: dist/novus-*
+          if-no-files-found: error
       - name: Save compiler and verification records
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: selfhost-${{ strategy.job-index }}
           path: build/selfhost/
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [bootstrap-tests, selfhost]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          merge-multiple: true
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/novus-*
