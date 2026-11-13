@@ -1,0 +1,5092 @@
+module model;
+
+import ../lib/std;
+import ../lib/file_io;
+import ../lib/process;
+
+class AstClassBinding {
+    pub let Name: str = "";
+    pub let Class: AstNode = null;
+    pub let Pos: AstPosition = CompilerState.zeroPosition;
+}
+
+fn copy_AstClassBinding(value: AstClassBinding) -> AstClassBinding {
+    let result: AstClassBinding = new AstClassBinding();
+    result.Name = value.Name;
+    result.Class = value.Class;
+    result.Pos = value.Pos;
+    return result;
+}
+
+class AstClassField {
+    pub let Name: str = "";
+    pub let Type: AstTypeExpr = null;
+    pub let Value: AstNode = null;
+    pub let Public: bool = false;
+    pub let Static: bool = false;
+    pub let Pos: AstPosition = CompilerState.zeroPosition;
+}
+
+fn copy_AstClassField(value: AstClassField) -> AstClassField {
+    let result: AstClassField = new AstClassField();
+    result.Name = value.Name;
+    result.Type = value.Type;
+    result.Value = value.Value;
+    result.Public = value.Public;
+    result.Static = value.Static;
+    result.Pos = value.Pos;
+    return result;
+}
+
+class AstClassMethod {
+    pub let Fn: AstNode = null;
+    pub let Public: bool = false;
+    pub let Static: bool = false;
+    pub let Constructor: bool = false;
+}
+
+fn copy_AstClassMethod(value: AstClassMethod) -> AstClassMethod {
+    let result: AstClassMethod = new AstClassMethod();
+    result.Fn = value.Fn;
+    result.Public = value.Public;
+    result.Static = value.Static;
+    result.Constructor = value.Constructor;
+    return result;
+}
+
+class AstParam {
+    pub let Name: str = "";
+    pub let Type: AstTypeExpr = null;
+    pub let Default: AstNode = null;
+    pub let Pos: AstPosition = CompilerState.zeroPosition;
+}
+
+fn copy_AstParam(value: AstParam) -> AstParam {
+    let result: AstParam = new AstParam();
+    result.Name = value.Name;
+    result.Type = value.Type;
+    result.Default = value.Default;
+    result.Pos = value.Pos;
+    return result;
+}
+
+class AstPosition {
+    pub let Line: i32 = 0;
+    pub let Column: i32 = 0;
+}
+
+class AstResolvedField {
+    pub let Type: str = "";
+    pub let Slot: i32 = 0;
+    pub let Global: str = "";
+}
+
+fn copy_AstResolvedField(value: AstResolvedField) -> AstResolvedField {
+    let result: AstResolvedField = new AstResolvedField();
+    result.Type = value.Type;
+    result.Slot = value.Slot;
+    result.Global = value.Global;
+    return result;
+}
+
+class AstTypeExpr {
+    pub let Name: str = "";
+    pub let IsArray: bool = false;
+    pub let ElemName: str = "";
+    pub let Pos: AstPosition = CompilerState.zeroPosition;
+}
+
+fn copy_AstTypeExpr(value: AstTypeExpr) -> AstTypeExpr {
+    let result: AstTypeExpr = new AstTypeExpr();
+    result.Name = value.Name;
+    result.IsArray = value.IsArray;
+    result.ElemName = value.ElemName;
+    result.Pos = value.Pos;
+    return result;
+}
+
+class CodegenIRFunc {
+    pub let Name: str = "";
+    pub let ParamNames: []str = [];
+    pub let ParamCount: i32 = 0;
+    pub let Instrs: []CodegenIRInstr = [];
+    pub let Locals: i32 = 0;
+    pub let FrameSize: i32 = 0;
+    pub let Imported: bool = false;
+}
+
+fn copy_CodegenIRFunc(value: CodegenIRFunc) -> CodegenIRFunc {
+    let result: CodegenIRFunc = new CodegenIRFunc();
+    result.Name = value.Name;
+    result.ParamNames = value.ParamNames;
+    result.ParamCount = value.ParamCount;
+    result.Instrs = value.Instrs;
+    result.Locals = value.Locals;
+    result.FrameSize = value.FrameSize;
+    result.Imported = value.Imported;
+    return result;
+}
+
+class CodegenIRGlobal {
+    pub let Name: str = "";
+    pub let Type: str = "";
+    pub let InitImm: i64 = 0;
+    pub let InitStr: i32 = 0;
+}
+
+fn copy_CodegenIRGlobal(value: CodegenIRGlobal) -> CodegenIRGlobal {
+    let result: CodegenIRGlobal = new CodegenIRGlobal();
+    result.Name = value.Name;
+    result.Type = value.Type;
+    result.InitImm = value.InitImm;
+    result.InitStr = value.InitStr;
+    return result;
+}
+
+class CodegenIRInstr {
+    pub let Op: i32 = 0;
+    pub let Dst: CodegenOperand = CompilerState.codegen_noneOperand;
+    pub let Src1: CodegenOperand = CompilerState.codegen_noneOperand;
+    pub let Src2: CodegenOperand = CompilerState.codegen_noneOperand;
+    pub let Args: []CodegenOperand = CompilerState.codegen_emptyOperands;
+}
+
+fn copy_CodegenIRInstr(value: CodegenIRInstr) -> CodegenIRInstr {
+    let result: CodegenIRInstr = new CodegenIRInstr();
+    result.Op = value.Op;
+    result.Dst = value.Dst;
+    result.Src1 = value.Src1;
+    result.Src2 = value.Src2;
+    result.Args = value.Args;
+    return result;
+}
+
+class CodegenIRModule {
+    pub let Functions: []CodegenIRFunc = [];
+    pub let Strings: []CodegenIRStringConst = [];
+    pub let Globals: []CodegenIRGlobal = [];
+    pub let EntryFunc: str = "";
+}
+
+fn copy_CodegenIRModule(value: CodegenIRModule) -> CodegenIRModule {
+    let result: CodegenIRModule = new CodegenIRModule();
+    result.Functions = value.Functions;
+    result.Strings = value.Strings;
+    result.Globals = value.Globals;
+    result.EntryFunc = value.EntryFunc;
+    return result;
+}
+
+class CodegenIRStringConst {
+    pub let Label: str = "";
+    pub let Value: ByteBuffer = new ByteBuffer();
+}
+
+fn copy_CodegenIRStringConst(value: CodegenIRStringConst) -> CodegenIRStringConst {
+    let result: CodegenIRStringConst = new CodegenIRStringConst();
+    result.Label = value.Label;
+    result.Value = value.Value;
+    return result;
+}
+
+class CodegenLowerer {
+    pub let module_value: CodegenIRModule = null;
+    pub let target: CodegenTarget = null;
+    pub let fn_value: CodegenIRFunc = null;
+    pub let nextVReg: i32 = 0;
+    pub let nextLabel: i32 = 0;
+    pub let vars: MapStrI32 = null;
+    pub let nextSlot: i32 = 0;
+    pub let varTypes: MapStrStr = null;
+    pub let vregIsStr: MapI32Bool = null;
+    pub let vregIsFloat: MapI32Bool = null;
+    pub let vregIsUnsigned: MapI32Bool = null;
+    pub let funcRetTypes: MapStrStr = null;
+    pub let funcParamTypes: MapStrArraystr = null;
+    pub let currentRetType: str = "";
+    pub let loopBreakLabel: str = "";
+    pub let loopContinueLabel: str = "";
+    pub let physRegs: MapStrBool = null;
+    pub let globals: MapStrStr = null;
+    pub let globalTypes: MapStrStr = null;
+    pub let globalInits: []AstNode = [];
+    pub let funcOverloads: MapStrArraycodegenfuncoverloadentry = null;
+}
+
+fn copy_CodegenLowerer(value: CodegenLowerer) -> CodegenLowerer {
+    let result: CodegenLowerer = new CodegenLowerer();
+    result.module_value = value.module_value;
+    result.target = value.target;
+    result.fn_value = value.fn_value;
+    result.nextVReg = value.nextVReg;
+    result.nextLabel = value.nextLabel;
+    result.vars = value.vars;
+    result.nextSlot = value.nextSlot;
+    result.varTypes = value.varTypes;
+    result.vregIsStr = value.vregIsStr;
+    result.vregIsFloat = value.vregIsFloat;
+    result.vregIsUnsigned = value.vregIsUnsigned;
+    result.funcRetTypes = value.funcRetTypes;
+    result.funcParamTypes = value.funcParamTypes;
+    result.currentRetType = value.currentRetType;
+    result.loopBreakLabel = value.loopBreakLabel;
+    result.loopContinueLabel = value.loopContinueLabel;
+    result.physRegs = value.physRegs;
+    result.globals = value.globals;
+    result.globalTypes = value.globalTypes;
+    result.globalInits = value.globalInits;
+    result.funcOverloads = value.funcOverloads;
+    return result;
+}
+
+// Operands are immutable after construction and may be shared by instructions.
+class CodegenOperand {
+    pub let Kind: i32 = 0;
+    pub let Reg: i32 = 0;
+    pub let PhysReg: str = "";
+    pub let Imm: i64 = 0;
+    pub let Label: str = "";
+    pub let MemBase: str = "";
+    pub let MemOffset: i64 = 0;
+}
+
+class CodegenOptions {
+    pub let Target: CodegenTarget = null;
+    pub let BuildDir: str = "";
+    pub let OutputName: str = "";
+    pub let Verbose: bool = false;
+    pub let SkipIRDump: bool = false;
+    pub let AsmOnly: bool = false;
+    pub let SkipLink: bool = false;
+    pub let HeapSize: i64 = 0;
+    pub let GCEntries: i32 = 0;
+}
+
+fn copy_CodegenOptions(value: CodegenOptions) -> CodegenOptions {
+    let result: CodegenOptions = new CodegenOptions();
+    result.Target = value.Target;
+    result.BuildDir = value.BuildDir;
+    result.OutputName = value.OutputName;
+    result.Verbose = value.Verbose;
+    result.SkipIRDump = value.SkipIRDump;
+    result.AsmOnly = value.AsmOnly;
+    result.SkipLink = value.SkipLink;
+    result.HeapSize = value.HeapSize;
+    result.GCEntries = value.GCEntries;
+    return result;
+}
+
+class CodegenResult {
+    pub let AsmFile: str = "";
+    pub let ObjFile: str = "";
+    pub let ExeFile: str = "";
+    pub let IRDump: str = "";
+    pub let Warnings: []str = [];
+}
+
+fn copy_CodegenResult(value: CodegenResult) -> CodegenResult {
+    let result: CodegenResult = new CodegenResult();
+    result.AsmFile = value.AsmFile;
+    result.ObjFile = value.ObjFile;
+    result.ExeFile = value.ExeFile;
+    result.IRDump = value.IRDump;
+    result.Warnings = value.Warnings;
+    return result;
+}
+
+class CodegenTarget {
+    pub let OS: i32 = 0;
+    pub let Arch: i32 = 0;
+    pub let Flavor: i32 = 0;
+    pub let ObjFmt: i32 = 0;
+    pub let PtrSize: i32 = 0;
+    pub let StackArgSlotSize: i32 = 0;
+    pub let ReturnReg: str = "";
+    pub let StackPointer: str = "";
+    pub let BasePointer: str = "";
+    pub let SyscallReg: str = "";
+    pub let ArgRegs: []str = [];
+    pub let SyscallArgRegs: []str = [];
+    pub let SyscallInstr: str = "";
+    pub let HeapSize: i64 = 0;
+    pub let GCEntries: i32 = 0;
+    pub let SymbolPrefix: str = "";
+    pub let EntryPoint: str = "";
+    pub let SyscallNumOffset: i64 = 0;
+}
+
+fn copy_CodegenTarget(value: CodegenTarget) -> CodegenTarget {
+    let result: CodegenTarget = new CodegenTarget();
+    result.OS = value.OS;
+    result.Arch = value.Arch;
+    result.Flavor = value.Flavor;
+    result.ObjFmt = value.ObjFmt;
+    result.PtrSize = value.PtrSize;
+    result.StackArgSlotSize = value.StackArgSlotSize;
+    result.ReturnReg = value.ReturnReg;
+    result.StackPointer = value.StackPointer;
+    result.BasePointer = value.BasePointer;
+    result.SyscallReg = value.SyscallReg;
+    result.ArgRegs = value.ArgRegs;
+    result.SyscallArgRegs = value.SyscallArgRegs;
+    result.SyscallInstr = value.SyscallInstr;
+    result.HeapSize = value.HeapSize;
+    result.GCEntries = value.GCEntries;
+    result.SymbolPrefix = value.SymbolPrefix;
+    result.EntryPoint = value.EntryPoint;
+    result.SyscallNumOffset = value.SyscallNumOffset;
+    return result;
+}
+
+class CodegenToolchain {
+    pub let Target: CodegenTarget = null;
+    pub let BuildDir: str = "";
+    pub let AsmFile: str = "";
+    pub let ObjFile: str = "";
+    pub let ExeFile: str = "";
+    pub let Verbose: bool = false;
+    pub let NASMPath: str = "";
+    pub let WindowsAPI: bool = false;
+    pub let GoLinkPath: str = "";
+}
+
+fn copy_CodegenToolchain(value: CodegenToolchain) -> CodegenToolchain {
+    let result: CodegenToolchain = new CodegenToolchain();
+    result.Target = value.Target;
+    result.BuildDir = value.BuildDir;
+    result.AsmFile = value.AsmFile;
+    result.ObjFile = value.ObjFile;
+    result.ExeFile = value.ExeFile;
+    result.Verbose = value.Verbose;
+    result.NASMPath = value.NASMPath;
+    result.WindowsAPI = value.WindowsAPI;
+    result.GoLinkPath = value.GoLinkPath;
+    return result;
+}
+
+class CodegenArm64Emitter {
+    pub let mod: CodegenIRModule = null;
+    pub let target: CodegenTarget = null;
+    pub let b: StringBuilder = null;
+    pub let uid: i32 = 0;
+}
+
+fn copy_CodegenArm64Emitter(value: CodegenArm64Emitter) -> CodegenArm64Emitter {
+    let result: CodegenArm64Emitter = new CodegenArm64Emitter();
+    result.mod = value.mod;
+    result.target = value.target;
+    result.b = value.b;
+    result.uid = value.uid;
+    return result;
+}
+
+class CodegenFuncOverloadEntry {
+    pub let mangledName: str = "";
+    pub let paramCount: i32 = 0;
+}
+
+fn copy_CodegenFuncOverloadEntry(value: CodegenFuncOverloadEntry) -> CodegenFuncOverloadEntry {
+    let result: CodegenFuncOverloadEntry = new CodegenFuncOverloadEntry();
+    result.mangledName = value.mangledName;
+    result.paramCount = value.paramCount;
+    return result;
+}
+
+class CodegenX86Emitter {
+    pub let mod: CodegenIRModule = null;
+    pub let target: CodegenTarget = null;
+    pub let b: StringBuilder = null;
+    pub let nextID: i32 = 0;
+    pub let fn_value: CodegenIRFunc = null;
+}
+
+fn copy_CodegenX86Emitter(value: CodegenX86Emitter) -> CodegenX86Emitter {
+    let result: CodegenX86Emitter = new CodegenX86Emitter();
+    result.mod = value.mod;
+    result.target = value.target;
+    result.b = value.b;
+    result.nextID = value.nextID;
+    result.fn_value = value.fn_value;
+    return result;
+}
+
+class CodegenX86_64Emitter {
+    pub let mod: CodegenIRModule = null;
+    pub let target: CodegenTarget = null;
+    pub let b: StringBuilder = null;
+    pub let uid: i32 = 0;
+}
+
+fn copy_CodegenX86_64Emitter(value: CodegenX86_64Emitter) -> CodegenX86_64Emitter {
+    let result: CodegenX86_64Emitter = new CodegenX86_64Emitter();
+    result.mod = value.mod;
+    result.target = value.target;
+    result.b = value.b;
+    result.uid = value.uid;
+    return result;
+}
+
+class ImportsImportedModule {
+    pub let Path: str = "";
+    pub let FilePath: str = "";
+    pub let Alias: str = "";
+    pub let SelectFns: []str = [];
+    pub let Program: AstNode = null;
+    pub let Functions: []AstNode = [];
+}
+
+fn copy_ImportsImportedModule(value: ImportsImportedModule) -> ImportsImportedModule {
+    let result: ImportsImportedModule = new ImportsImportedModule();
+    result.Path = value.Path;
+    result.FilePath = value.FilePath;
+    result.Alias = value.Alias;
+    result.SelectFns = value.SelectFns;
+    result.Program = value.Program;
+    result.Functions = value.Functions;
+    return result;
+}
+
+class ImportsResolveError {
+    pub let Message: str = "";
+    pub let Pos: AstPosition = CompilerState.zeroPosition;
+    pub let File: str = "";
+}
+
+fn copy_ImportsResolveError(value: ImportsResolveError) -> ImportsResolveError {
+    let result: ImportsResolveError = new ImportsResolveError();
+    result.Message = value.Message;
+    result.Pos = value.Pos;
+    result.File = value.File;
+    return result;
+}
+
+class ImportsResolver {
+    pub let BaseDir: str = "";
+    pub let resolved: MapStrImportsimportedmodule = null;
+    pub let importStack: []str = [];
+    pub let errors: []ImportsResolveError = [];
+    pub let allModules: []ImportsImportedModule = [];
+    pub let classScopes: MapStrArrayastclassbinding = null;
+    pub let TargetOS: str = "";
+    pub let TargetArch: str = "";
+}
+
+fn copy_ImportsResolver(value: ImportsResolver) -> ImportsResolver {
+    let result: ImportsResolver = new ImportsResolver();
+    result.BaseDir = value.BaseDir;
+    result.resolved = value.resolved;
+    result.importStack = value.importStack;
+    result.errors = value.errors;
+    result.allModules = value.allModules;
+    result.classScopes = value.classScopes;
+    result.TargetOS = value.TargetOS;
+    result.TargetArch = value.TargetArch;
+    return result;
+}
+
+class ImportsFnKey {
+    pub let alias: str = "";
+    pub let sig: str = "";
+}
+
+fn copy_ImportsFnKey(value: ImportsFnKey) -> ImportsFnKey {
+    let result: ImportsFnKey = new ImportsFnKey();
+    result.alias = value.alias;
+    result.sig = value.sig;
+    return result;
+}
+
+class ImportsSigOrigin {
+    pub let filePath: str = "";
+    pub let sig: str = "";
+    pub let modPath: str = "";
+}
+
+fn copy_ImportsSigOrigin(value: ImportsSigOrigin) -> ImportsSigOrigin {
+    let result: ImportsSigOrigin = new ImportsSigOrigin();
+    result.filePath = value.filePath;
+    result.sig = value.sig;
+    result.modPath = value.modPath;
+    return result;
+}
+
+class LexerLexError {
+    pub let Message: str = "";
+    pub let Lexeme: str = "";
+    pub let Line: i32 = 0;
+    pub let Column: i32 = 0;
+}
+
+fn copy_LexerLexError(value: LexerLexError) -> LexerLexError {
+    let result: LexerLexError = new LexerLexError();
+    result.Message = value.Message;
+    result.Lexeme = value.Lexeme;
+    result.Line = value.Line;
+    result.Column = value.Column;
+    return result;
+}
+
+class LexerToken {
+    pub let Type: str = "";
+    pub let Value: str = "";
+    pub let Line: i32 = 0;
+    pub let Column: i32 = 0;
+}
+
+class ParserParseError {
+    pub let Message: str = "";
+    pub let Line: i32 = 0;
+    pub let Column: i32 = 0;
+}
+
+fn copy_ParserParseError(value: ParserParseError) -> ParserParseError {
+    let result: ParserParseError = new ParserParseError();
+    result.Message = value.Message;
+    result.Line = value.Line;
+    result.Column = value.Column;
+    return result;
+}
+
+class ParserParser {
+    pub let tokens: []LexerToken = [];
+    pub let pos: i32 = 0;
+    pub let errors: []ParserParseError = [];
+}
+
+fn copy_ParserParser(value: ParserParser) -> ParserParser {
+    let result: ParserParser = new ParserParser();
+    result.tokens = value.tokens;
+    result.pos = value.pos;
+    result.errors = value.errors;
+    return result;
+}
+
+class SemanticAnalyzer {
+    pub let diagnostics: []SemanticDiagnostic = [];
+    pub let scope: SemanticScope = null;
+    pub let currentFunc: AstNode = null;
+    pub let loopDepth: i32 = 0;
+    pub let importedFuncs: []SemanticImportedFunc = [];
+    pub let sourceFile: str = "";
+    pub let currentClass: SemanticClassInfo = null;
+    pub let classInstance: bool = false;
+    pub let fileFunctions: MapStrSemanticscope = null;
+    pub let classSourceIDs: MapStrI32 = null;
+    pub let classes: MapStrMapstrsemanticclassinfo = null;
+    pub let classDecls: MapAstnodeSemanticclassinfo = null;
+    pub let classMethods: []SemanticClassMethodBody = [];
+    pub let importAliases: MapStrBool = null;
+    pub let importedFnSet: MapAstnodeBool = null;
+    pub let importedFnAlias: MapAstnodeStr = null;
+}
+
+fn copy_SemanticAnalyzer(value: SemanticAnalyzer) -> SemanticAnalyzer {
+    let result: SemanticAnalyzer = new SemanticAnalyzer();
+    result.diagnostics = value.diagnostics;
+    result.scope = value.scope;
+    result.currentFunc = value.currentFunc;
+    result.loopDepth = value.loopDepth;
+    result.importedFuncs = value.importedFuncs;
+    result.sourceFile = value.sourceFile;
+    result.currentClass = value.currentClass;
+    result.classInstance = value.classInstance;
+    result.fileFunctions = value.fileFunctions;
+    result.classSourceIDs = value.classSourceIDs;
+    result.classes = value.classes;
+    result.classDecls = value.classDecls;
+    result.classMethods = value.classMethods;
+    result.importAliases = value.importAliases;
+    result.importedFnSet = value.importedFnSet;
+    result.importedFnAlias = value.importedFnAlias;
+    return result;
+}
+
+class SemanticDiagnostic {
+    pub let Message: str = "";
+    pub let File: str = "";
+    pub let Pos: AstPosition = CompilerState.zeroPosition;
+    pub let Severity: i32 = 0;
+    pub let classRelated: bool = false;
+}
+
+fn copy_SemanticDiagnostic(value: SemanticDiagnostic) -> SemanticDiagnostic {
+    let result: SemanticDiagnostic = new SemanticDiagnostic();
+    result.Message = value.Message;
+    result.File = value.File;
+    result.Pos = value.Pos;
+    result.Severity = value.Severity;
+    result.classRelated = value.classRelated;
+    return result;
+}
+
+class SemanticImportedFunc {
+    pub let Fn: AstNode = null;
+    pub let Alias: str = "";
+}
+
+fn copy_SemanticImportedFunc(value: SemanticImportedFunc) -> SemanticImportedFunc {
+    let result: SemanticImportedFunc = new SemanticImportedFunc();
+    result.Fn = value.Fn;
+    result.Alias = value.Alias;
+    return result;
+}
+
+class SemanticScope {
+    pub let parent: SemanticScope = null;
+    pub let symbols: MapStrSemanticsymbol = null;
+    pub let funcOverloads: MapStrArraysemanticsymbol = null;
+}
+
+fn copy_SemanticScope(value: SemanticScope) -> SemanticScope {
+    let result: SemanticScope = new SemanticScope();
+    result.parent = value.parent;
+    result.symbols = value.symbols;
+    result.funcOverloads = value.funcOverloads;
+    return result;
+}
+
+class SemanticSymbol {
+    pub let Name: str = "";
+    pub let MangledName: str = "";
+    pub let Kind: i32 = 0;
+    pub let Type: SemanticType = null;
+    pub let Pos: AstPosition = CompilerState.zeroPosition;
+    pub let Params: []SemanticType = [];
+    pub let Variadic: bool = false;
+    pub let Defaults: []AstNode = [];
+    pub let DefaultCount: i32 = 0;
+    pub let ReturnType: SemanticType = null;
+}
+
+fn copy_SemanticSymbol(value: SemanticSymbol) -> SemanticSymbol {
+    let result: SemanticSymbol = new SemanticSymbol();
+    result.Name = value.Name;
+    result.MangledName = value.MangledName;
+    result.Kind = value.Kind;
+    result.Type = value.Type;
+    result.Pos = value.Pos;
+    result.Params = value.Params;
+    result.Variadic = value.Variadic;
+    result.Defaults = value.Defaults;
+    result.DefaultCount = value.DefaultCount;
+    result.ReturnType = value.ReturnType;
+    return result;
+}
+
+class SemanticType {
+    pub let Name: str = "";
+    pub let IsArray: bool = false;
+    pub let class_value: SemanticClassInfo = null;
+    pub let identity: str = "";
+    pub let ElemType: SemanticType = null;
+}
+
+fn copy_SemanticType(value: SemanticType) -> SemanticType {
+    let result: SemanticType = new SemanticType();
+    result.Name = value.Name;
+    result.IsArray = value.IsArray;
+    result.class_value = value.class_value;
+    result.identity = value.identity;
+    result.ElemType = value.ElemType;
+    return result;
+}
+
+class SemanticBuiltinInfo {
+    pub let Arity: i32 = 0;
+    pub let ReturnType: SemanticType = null;
+}
+
+fn copy_SemanticBuiltinInfo(value: SemanticBuiltinInfo) -> SemanticBuiltinInfo {
+    let result: SemanticBuiltinInfo = new SemanticBuiltinInfo();
+    result.Arity = value.Arity;
+    result.ReturnType = value.ReturnType;
+    return result;
+}
+
+class SemanticClassInfo {
+    pub let decl: AstNode = null;
+    pub let typ: SemanticType = null;
+    pub let fields: MapStrSemanticfieldinfo = null;
+    pub let methods: MapStrArraysemanticmethodinfo = null;
+    pub let constructor: []SemanticMethodInfo = [];
+    pub let slots: i32 = 0;
+}
+
+fn copy_SemanticClassInfo(value: SemanticClassInfo) -> SemanticClassInfo {
+    let result: SemanticClassInfo = new SemanticClassInfo();
+    result.decl = value.decl;
+    result.typ = value.typ;
+    result.fields = value.fields;
+    result.methods = value.methods;
+    result.constructor = value.constructor;
+    result.slots = value.slots;
+    return result;
+}
+
+class SemanticClassMethodBody {
+    pub let class_value: SemanticClassInfo = null;
+    pub let method: SemanticMethodInfo = null;
+}
+
+fn copy_SemanticClassMethodBody(value: SemanticClassMethodBody) -> SemanticClassMethodBody {
+    let result: SemanticClassMethodBody = new SemanticClassMethodBody();
+    result.class_value = value.class_value;
+    result.method = value.method;
+    return result;
+}
+
+class SemanticFieldInfo {
+    pub let decl: AstClassField = null;
+    pub let typ: SemanticType = null;
+    pub let storage: AstResolvedField = new AstResolvedField();
+}
+
+fn copy_SemanticFieldInfo(value: SemanticFieldInfo) -> SemanticFieldInfo {
+    let result: SemanticFieldInfo = new SemanticFieldInfo();
+    result.decl = value.decl;
+    result.typ = value.typ;
+    result.storage = copy_AstResolvedField(value.storage);
+    return result;
+}
+
+class SemanticMethodInfo {
+    pub let decl: AstClassMethod = null;
+    pub let sym: SemanticSymbol = null;
+}
+
+fn copy_SemanticMethodInfo(value: SemanticMethodInfo) -> SemanticMethodInfo {
+    let result: SemanticMethodInfo = new SemanticMethodInfo();
+    result.decl = value.decl;
+    result.sym = value.sym;
+    return result;
+}
+
+// Empty list fields are shared read-only; append/extend helpers materialize
+// a private list on first use. Tokens and source positions are immutable.
+class AstNode {
+    pub let Kind: str;
+    pub let Operand: AstNode = null;
+    pub let Pos: AstPosition = CompilerState.zeroPosition;
+    pub let Elems: []AstNode = CompilerState.empty_AstNode;
+    pub let Target: AstNode = null;
+    pub let Value: AstNode = null;
+    pub let Op: str = "";
+    pub let Left: AstNode = null;
+    pub let Right: AstNode = null;
+    pub let Stmts: []AstNode = CompilerState.empty_AstNode;
+    pub let BoolValue: bool = false;
+    pub let Callee: AstNode = null;
+    pub let Args: []AstNode = CompilerState.empty_AstNode;
+    pub let Receiver: AstNode = null;
+    pub let ResolvedCallee: str = "";
+    pub let Name: str = "";
+    pub let Fields: []AstClassField = CompilerState.empty_AstClassField;
+    pub let Initializers: []AstNode = CompilerState.empty_AstNode;
+    pub let Methods: []AstClassMethod = CompilerState.empty_AstClassMethod;
+    pub let SourceFile: str = "";
+    pub let Variable: str = "";
+    pub let Operator: str = "";
+    pub let TextValue: str = "";
+    pub let Imports: []AstNode = CompilerState.empty_AstNode;
+    pub let Functions: []AstNode = CompilerState.empty_AstNode;
+    pub let Globals: []AstNode = CompilerState.empty_AstNode;
+    pub let Classes: []AstNode = CompilerState.empty_AstNode;
+    pub let Expression: AstNode = null;
+    pub let MangledName: str = "";
+    pub let Params: []AstParam = CompilerState.empty_AstParam;
+    pub let ReturnType: AstTypeExpr = null;
+    pub let Body: AstNode = null;
+    pub let Imported: bool = false;
+    pub let Init: AstNode = null;
+    pub let Condition: AstNode = null;
+    pub let Update: AstNode = null;
+    pub let Type: AstTypeExpr = null;
+    pub let RuntimeInit: bool = false;
+    pub let Then: AstNode = null;
+    pub let Else: AstNode = null;
+    pub let Path: str = "";
+    pub let Alias: str = "";
+    pub let SelectFns: []str = CompilerState.empty_str;
+    pub let Object: AstNode = null;
+    pub let Index: AstNode = null;
+    pub let ArrayType: str = "";
+    pub let Field: str = "";
+    pub let ResolvedField: AstResolvedField = null;
+    pub let ClassName: str = "";
+    pub let Constructor: str = "";
+    pub let Slots: i32 = 0;
+    pub let Module: AstNode = null;
+    pub let ClassHelpers: []AstNode = CompilerState.empty_AstNode;
+    pub let ClassScopes: MapStrArrayastclassbinding = null;
+    pub let ClassGlobals: []AstNode = CompilerState.empty_AstNode;
+    pub let ClassFunctions: []AstNode = CompilerState.empty_AstNode;
+    pub let Startup: []AstNode = CompilerState.empty_AstNode;
+    pub let CompTimeBlocks: []AstNode = CompilerState.empty_AstNode;
+}
+
+fn copy_AstNode(value: AstNode) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = value.Kind;
+    result.Operand = value.Operand;
+    result.Pos = value.Pos;
+    result.Elems = value.Elems;
+    result.Target = value.Target;
+    result.Value = value.Value;
+    result.Op = value.Op;
+    result.Left = value.Left;
+    result.Right = value.Right;
+    result.Stmts = value.Stmts;
+    result.BoolValue = value.BoolValue;
+    result.Callee = value.Callee;
+    result.Args = value.Args;
+    result.Receiver = value.Receiver;
+    result.ResolvedCallee = value.ResolvedCallee;
+    result.Name = value.Name;
+    result.Fields = value.Fields;
+    result.Initializers = value.Initializers;
+    result.Methods = value.Methods;
+    result.SourceFile = value.SourceFile;
+    result.Variable = value.Variable;
+    result.Operator = value.Operator;
+    result.TextValue = value.TextValue;
+    result.Imports = value.Imports;
+    result.Functions = value.Functions;
+    result.Globals = value.Globals;
+    result.Classes = value.Classes;
+    result.Expression = value.Expression;
+    result.MangledName = value.MangledName;
+    result.Params = value.Params;
+    result.ReturnType = value.ReturnType;
+    result.Body = value.Body;
+    result.Imported = value.Imported;
+    result.Init = value.Init;
+    result.Condition = value.Condition;
+    result.Update = value.Update;
+    result.Type = value.Type;
+    result.RuntimeInit = value.RuntimeInit;
+    result.Then = value.Then;
+    result.Else = value.Else;
+    result.Path = value.Path;
+    result.Alias = value.Alias;
+    result.SelectFns = value.SelectFns;
+    result.Object = value.Object;
+    result.Index = value.Index;
+    result.ArrayType = value.ArrayType;
+    result.Field = value.Field;
+    result.ResolvedField = value.ResolvedField;
+    result.ClassName = value.ClassName;
+    result.Constructor = value.Constructor;
+    result.Slots = value.Slots;
+    result.Module = value.Module;
+    result.ClassHelpers = value.ClassHelpers;
+    result.ClassScopes = value.ClassScopes;
+    result.ClassGlobals = value.ClassGlobals;
+    result.ClassFunctions = value.ClassFunctions;
+    result.Startup = value.Startup;
+    result.CompTimeBlocks = value.CompTimeBlocks;
+    return result;
+}
+
+class CompilerState {
+    pub static let integerText: MapI32Str = null;
+    pub static let zeroPosition: AstPosition = null;
+    pub static let empty_AstClassField: []AstClassField = [];
+    pub static let empty_AstClassMethod: []AstClassMethod = [];
+    pub static let empty_AstNode: []AstNode = [];
+    pub static let empty_AstParam: []AstParam = [];
+    pub static let empty_str: []str = [];
+
+    pub static let codegen_noneOperand: CodegenOperand = null;
+    pub static let codegen_emptyOperands: []CodegenOperand = [];
+    pub static let arguments: []str = [];
+    pub static let driver_debugMode: bool = false;
+    pub static let codegen_x86Registers: MapStrBool = null;
+    pub static let codegen_arm64Registers: MapStrBool = null;
+    pub static let codegen_irOpNames: MapI32Str = null;
+    pub static let lexer_keywords: MapStrStr = null;
+    pub static let semantic_TypeVoid: SemanticType = null;
+    pub static let semantic_TypeBool: SemanticType = null;
+    pub static let semantic_TypeStr: SemanticType = null;
+    pub static let semantic_TypeU8: SemanticType = null;
+    pub static let semantic_TypeU16: SemanticType = null;
+    pub static let semantic_TypeU32: SemanticType = null;
+    pub static let semantic_TypeU64: SemanticType = null;
+    pub static let semantic_TypeI8: SemanticType = null;
+    pub static let semantic_TypeI16: SemanticType = null;
+    pub static let semantic_TypeI32: SemanticType = null;
+    pub static let semantic_TypeI64: SemanticType = null;
+    pub static let semantic_TypeF32: SemanticType = null;
+    pub static let semantic_TypeF64: SemanticType = null;
+    pub static let semantic_TypeUntypedInt: SemanticType = null;
+    pub static let semantic_TypeUntypedFloat: SemanticType = null;
+    pub static let semantic_TypeNull: SemanticType = null;
+    pub static let semantic_TypeReg: SemanticType = null;
+    pub static let semantic_builtinTypes: MapStrSemantictype = null;
+    pub static let semantic_builtinFuncTable: MapStrSemanticbuiltininfo = null;
+    pub static let semantic_reservedRegisters: []str = [];
+}
+
+fn initialize_compiler() -> void {
+    CompilerState.integerText = new MapI32Str();
+    CompilerState.zeroPosition = new AstPosition();
+    CompilerState.codegen_noneOperand = new CodegenOperand();
+    CompilerState.driver_debugMode = false;
+    let map_132: MapStrBool = new MapStrBool();
+    MapStrBool_put(map_132, "eax", true);
+    MapStrBool_put(map_132, "ebx", true);
+    MapStrBool_put(map_132, "ecx", true);
+    MapStrBool_put(map_132, "edx", true);
+    MapStrBool_put(map_132, "esi", true);
+    MapStrBool_put(map_132, "edi", true);
+    MapStrBool_put(map_132, "ebp", true);
+    MapStrBool_put(map_132, "esp", true);
+    MapStrBool_put(map_132, "rax", true);
+    MapStrBool_put(map_132, "rbx", true);
+    MapStrBool_put(map_132, "rcx", true);
+    MapStrBool_put(map_132, "rdx", true);
+    MapStrBool_put(map_132, "rsi", true);
+    MapStrBool_put(map_132, "rdi", true);
+    MapStrBool_put(map_132, "rbp", true);
+    MapStrBool_put(map_132, "rsp", true);
+    MapStrBool_put(map_132, "r8", true);
+    MapStrBool_put(map_132, "r9", true);
+    MapStrBool_put(map_132, "r10", true);
+    MapStrBool_put(map_132, "r11", true);
+    MapStrBool_put(map_132, "r12", true);
+    MapStrBool_put(map_132, "r13", true);
+    MapStrBool_put(map_132, "r14", true);
+    MapStrBool_put(map_132, "r15", true);
+    MapStrBool_put(map_132, "eip", true);
+    MapStrBool_put(map_132, "rip", true);
+    MapStrBool_put(map_132, "eflags", true);
+    MapStrBool_put(map_132, "rflags", true);
+    MapStrBool_put(map_132, "st0", true);
+    MapStrBool_put(map_132, "st1", true);
+    MapStrBool_put(map_132, "st2", true);
+    MapStrBool_put(map_132, "st3", true);
+    MapStrBool_put(map_132, "st4", true);
+    MapStrBool_put(map_132, "st5", true);
+    MapStrBool_put(map_132, "st6", true);
+    MapStrBool_put(map_132, "st7", true);
+    MapStrBool_put(map_132, "mm0", true);
+    MapStrBool_put(map_132, "mm1", true);
+    MapStrBool_put(map_132, "mm2", true);
+    MapStrBool_put(map_132, "mm3", true);
+    MapStrBool_put(map_132, "mm4", true);
+    MapStrBool_put(map_132, "mm5", true);
+    MapStrBool_put(map_132, "mm6", true);
+    MapStrBool_put(map_132, "mm7", true);
+    MapStrBool_put(map_132, "xmm0", true);
+    MapStrBool_put(map_132, "xmm1", true);
+    MapStrBool_put(map_132, "xmm2", true);
+    MapStrBool_put(map_132, "xmm3", true);
+    MapStrBool_put(map_132, "xmm4", true);
+    MapStrBool_put(map_132, "xmm5", true);
+    MapStrBool_put(map_132, "xmm6", true);
+    MapStrBool_put(map_132, "xmm7", true);
+    MapStrBool_put(map_132, "xmm8", true);
+    MapStrBool_put(map_132, "xmm9", true);
+    MapStrBool_put(map_132, "xmm10", true);
+    MapStrBool_put(map_132, "xmm11", true);
+    MapStrBool_put(map_132, "xmm12", true);
+    MapStrBool_put(map_132, "xmm13", true);
+    MapStrBool_put(map_132, "xmm14", true);
+    MapStrBool_put(map_132, "xmm15", true);
+    CompilerState.codegen_x86Registers = map_132;
+    let map_133: MapStrBool = new MapStrBool();
+    MapStrBool_put(map_133, "x0", true);
+    MapStrBool_put(map_133, "x1", true);
+    MapStrBool_put(map_133, "x2", true);
+    MapStrBool_put(map_133, "x3", true);
+    MapStrBool_put(map_133, "x4", true);
+    MapStrBool_put(map_133, "x5", true);
+    MapStrBool_put(map_133, "x6", true);
+    MapStrBool_put(map_133, "x7", true);
+    MapStrBool_put(map_133, "x8", true);
+    MapStrBool_put(map_133, "x9", true);
+    MapStrBool_put(map_133, "x10", true);
+    MapStrBool_put(map_133, "x11", true);
+    MapStrBool_put(map_133, "x12", true);
+    MapStrBool_put(map_133, "x13", true);
+    MapStrBool_put(map_133, "x14", true);
+    MapStrBool_put(map_133, "x15", true);
+    MapStrBool_put(map_133, "x16", true);
+    MapStrBool_put(map_133, "x17", true);
+    MapStrBool_put(map_133, "x18", true);
+    MapStrBool_put(map_133, "x19", true);
+    MapStrBool_put(map_133, "x20", true);
+    MapStrBool_put(map_133, "x21", true);
+    MapStrBool_put(map_133, "x22", true);
+    MapStrBool_put(map_133, "x23", true);
+    MapStrBool_put(map_133, "x24", true);
+    MapStrBool_put(map_133, "x25", true);
+    MapStrBool_put(map_133, "x26", true);
+    MapStrBool_put(map_133, "x27", true);
+    MapStrBool_put(map_133, "x28", true);
+    MapStrBool_put(map_133, "x29", true);
+    MapStrBool_put(map_133, "x30", true);
+    MapStrBool_put(map_133, "w0", true);
+    MapStrBool_put(map_133, "w1", true);
+    MapStrBool_put(map_133, "w2", true);
+    MapStrBool_put(map_133, "w3", true);
+    MapStrBool_put(map_133, "w4", true);
+    MapStrBool_put(map_133, "w5", true);
+    MapStrBool_put(map_133, "w6", true);
+    MapStrBool_put(map_133, "w7", true);
+    MapStrBool_put(map_133, "w8", true);
+    MapStrBool_put(map_133, "w9", true);
+    MapStrBool_put(map_133, "w10", true);
+    MapStrBool_put(map_133, "w11", true);
+    MapStrBool_put(map_133, "w12", true);
+    MapStrBool_put(map_133, "w13", true);
+    MapStrBool_put(map_133, "w14", true);
+    MapStrBool_put(map_133, "w15", true);
+    MapStrBool_put(map_133, "w16", true);
+    MapStrBool_put(map_133, "w17", true);
+    MapStrBool_put(map_133, "w18", true);
+    MapStrBool_put(map_133, "w19", true);
+    MapStrBool_put(map_133, "w20", true);
+    MapStrBool_put(map_133, "w21", true);
+    MapStrBool_put(map_133, "w22", true);
+    MapStrBool_put(map_133, "w23", true);
+    MapStrBool_put(map_133, "w24", true);
+    MapStrBool_put(map_133, "w25", true);
+    MapStrBool_put(map_133, "w26", true);
+    MapStrBool_put(map_133, "w27", true);
+    MapStrBool_put(map_133, "w28", true);
+    MapStrBool_put(map_133, "w29", true);
+    MapStrBool_put(map_133, "w30", true);
+    MapStrBool_put(map_133, "sp", true);
+    MapStrBool_put(map_133, "xzr", true);
+    MapStrBool_put(map_133, "wzr", true);
+    MapStrBool_put(map_133, "lr", true);
+    CompilerState.codegen_arm64Registers = map_133;
+    let map_353: MapI32Str = new MapI32Str();
+    MapI32Str_put(map_353, 0, "mov");
+    MapI32Str_put(map_353, 1, "lea");
+    MapI32Str_put(map_353, 2, "load");
+    MapI32Str_put(map_353, 3, "store");
+    MapI32Str_put(map_353, 4, "push");
+    MapI32Str_put(map_353, 5, "pop");
+    MapI32Str_put(map_353, 6, "add");
+    MapI32Str_put(map_353, 7, "sub");
+    MapI32Str_put(map_353, 8, "mul");
+    MapI32Str_put(map_353, 9, "div");
+    MapI32Str_put(map_353, 10, "mod");
+    MapI32Str_put(map_353, 11, "udiv");
+    MapI32Str_put(map_353, 12, "umod");
+    MapI32Str_put(map_353, 13, "neg");
+    MapI32Str_put(map_353, 14, "and");
+    MapI32Str_put(map_353, 15, "or");
+    MapI32Str_put(map_353, 16, "xor");
+    MapI32Str_put(map_353, 17, "not");
+    MapI32Str_put(map_353, 18, "shl");
+    MapI32Str_put(map_353, 19, "shr");
+    MapI32Str_put(map_353, 20, "bitnot");
+    MapI32Str_put(map_353, 21, "cmp_eq");
+    MapI32Str_put(map_353, 22, "cmp_ne");
+    MapI32Str_put(map_353, 23, "cmp_lt");
+    MapI32Str_put(map_353, 24, "cmp_le");
+    MapI32Str_put(map_353, 25, "cmp_gt");
+    MapI32Str_put(map_353, 26, "cmp_ge");
+    MapI32Str_put(map_353, 79, "narrow");
+    MapI32Str_put(map_353, 80, "ushr");
+    MapI32Str_put(map_353, 75, "ucmp_lt");
+    MapI32Str_put(map_353, 76, "ucmp_le");
+    MapI32Str_put(map_353, 77, "ucmp_gt");
+    MapI32Str_put(map_353, 78, "ucmp_ge");
+    MapI32Str_put(map_353, 27, "jmp");
+    MapI32Str_put(map_353, 28, "jmp_if");
+    MapI32Str_put(map_353, 29, "jmp_not");
+    MapI32Str_put(map_353, 30, "label");
+    MapI32Str_put(map_353, 31, "call");
+    MapI32Str_put(map_353, 32, "ret");
+    MapI32Str_put(map_353, 33, "syscall");
+    MapI32Str_put(map_353, 34, "int");
+    MapI32Str_put(map_353, 35, "nop");
+    MapI32Str_put(map_353, 36, "setreg");
+    MapI32Str_put(map_353, 37, "getreg");
+    MapI32Str_put(map_353, 38, "setflag");
+    MapI32Str_put(map_353, 39, "getflag");
+    MapI32Str_put(map_353, 40, "str_concat");
+    MapI32Str_put(map_353, 41, "str_len");
+    MapI32Str_put(map_353, 42, "str_index");
+    MapI32Str_put(map_353, 43, "store_byte");
+    MapI32Str_put(map_353, 44, "str_cmp_eq");
+    MapI32Str_put(map_353, 45, "load8");
+    MapI32Str_put(map_353, 46, "load32");
+    MapI32Str_put(map_353, 47, "load64");
+    MapI32Str_put(map_353, 48, "array_new");
+    MapI32Str_put(map_353, 49, "array_get");
+    MapI32Str_put(map_353, 50, "array_set");
+    MapI32Str_put(map_353, 51, "array_append");
+    MapI32Str_put(map_353, 52, "array_pop");
+    MapI32Str_put(map_353, 53, "array_len");
+    MapI32Str_put(map_353, 54, "win_call");
+    MapI32Str_put(map_353, 55, "load_global");
+    MapI32Str_put(map_353, 56, "store_global");
+    MapI32Str_put(map_353, 57, "fadd");
+    MapI32Str_put(map_353, 58, "fsub");
+    MapI32Str_put(map_353, 59, "fmul");
+    MapI32Str_put(map_353, 60, "fdiv");
+    MapI32Str_put(map_353, 61, "fmod");
+    MapI32Str_put(map_353, 62, "fneg");
+    MapI32Str_put(map_353, 63, "fcmp_eq");
+    MapI32Str_put(map_353, 64, "fcmp_ne");
+    MapI32Str_put(map_353, 65, "fcmp_lt");
+    MapI32Str_put(map_353, 66, "fcmp_le");
+    MapI32Str_put(map_353, 67, "fcmp_gt");
+    MapI32Str_put(map_353, 68, "fcmp_ge");
+    MapI32Str_put(map_353, 69, "i2f");
+    MapI32Str_put(map_353, 70, "f2i");
+    MapI32Str_put(map_353, 73, "gc_collect");
+    MapI32Str_put(map_353, 74, "heap_alloc");
+    MapI32Str_put(map_353, 71, "comment");
+    MapI32Str_put(map_353, 72, "data");
+    CompilerState.codegen_irOpNames = map_353;
+    let map_622: MapStrStr = new MapStrStr();
+    MapStrStr_put(map_622, "module", "MODULE");
+    MapStrStr_put(map_622, "import", "IMPORT");
+    MapStrStr_put(map_622, "fn", "FN");
+    MapStrStr_put(map_622, "class", "CLASS");
+    MapStrStr_put(map_622, "new", "NEW");
+    MapStrStr_put(map_622, "pub", "PUB");
+    MapStrStr_put(map_622, "priv", "PRIV");
+    MapStrStr_put(map_622, "static", "STATIC");
+    MapStrStr_put(map_622, "let", "LET");
+    MapStrStr_put(map_622, "return", "RETURN");
+    MapStrStr_put(map_622, "true", "TRUE");
+    MapStrStr_put(map_622, "false", "FALSE");
+    MapStrStr_put(map_622, "null", "NULL");
+    MapStrStr_put(map_622, "if", "IF");
+    MapStrStr_put(map_622, "else", "ELSE");
+    MapStrStr_put(map_622, "for", "FOR");
+    MapStrStr_put(map_622, "while", "WHILE");
+    MapStrStr_put(map_622, "break", "BREAK");
+    MapStrStr_put(map_622, "continue", "CONTINUE");
+    MapStrStr_put(map_622, "void", "VOID");
+    MapStrStr_put(map_622, "bool", "BOOL");
+    MapStrStr_put(map_622, "str", "STR");
+    MapStrStr_put(map_622, "u8", "U8");
+    MapStrStr_put(map_622, "u16", "U16");
+    MapStrStr_put(map_622, "u32", "U32");
+    MapStrStr_put(map_622, "u64", "U64");
+    MapStrStr_put(map_622, "i8", "I8");
+    MapStrStr_put(map_622, "i16", "I16");
+    MapStrStr_put(map_622, "i32", "I32");
+    MapStrStr_put(map_622, "i64", "I64");
+    MapStrStr_put(map_622, "f32", "F32");
+    MapStrStr_put(map_622, "f64", "F64");
+    CompilerState.lexer_keywords = map_622;
+    CompilerState.semantic_TypeVoid = make_SemanticType_96("void");
+    CompilerState.semantic_TypeBool = make_SemanticType_96("bool");
+    CompilerState.semantic_TypeStr = make_SemanticType_96("str");
+    CompilerState.semantic_TypeU8 = make_SemanticType_96("u8");
+    CompilerState.semantic_TypeU16 = make_SemanticType_96("u16");
+    CompilerState.semantic_TypeU32 = make_SemanticType_96("u32");
+    CompilerState.semantic_TypeU64 = make_SemanticType_96("u64");
+    CompilerState.semantic_TypeI8 = make_SemanticType_96("i8");
+    CompilerState.semantic_TypeI16 = make_SemanticType_96("i16");
+    CompilerState.semantic_TypeI32 = make_SemanticType_96("i32");
+    CompilerState.semantic_TypeI64 = make_SemanticType_96("i64");
+    CompilerState.semantic_TypeF32 = make_SemanticType_96("f32");
+    CompilerState.semantic_TypeF64 = make_SemanticType_96("f64");
+    CompilerState.semantic_TypeUntypedInt = make_SemanticType_96("untyped int");
+    CompilerState.semantic_TypeUntypedFloat = make_SemanticType_96("untyped float");
+    CompilerState.semantic_TypeNull = make_SemanticType_96("null");
+    CompilerState.semantic_TypeReg = make_SemanticType_96("register");
+    let map_739: MapStrSemantictype = new MapStrSemantictype();
+    MapStrSemantictype_put(map_739, "void", CompilerState.semantic_TypeVoid);
+    MapStrSemantictype_put(map_739, "bool", CompilerState.semantic_TypeBool);
+    MapStrSemantictype_put(map_739, "str", CompilerState.semantic_TypeStr);
+    MapStrSemantictype_put(map_739, "u8", CompilerState.semantic_TypeU8);
+    MapStrSemantictype_put(map_739, "u16", CompilerState.semantic_TypeU16);
+    MapStrSemantictype_put(map_739, "u32", CompilerState.semantic_TypeU32);
+    MapStrSemantictype_put(map_739, "u64", CompilerState.semantic_TypeU64);
+    MapStrSemantictype_put(map_739, "i8", CompilerState.semantic_TypeI8);
+    MapStrSemantictype_put(map_739, "i16", CompilerState.semantic_TypeI16);
+    MapStrSemantictype_put(map_739, "i32", CompilerState.semantic_TypeI32);
+    MapStrSemantictype_put(map_739, "i64", CompilerState.semantic_TypeI64);
+    MapStrSemantictype_put(map_739, "f32", CompilerState.semantic_TypeF32);
+    MapStrSemantictype_put(map_739, "f64", CompilerState.semantic_TypeF64);
+    CompilerState.semantic_builtinTypes = map_739;
+    let map_751: MapStrSemanticbuiltininfo = new MapStrSemanticbuiltininfo();
+    MapStrSemanticbuiltininfo_put(map_751, "push", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeVoid));
+    MapStrSemanticbuiltininfo_put(map_751, "pop", make_SemanticBuiltinInfo_99(0, CompilerState.semantic_TypeU64));
+    MapStrSemanticbuiltininfo_put(map_751, "lea", make_SemanticBuiltinInfo_99(2, CompilerState.semantic_TypeVoid));
+    MapStrSemanticbuiltininfo_put(map_751, "mov", make_SemanticBuiltinInfo_99(2, CompilerState.semantic_TypeVoid));
+    MapStrSemanticbuiltininfo_put(map_751, "call", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeVoid));
+    MapStrSemanticbuiltininfo_put(map_751, "ret", make_SemanticBuiltinInfo_99(0, CompilerState.semantic_TypeVoid));
+    MapStrSemanticbuiltininfo_put(map_751, "syscall", make_SemanticBuiltinInfo_99(0, CompilerState.semantic_TypeVoid));
+    MapStrSemanticbuiltininfo_put(map_751, "int", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeVoid));
+    MapStrSemanticbuiltininfo_put(map_751, "setreg", make_SemanticBuiltinInfo_99(2, CompilerState.semantic_TypeVoid));
+    MapStrSemanticbuiltininfo_put(map_751, "getreg", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeU64));
+    MapStrSemanticbuiltininfo_put(map_751, "nop", make_SemanticBuiltinInfo_99(0, CompilerState.semantic_TypeVoid));
+    MapStrSemanticbuiltininfo_put(map_751, "setflag", make_SemanticBuiltinInfo_99(2, CompilerState.semantic_TypeVoid));
+    MapStrSemanticbuiltininfo_put(map_751, "getflag", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeBool));
+    MapStrSemanticbuiltininfo_put(map_751, "load8", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeI32));
+    MapStrSemanticbuiltininfo_put(map_751, "store_byte", make_SemanticBuiltinInfo_99(2, CompilerState.semantic_TypeVoid));
+    MapStrSemanticbuiltininfo_put(map_751, "alloc_string", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeStr));
+    MapStrSemanticbuiltininfo_put(map_751, "store_word", make_SemanticBuiltinInfo_99(2, CompilerState.semantic_TypeVoid));
+    MapStrSemanticbuiltininfo_put(map_751, "load32", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeI32));
+    MapStrSemanticbuiltininfo_put(map_751, "load64", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeI64));
+    MapStrSemanticbuiltininfo_put(map_751, "len", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeI32));
+    MapStrSemanticbuiltininfo_put(map_751, "win_call", make_SemanticBuiltinInfo_99(-1, CompilerState.semantic_TypeVoid));
+    MapStrSemanticbuiltininfo_put(map_751, "i64_to_f64", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeF64));
+    MapStrSemanticbuiltininfo_put(map_751, "f64_to_i64", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeI64));
+    MapStrSemanticbuiltininfo_put(map_751, "f64_bits", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeI64));
+    MapStrSemanticbuiltininfo_put(map_751, "f64_from_bits", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeF64));
+    MapStrSemanticbuiltininfo_put(map_751, "gc_collect", make_SemanticBuiltinInfo_99(0, CompilerState.semantic_TypeVoid));
+    CompilerState.semantic_builtinFuncTable = map_751;
+    CompilerState.semantic_reservedRegisters = ["eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp", "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "eip", "rip", "eflags", "rflags", "st0", "st1", "st2", "st3", "st4", "st5", "st6", "st7", "mm0", "mm1", "mm2", "mm3", "mm4", "mm5", "mm6", "mm7", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7", "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15", "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "x19", "x20", "x21", "x22", "x23", "x24", "x25", "x26", "x27", "x28", "x29", "x30", "w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7", "w8", "w9", "w10", "w11", "w12", "w13", "w14", "w15", "w16", "w17", "w18", "w19", "w20", "w21", "w22", "w23", "w24", "w25", "w26", "w27", "w28", "w29", "w30", "sp", "xzr", "wzr", "lr", "carry", "zero_flag", "negative_flag", "overflow_flag", "nzcv", "cf"];
+}
+
+fn make_SemanticImportedFunc_1(Fn: AstNode, Alias: str) -> SemanticImportedFunc {
+    let result: SemanticImportedFunc = new SemanticImportedFunc();
+    result.Fn = Fn;
+    result.Alias = Alias;
+    return result;
+}
+
+fn make_CodegenIRInstr_2(Op: i32, Dst: CodegenOperand, Src1: CodegenOperand) -> CodegenIRInstr {
+    let result: CodegenIRInstr = new CodegenIRInstr();
+    result.Op = Op;
+    result.Dst = Dst;
+    result.Src1 = Src1;
+    return result;
+}
+
+fn make_CodegenIRInstr_3(Op: i32, Src1: CodegenOperand, Src2: CodegenOperand) -> CodegenIRInstr {
+    let result: CodegenIRInstr = new CodegenIRInstr();
+    result.Op = Op;
+    result.Src1 = Src1;
+    result.Src2 = Src2;
+    return result;
+}
+
+fn make_CodegenIRInstr_4(Op: i32, Src1: CodegenOperand, Args: []CodegenOperand) -> CodegenIRInstr {
+    let result: CodegenIRInstr = new CodegenIRInstr();
+    result.Op = Op;
+    result.Src1 = Src1;
+    result.Args = Args;
+    return result;
+}
+
+fn make_CodegenIRInstr_5(Op: i32, Dst: CodegenOperand, Src1: CodegenOperand, Src2: CodegenOperand) -> CodegenIRInstr {
+    let result: CodegenIRInstr = new CodegenIRInstr();
+    result.Op = Op;
+    result.Dst = Dst;
+    result.Src1 = Src1;
+    result.Src2 = Src2;
+    return result;
+}
+
+fn make_CodegenOptions_6(BuildDir: str) -> CodegenOptions {
+    let result: CodegenOptions = new CodegenOptions();
+    result.BuildDir = BuildDir;
+    return result;
+}
+
+fn make_CodegenResult_7() -> CodegenResult {
+    let result: CodegenResult = new CodegenResult();
+    return result;
+}
+
+fn make_StringBuilder_8() -> StringBuilder {
+    let result: StringBuilder = new StringBuilder();
+    return result;
+}
+
+fn make_CodegenArm64Emitter_9(mod: CodegenIRModule, target: CodegenTarget, b: StringBuilder) -> CodegenArm64Emitter {
+    let result: CodegenArm64Emitter = new CodegenArm64Emitter();
+    result.mod = mod;
+    result.target = target;
+    result.b = b;
+    return result;
+}
+
+fn make_CodegenX86Emitter_10(mod: CodegenIRModule, target: CodegenTarget, b: StringBuilder) -> CodegenX86Emitter {
+    let result: CodegenX86Emitter = new CodegenX86Emitter();
+    result.mod = mod;
+    result.target = target;
+    result.b = b;
+    return result;
+}
+
+fn make_CodegenX86_64Emitter_11(mod: CodegenIRModule, target: CodegenTarget, b: StringBuilder) -> CodegenX86_64Emitter {
+    let result: CodegenX86_64Emitter = new CodegenX86_64Emitter();
+    result.mod = mod;
+    result.target = target;
+    result.b = b;
+    return result;
+}
+
+fn make_CodegenOperand_12(Kind: i32, Reg: i32) -> CodegenOperand {
+    let result: CodegenOperand = new CodegenOperand();
+    result.Kind = Kind;
+    result.Reg = Reg;
+    return result;
+}
+
+fn make_CodegenOperand_13(Kind: i32, PhysReg: str) -> CodegenOperand {
+    let result: CodegenOperand = new CodegenOperand();
+    result.Kind = Kind;
+    result.PhysReg = PhysReg;
+    return result;
+}
+
+fn make_CodegenOperand_14(Kind: i32, Imm: i64) -> CodegenOperand {
+    let result: CodegenOperand = new CodegenOperand();
+    result.Kind = Kind;
+    result.Imm = Imm;
+    return result;
+}
+
+fn make_CodegenOperand_15(Kind: i32, Label: str) -> CodegenOperand {
+    let result: CodegenOperand = new CodegenOperand();
+    result.Kind = Kind;
+    result.Label = Label;
+    return result;
+}
+
+fn make_CodegenOperand_16(Kind: i32, MemBase: str, MemOffset: i64) -> CodegenOperand {
+    let result: CodegenOperand = new CodegenOperand();
+    result.Kind = Kind;
+    result.MemBase = MemBase;
+    result.MemOffset = MemOffset;
+    return result;
+}
+
+fn make_CodegenOperand_17(Kind: i32) -> CodegenOperand {
+    let result: CodegenOperand = new CodegenOperand();
+    result.Kind = Kind;
+    return result;
+}
+
+fn make_CodegenIRStringConst_18(Label: str, Value: ByteBuffer) -> CodegenIRStringConst {
+    let result: CodegenIRStringConst = new CodegenIRStringConst();
+    result.Label = Label;
+    result.Value = Value;
+    return result;
+}
+
+fn make_CodegenFuncOverloadEntry_19(mangledName: str, paramCount: i32) -> CodegenFuncOverloadEntry {
+    let result: CodegenFuncOverloadEntry = new CodegenFuncOverloadEntry();
+    result.mangledName = mangledName;
+    result.paramCount = paramCount;
+    return result;
+}
+
+fn make_CodegenIRModule_20(EntryFunc: str) -> CodegenIRModule {
+    let result: CodegenIRModule = new CodegenIRModule();
+    result.EntryFunc = EntryFunc;
+    return result;
+}
+
+fn make_CodegenLowerer_21(module_value: CodegenIRModule, target: CodegenTarget, funcRetTypes: MapStrStr, funcParamTypes: MapStrArraystr, physRegs: MapStrBool, globals: MapStrStr, globalTypes: MapStrStr, funcOverloads: MapStrArraycodegenfuncoverloadentry) -> CodegenLowerer {
+    let result: CodegenLowerer = new CodegenLowerer();
+    result.module_value = module_value;
+    result.target = target;
+    result.funcRetTypes = funcRetTypes;
+    result.funcParamTypes = funcParamTypes;
+    result.physRegs = physRegs;
+    result.globals = globals;
+    result.globalTypes = globalTypes;
+    result.funcOverloads = funcOverloads;
+    return result;
+}
+
+fn make_CodegenIRInstr_22(Op: i32, Src1: CodegenOperand) -> CodegenIRInstr {
+    let result: CodegenIRInstr = new CodegenIRInstr();
+    result.Op = Op;
+    result.Src1 = Src1;
+    return result;
+}
+
+fn make_CodegenIRGlobal_23(Name: str, Type: str, InitImm: i64, InitStr: i32) -> CodegenIRGlobal {
+    let result: CodegenIRGlobal = new CodegenIRGlobal();
+    result.Name = Name;
+    result.Type = Type;
+    result.InitImm = InitImm;
+    result.InitStr = InitStr;
+    return result;
+}
+
+fn make_CodegenIRFunc_24(Name: str, ParamNames: []str, ParamCount: i32, Imported: bool) -> CodegenIRFunc {
+    let result: CodegenIRFunc = new CodegenIRFunc();
+    result.Name = Name;
+    result.ParamNames = ParamNames;
+    result.ParamCount = ParamCount;
+    result.Imported = Imported;
+    return result;
+}
+
+fn make_CodegenIRInstr_25(Op: i32, Dst: CodegenOperand) -> CodegenIRInstr {
+    let result: CodegenIRInstr = new CodegenIRInstr();
+    result.Op = Op;
+    result.Dst = Dst;
+    return result;
+}
+
+fn make_CodegenIRInstr_26(Op: i32) -> CodegenIRInstr {
+    let result: CodegenIRInstr = new CodegenIRInstr();
+    result.Op = Op;
+    return result;
+}
+
+fn make_CodegenIRInstr_27(Op: i32, Dst: CodegenOperand, Src1: CodegenOperand, Args: []CodegenOperand) -> CodegenIRInstr {
+    let result: CodegenIRInstr = new CodegenIRInstr();
+    result.Op = Op;
+    result.Dst = Dst;
+    result.Src1 = Src1;
+    result.Args = Args;
+    return result;
+}
+
+fn make_CodegenTarget_28() -> CodegenTarget {
+    let result: CodegenTarget = new CodegenTarget();
+    return result;
+}
+
+fn make_CodegenToolchain_29(Target: CodegenTarget, BuildDir: str, AsmFile: str, ObjFile: str, ExeFile: str) -> CodegenToolchain {
+    let result: CodegenToolchain = new CodegenToolchain();
+    result.Target = Target;
+    result.BuildDir = BuildDir;
+    result.AsmFile = AsmFile;
+    result.ObjFile = ObjFile;
+    result.ExeFile = ExeFile;
+    return result;
+}
+
+fn make_ImportsResolver_30(BaseDir: str, resolved: MapStrImportsimportedmodule, classScopes: MapStrArrayastclassbinding) -> ImportsResolver {
+    let result: ImportsResolver = new ImportsResolver();
+    result.BaseDir = BaseDir;
+    result.resolved = resolved;
+    result.classScopes = classScopes;
+    return result;
+}
+
+fn make_AstNode_31(Module: AstNode, Imports: []AstNode, ClassScopes: MapStrArrayastclassbinding, SourceFile: str, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "Program";
+    result.Module = Module;
+    result.Imports = Imports;
+    result.ClassScopes = ClassScopes;
+    result.SourceFile = SourceFile;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_ImportsImportedModule_32(Path: str, FilePath: str, Alias: str, SelectFns: []str, Program: AstNode) -> ImportsImportedModule {
+    let result: ImportsImportedModule = new ImportsImportedModule();
+    result.Path = Path;
+    result.FilePath = FilePath;
+    result.Alias = Alias;
+    result.SelectFns = SelectFns;
+    result.Program = Program;
+    return result;
+}
+
+fn make_ImportsFnKey_33(alias: str, sig: str) -> ImportsFnKey {
+    let result: ImportsFnKey = new ImportsFnKey();
+    result.alias = alias;
+    result.sig = sig;
+    return result;
+}
+
+fn make_AstClassBinding_34(Name: str, Class: AstNode) -> AstClassBinding {
+    let result: AstClassBinding = new AstClassBinding();
+    result.Name = Name;
+    result.Class = Class;
+    return result;
+}
+
+fn make_AstClassBinding_35(Name: str, Class: AstNode, Pos: AstPosition) -> AstClassBinding {
+    let result: AstClassBinding = new AstClassBinding();
+    result.Name = Name;
+    result.Class = Class;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_ImportsResolveError_36(Message: str, Pos: AstPosition, File: str) -> ImportsResolveError {
+    let result: ImportsResolveError = new ImportsResolveError();
+    result.Message = Message;
+    result.Pos = Pos;
+    result.File = File;
+    return result;
+}
+
+fn make_ImportsSigOrigin_37(filePath: str, sig: str, modPath: str) -> ImportsSigOrigin {
+    let result: ImportsSigOrigin = new ImportsSigOrigin();
+    result.filePath = filePath;
+    result.sig = sig;
+    result.modPath = modPath;
+    return result;
+}
+
+fn make_LexerLexError_38(Message: str, Lexeme: str, Line: i32, Column: i32) -> LexerLexError {
+    let result: LexerLexError = new LexerLexError();
+    result.Message = Message;
+    result.Lexeme = Lexeme;
+    result.Line = Line;
+    result.Column = Column;
+    return result;
+}
+
+fn make_LexerToken_39(Type: str, Value: str, Line: i32, Column: i32) -> LexerToken {
+    let result: LexerToken = new LexerToken();
+    result.Type = Type;
+    result.Value = Value;
+    result.Line = Line;
+    result.Column = Column;
+    return result;
+}
+
+fn make_LexerToken_40() -> LexerToken {
+    let result: LexerToken = new LexerToken();
+    return result;
+}
+
+fn make_ParserParser_41(tokens: []LexerToken, pos: i32) -> ParserParser {
+    let result: ParserParser = new ParserParser();
+    result.tokens = tokens;
+    result.pos = pos;
+    return result;
+}
+
+fn make_LexerToken_42(Type: str) -> LexerToken {
+    let result: LexerToken = new LexerToken();
+    result.Type = Type;
+    return result;
+}
+
+fn make_ParserParseError_43(Message: str, Line: i32, Column: i32) -> ParserParseError {
+    let result: ParserParseError = new ParserParseError();
+    result.Message = Message;
+    result.Line = Line;
+    result.Column = Column;
+    return result;
+}
+
+fn make_AstPosition_44(Line: i32, Column: i32) -> AstPosition {
+    let result: AstPosition = new AstPosition();
+    result.Line = Line;
+    result.Column = Column;
+    return result;
+}
+
+fn make_AstNode_45(Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "Program";
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_46(Name: str, Type: AstTypeExpr, Value: AstNode, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "GlobalVar";
+    result.Name = Name;
+    result.Type = Type;
+    result.Value = Value;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_47(Name: str, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "ModuleDecl";
+    result.Name = Name;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_48(Path: str, Alias: str, SelectFns: []str, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "ImportDecl";
+    result.Path = Path;
+    result.Alias = Alias;
+    result.SelectFns = SelectFns;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_49(Variable: str, Operator: str, Value: str, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "CompTimeIf";
+    result.Variable = Variable;
+    result.Operator = Operator;
+    result.TextValue = Value;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_50(Name: str, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "ClassDecl";
+    result.Name = Name;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstClassField_51(Name: str, Type: AstTypeExpr, Public: bool, Static: bool, Pos: AstPosition) -> AstClassField {
+    let result: AstClassField = new AstClassField();
+    result.Name = Name;
+    result.Type = Type;
+    result.Public = Public;
+    result.Static = Static;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstClassMethod_52(Fn: AstNode, Public: bool, Static: bool) -> AstClassMethod {
+    let result: AstClassMethod = new AstClassMethod();
+    result.Fn = Fn;
+    result.Public = Public;
+    result.Static = Static;
+    return result;
+}
+
+fn make_AstTypeExpr_53(Name: str, Pos: AstPosition) -> AstTypeExpr {
+    let result: AstTypeExpr = new AstTypeExpr();
+    result.Name = Name;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_54(Name: str, Params: []AstParam, ReturnType: AstTypeExpr, Body: AstNode, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "FnDecl";
+    result.Name = Name;
+    result.Params = Params;
+    result.ReturnType = ReturnType;
+    result.Body = Body;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstClassMethod_55(Fn: AstNode, Public: bool, Constructor: bool) -> AstClassMethod {
+    let result: AstClassMethod = new AstClassMethod();
+    result.Fn = Fn;
+    result.Public = Public;
+    result.Constructor = Constructor;
+    return result;
+}
+
+fn make_AstParam_56(Name: str, Type: AstTypeExpr, Default: AstNode, Pos: AstPosition) -> AstParam {
+    let result: AstParam = new AstParam();
+    result.Name = Name;
+    result.Type = Type;
+    result.Default = Default;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstTypeExpr_57(Name: str, IsArray: bool, ElemName: str, Pos: AstPosition) -> AstTypeExpr {
+    let result: AstTypeExpr = new AstTypeExpr();
+    result.Name = Name;
+    result.IsArray = IsArray;
+    result.ElemName = ElemName;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_58(Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "BlockStmt";
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_59(Name: str, Type: AstTypeExpr, Value: AstNode, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "LetStmt";
+    result.Name = Name;
+    result.Type = Type;
+    result.Value = Value;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_60(Value: AstNode, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "ReturnStmt";
+    result.Value = Value;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_61(Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "BreakStmt";
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_62(Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "ContinueStmt";
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_63(Condition: AstNode, Then: AstNode, Else: AstNode, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "IfStmt";
+    result.Condition = Condition;
+    result.Then = Then;
+    result.Else = Else;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_64(Condition: AstNode, Body: AstNode, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "WhileStmt";
+    result.Condition = Condition;
+    result.Body = Body;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_65(Value: bool, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "BoolLitExpr";
+    result.BoolValue = Value;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_66(Init: AstNode, Condition: AstNode, Update: AstNode, Body: AstNode, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "ForStmt";
+    result.Init = Init;
+    result.Condition = Condition;
+    result.Update = Update;
+    result.Body = Body;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_67(Op: str, Left: AstNode, Right: AstNode, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "BinaryExpr";
+    result.Op = Op;
+    result.Left = Left;
+    result.Right = Right;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_68(Target: AstNode, Value: AstNode, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "AssignStmt";
+    result.Target = Target;
+    result.Value = Value;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_69(Value: str, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "IntLitExpr";
+    result.TextValue = Value;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_70(Expression: AstNode, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "ExprStmt";
+    result.Expression = Expression;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_71(ClassName: str, Args: []AstNode, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "NewExpr";
+    result.ClassName = ClassName;
+    result.Args = Args;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_72(Name: str, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "IdentExpr";
+    result.Name = Name;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_73(Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "NullLitExpr";
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_74(Value: str, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "FloatLitExpr";
+    result.TextValue = Value;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_75(Value: str, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "StringLitExpr";
+    result.TextValue = Value;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_76(Op: str, Operand: AstNode, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "UnaryExpr";
+    result.Op = Op;
+    result.Operand = Operand;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_77(Operand: AstNode, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "AddressOfExpr";
+    result.Operand = Operand;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_78(Expression: AstNode, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "GroupExpr";
+    result.Expression = Expression;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_79(Elems: []AstNode, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "ArrayLitExpr";
+    result.Elems = Elems;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_80(Object: AstNode, Index: AstNode, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "IndexExpr";
+    result.Object = Object;
+    result.Index = Index;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_81(Callee: AstNode, Args: []AstNode, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "CallExpr";
+    result.Callee = Callee;
+    result.Args = Args;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_82(Object: AstNode, Field: str, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "MemberExpr";
+    result.Object = Object;
+    result.Field = Field;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_SemanticClassInfo_83(decl: AstNode, fields: MapStrSemanticfieldinfo, methods: MapStrArraysemanticmethodinfo) -> SemanticClassInfo {
+    let result: SemanticClassInfo = new SemanticClassInfo();
+    result.decl = decl;
+    result.fields = fields;
+    result.methods = methods;
+    return result;
+}
+
+fn make_SemanticType_84(Name: str, class_value: SemanticClassInfo, identity: str) -> SemanticType {
+    let result: SemanticType = new SemanticType();
+    result.Name = Name;
+    result.class_value = class_value;
+    result.identity = identity;
+    return result;
+}
+
+fn make_AstResolvedField_85(Type: str) -> AstResolvedField {
+    let result: AstResolvedField = new AstResolvedField();
+    result.Type = Type;
+    return result;
+}
+
+fn make_SemanticFieldInfo_86(decl: AstClassField, typ: SemanticType, storage: AstResolvedField) -> SemanticFieldInfo {
+    let result: SemanticFieldInfo = new SemanticFieldInfo();
+    result.decl = decl;
+    result.typ = typ;
+    result.storage = storage;
+    return result;
+}
+
+fn make_AstNode_87(Name: str, Type: AstTypeExpr, Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "GlobalVar";
+    result.Name = Name;
+    result.Type = Type;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstNode_88(Name: str, ReturnType: AstTypeExpr, Body: AstNode, Pos: AstPosition, SourceFile: str) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "FnDecl";
+    result.Name = Name;
+    result.ReturnType = ReturnType;
+    result.Body = Body;
+    result.Pos = Pos;
+    result.SourceFile = SourceFile;
+    return result;
+}
+
+fn make_SemanticSymbol_89(Name: str, MangledName: str, Kind: i32, Params: []SemanticType, Defaults: []AstNode, DefaultCount: i32, ReturnType: SemanticType) -> SemanticSymbol {
+    let result: SemanticSymbol = new SemanticSymbol();
+    result.Name = Name;
+    result.MangledName = MangledName;
+    result.Kind = Kind;
+    result.Params = Params;
+    result.Defaults = Defaults;
+    result.DefaultCount = DefaultCount;
+    result.ReturnType = ReturnType;
+    return result;
+}
+
+fn make_SemanticMethodInfo_90(decl: AstClassMethod, sym: SemanticSymbol) -> SemanticMethodInfo {
+    let result: SemanticMethodInfo = new SemanticMethodInfo();
+    result.decl = decl;
+    result.sym = sym;
+    return result;
+}
+
+fn make_SemanticClassMethodBody_91(class_value: SemanticClassInfo, method: SemanticMethodInfo) -> SemanticClassMethodBody {
+    let result: SemanticClassMethodBody = new SemanticClassMethodBody();
+    result.class_value = class_value;
+    result.method = method;
+    return result;
+}
+
+fn make_AstNode_92(Pos: AstPosition) -> AstNode {
+    let result: AstNode = new AstNode();
+    result.Kind = "ArrayLitExpr";
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_SemanticSymbol_93(Name: str, Kind: i32, Type: SemanticType, Pos: AstPosition) -> SemanticSymbol {
+    let result: SemanticSymbol = new SemanticSymbol();
+    result.Name = Name;
+    result.Kind = Kind;
+    result.Type = Type;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_AstParam_94(Name: str, Type: AstTypeExpr, Pos: AstPosition) -> AstParam {
+    let result: AstParam = new AstParam();
+    result.Name = Name;
+    result.Type = Type;
+    result.Pos = Pos;
+    return result;
+}
+
+fn make_SemanticSymbol_95(Name: str, MangledName: str, Kind: i32, Type: SemanticType, Pos: AstPosition, Params: []SemanticType, Defaults: []AstNode, DefaultCount: i32, ReturnType: SemanticType) -> SemanticSymbol {
+    let result: SemanticSymbol = new SemanticSymbol();
+    result.Name = Name;
+    result.MangledName = MangledName;
+    result.Kind = Kind;
+    result.Type = Type;
+    result.Pos = Pos;
+    result.Params = Params;
+    result.Defaults = Defaults;
+    result.DefaultCount = DefaultCount;
+    result.ReturnType = ReturnType;
+    return result;
+}
+
+fn make_SemanticType_96(Name: str) -> SemanticType {
+    let result: SemanticType = new SemanticType();
+    result.Name = Name;
+    return result;
+}
+
+fn make_SemanticType_97(Name: str, IsArray: bool, ElemType: SemanticType) -> SemanticType {
+    let result: SemanticType = new SemanticType();
+    result.Name = Name;
+    result.IsArray = IsArray;
+    result.ElemType = ElemType;
+    return result;
+}
+
+fn make_SemanticScope_98(parent: SemanticScope, symbols: MapStrSemanticsymbol, funcOverloads: MapStrArraysemanticsymbol) -> SemanticScope {
+    let result: SemanticScope = new SemanticScope();
+    result.parent = parent;
+    result.symbols = symbols;
+    result.funcOverloads = funcOverloads;
+    return result;
+}
+
+fn make_SemanticBuiltinInfo_99(Arity: i32, ReturnType: SemanticType) -> SemanticBuiltinInfo {
+    let result: SemanticBuiltinInfo = new SemanticBuiltinInfo();
+    result.Arity = Arity;
+    result.ReturnType = ReturnType;
+    return result;
+}
+
+fn make_SemanticAnalyzer_100(scope: SemanticScope, importedFuncs: []SemanticImportedFunc, classes: MapStrMapstrsemanticclassinfo, classDecls: MapAstnodeSemanticclassinfo, importAliases: MapStrBool, importedFnSet: MapAstnodeBool, importedFnAlias: MapAstnodeStr) -> SemanticAnalyzer {
+    let result: SemanticAnalyzer = new SemanticAnalyzer();
+    result.scope = scope;
+    result.importedFuncs = importedFuncs;
+    result.classes = classes;
+    result.classDecls = classDecls;
+    result.importAliases = importAliases;
+    result.importedFnSet = importedFnSet;
+    result.importedFnAlias = importedFnAlias;
+    return result;
+}
+
+fn make_SemanticDiagnostic_101(Message: str, File: str, Pos: AstPosition, Severity: i32) -> SemanticDiagnostic {
+    let result: SemanticDiagnostic = new SemanticDiagnostic();
+    result.Message = Message;
+    result.File = File;
+    result.Pos = Pos;
+    result.Severity = Severity;
+    return result;
+}
+
+fn make_SemanticSymbol_102(Name: str, Kind: i32, Type: SemanticType, Params: []SemanticType, Variadic: bool, ReturnType: SemanticType) -> SemanticSymbol {
+    let result: SemanticSymbol = new SemanticSymbol();
+    result.Name = Name;
+    result.Kind = Kind;
+    result.Type = Type;
+    result.Params = Params;
+    result.Variadic = Variadic;
+    result.ReturnType = ReturnType;
+    return result;
+}
+
+fn make_SemanticSymbol_103(Name: str, Kind: i32, Type: SemanticType) -> SemanticSymbol {
+    let result: SemanticSymbol = new SemanticSymbol();
+    result.Name = Name;
+    result.Kind = Kind;
+    result.Type = Type;
+    return result;
+}
+
+class ResultStrStr {
+    pub let value0: str = "";
+    pub let value1: str = "";
+}
+
+fn make_ResultStrStr(value0: str, value1: str) -> ResultStrStr {
+    let result: ResultStrStr = new ResultStrStr();
+    result.value0 = value0;
+    result.value1 = value1;
+    return result;
+}
+
+class ResultArraylexertokenArraylexerlexerror {
+    pub let value0: []LexerToken = [];
+    pub let value1: []LexerLexError = [];
+}
+
+fn make_ResultArraylexertokenArraylexerlexerror(value0: []LexerToken, value1: []LexerLexError) -> ResultArraylexertokenArraylexerlexerror {
+    let result: ResultArraylexertokenArraylexerlexerror = new ResultArraylexertokenArraylexerlexerror();
+    result.value0 = value0;
+    result.value1 = value1;
+    return result;
+}
+
+class ResultAstnodeArrayparserparseerror {
+    pub let value0: AstNode = null;
+    pub let value1: []ParserParseError = [];
+}
+
+fn make_ResultAstnodeArrayparserparseerror(value0: AstNode, value1: []ParserParseError) -> ResultAstnodeArrayparserparseerror {
+    let result: ResultAstnodeArrayparserparseerror = new ResultAstnodeArrayparserparseerror();
+    result.value0 = value0;
+    result.value1 = value1;
+    return result;
+}
+
+class ResultCodegentargetStr {
+    pub let value0: CodegenTarget = null;
+    pub let value1: str = "";
+}
+
+fn make_ResultCodegentargetStr(value0: CodegenTarget, value1: str) -> ResultCodegentargetStr {
+    let result: ResultCodegentargetStr = new ResultCodegentargetStr();
+    result.value0 = value0;
+    result.value1 = value1;
+    return result;
+}
+
+class ResultAstnodeArrayimportsresolveerror {
+    pub let value0: AstNode = null;
+    pub let value1: []ImportsResolveError = [];
+}
+
+fn make_ResultAstnodeArrayimportsresolveerror(value0: AstNode, value1: []ImportsResolveError) -> ResultAstnodeArrayimportsresolveerror {
+    let result: ResultAstnodeArrayimportsresolveerror = new ResultAstnodeArrayimportsresolveerror();
+    result.value0 = value0;
+    result.value1 = value1;
+    return result;
+}
+
+class ResultI64Str {
+    pub let value0: i64 = 0;
+    pub let value1: str = "";
+}
+
+fn make_ResultI64Str(value0: i64, value1: str) -> ResultI64Str {
+    let result: ResultI64Str = new ResultI64Str();
+    result.value0 = value0;
+    result.value1 = value1;
+    return result;
+}
+
+class ResultI32Str {
+    pub let value0: i32 = 0;
+    pub let value1: str = "";
+}
+
+fn make_ResultI32Str(value0: i32, value1: str) -> ResultI32Str {
+    let result: ResultI32Str = new ResultI32Str();
+    result.value0 = value0;
+    result.value1 = value1;
+    return result;
+}
+
+class ResultCodegenresultStr {
+    pub let value0: CodegenResult = null;
+    pub let value1: str = "";
+}
+
+fn make_ResultCodegenresultStr(value0: CodegenResult, value1: str) -> ResultCodegenresultStr {
+    let result: ResultCodegenresultStr = new ResultCodegenresultStr();
+    result.value0 = value0;
+    result.value1 = value1;
+    return result;
+}
+
+class ResultFileinfoStr {
+    pub let value0: FileInfo = null;
+    pub let value1: str = "";
+}
+
+fn make_ResultFileinfoStr(value0: FileInfo, value1: str) -> ResultFileinfoStr {
+    let result: ResultFileinfoStr = new ResultFileinfoStr();
+    result.value0 = value0;
+    result.value1 = value1;
+    return result;
+}
+
+class ResultArrayi32Str {
+    pub let value0: []i32 = [];
+    pub let value1: str = "";
+}
+
+fn make_ResultArrayi32Str(value0: []i32, value1: str) -> ResultArrayi32Str {
+    let result: ResultArrayi32Str = new ResultArrayi32Str();
+    result.value0 = value0;
+    result.value1 = value1;
+    return result;
+}
+
+class ResultStrStrStr {
+    pub let value0: str = "";
+    pub let value1: str = "";
+    pub let value2: str = "";
+}
+
+fn make_ResultStrStrStr(value0: str, value1: str, value2: str) -> ResultStrStrStr {
+    let result: ResultStrStrStr = new ResultStrStrStr();
+    result.value0 = value0;
+    result.value1 = value1;
+    result.value2 = value2;
+    return result;
+}
+
+class ResultStrStrBool {
+    pub let value0: str = "";
+    pub let value1: str = "";
+    pub let value2: bool = false;
+}
+
+fn make_ResultStrStrBool(value0: str, value1: str, value2: bool) -> ResultStrStrBool {
+    let result: ResultStrStrBool = new ResultStrStrBool();
+    result.value0 = value0;
+    result.value1 = value1;
+    result.value2 = value2;
+    return result;
+}
+
+class ResultF64Str {
+    pub let value0: f64 = 0.0;
+    pub let value1: str = "";
+}
+
+fn make_ResultF64Str(value0: f64, value1: str) -> ResultF64Str {
+    let result: ResultF64Str = new ResultF64Str();
+    result.value0 = value0;
+    result.value1 = value1;
+    return result;
+}
+
+class ResultU64Str {
+    pub let value0: u64 = 0;
+    pub let value1: str = "";
+}
+
+fn make_ResultU64Str(value0: u64, value1: str) -> ResultU64Str {
+    let result: ResultU64Str = new ResultU64Str();
+    result.value0 = value0;
+    result.value1 = value1;
+    return result;
+}
+
+class ResultStrBool {
+    pub let value0: str = "";
+    pub let value1: bool = false;
+}
+
+fn make_ResultStrBool(value0: str, value1: bool) -> ResultStrBool {
+    let result: ResultStrBool = new ResultStrBool();
+    result.value0 = value0;
+    result.value1 = value1;
+    return result;
+}
+
+class ResultI32I32 {
+    pub let value0: i32 = 0;
+    pub let value1: i32 = 0;
+}
+
+fn make_ResultI32I32(value0: i32, value1: i32) -> ResultI32I32 {
+    let result: ResultI32I32 = new ResultI32I32();
+    result.value0 = value0;
+    result.value1 = value1;
+    return result;
+}
+
+class ResultI32I32I32Lexerlexerror {
+    pub let value0: i32 = 0;
+    pub let value1: i32 = 0;
+    pub let value2: i32 = 0;
+    pub let value3: LexerLexError = null;
+}
+
+fn make_ResultI32I32I32Lexerlexerror(value0: i32, value1: i32, value2: i32, value3: LexerLexError) -> ResultI32I32I32Lexerlexerror {
+    let result: ResultI32I32I32Lexerlexerror = new ResultI32I32I32Lexerlexerror();
+    result.value0 = value0;
+    result.value1 = value1;
+    result.value2 = value2;
+    result.value3 = value3;
+    return result;
+}
+
+class ResultLexertokenArraylexerlexerrorI32I32I32 {
+    pub let value0: LexerToken = null;
+    pub let value1: []LexerLexError = [];
+    pub let value2: i32 = 0;
+    pub let value3: i32 = 0;
+    pub let value4: i32 = 0;
+}
+
+fn make_ResultLexertokenArraylexerlexerrorI32I32I32(value0: LexerToken, value1: []LexerLexError, value2: i32, value3: i32, value4: i32) -> ResultLexertokenArraylexerlexerrorI32I32I32 {
+    let result: ResultLexertokenArraylexerlexerrorI32I32I32 = new ResultLexertokenArraylexerlexerrorI32I32I32();
+    result.value0 = value0;
+    result.value1 = value1;
+    result.value2 = value2;
+    result.value3 = value3;
+    result.value4 = value4;
+    return result;
+}
+
+class ResultLexertokenI32I32 {
+    pub let value0: LexerToken = new LexerToken();
+    pub let value1: i32 = 0;
+    pub let value2: i32 = 0;
+}
+
+fn make_ResultLexertokenI32I32(value0: LexerToken, value1: i32, value2: i32) -> ResultLexertokenI32I32 {
+    let result: ResultLexertokenI32I32 = new ResultLexertokenI32I32();
+    result.value0 = value0;
+    result.value1 = value1;
+    result.value2 = value2;
+    return result;
+}
+
+class ResultLexertokenI32 {
+    pub let value0: LexerToken = new LexerToken();
+    pub let value1: i32 = 0;
+}
+
+fn make_ResultLexertokenI32(value0: LexerToken, value1: i32) -> ResultLexertokenI32 {
+    let result: ResultLexertokenI32 = new ResultLexertokenI32();
+    result.value0 = value0;
+    result.value1 = value1;
+    return result;
+}
+
+class ResultSemanticclassinfoBool {
+    pub let value0: SemanticClassInfo = null;
+    pub let value1: bool = false;
+}
+
+fn make_ResultSemanticclassinfoBool(value0: SemanticClassInfo, value1: bool) -> ResultSemanticclassinfoBool {
+    let result: ResultSemanticclassinfoBool = new ResultSemanticclassinfoBool();
+    result.value0 = value0;
+    result.value1 = value1;
+    return result;
+}
+
+class ResultSemanticmethodinfoArrayastnode {
+    pub let value0: SemanticMethodInfo = null;
+    pub let value1: []AstNode = [];
+}
+
+fn make_ResultSemanticmethodinfoArrayastnode(value0: SemanticMethodInfo, value1: []AstNode) -> ResultSemanticmethodinfoArrayastnode {
+    let result: ResultSemanticmethodinfoArrayastnode = new ResultSemanticmethodinfoArrayastnode();
+    result.value0 = value0;
+    result.value1 = value1;
+    return result;
+}
+
+// Stable, insertion-ordered maps keep their public key/value arrays. Hash
+// buckets only accelerate lookup; resizing and deletion preserve iteration order.
+fn compiler_hash_string(key: str) -> i32 {
+    let hash: i32 = 5381;
+    let address: u64 = ptr(key);
+    let byte: i32 = load8(address);
+    while (byte != 0) { hash = (hash * 33) ^ byte; address++; byte = load8(address); }
+    return hash & 2147483647;
+}
+
+class MapStrStr {
+    pub let keys: []str = [];
+    pub let buckets: []i32 = [];
+    pub let values: []str = [];
+}
+
+fn MapStrStr_index(map: MapStrStr, key: str) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapStrStr_rehash(map: MapStrStr, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapStrStr_has(map: MapStrStr, key: str) -> bool {
+    return MapStrStr_index(map, key) >= 0;
+}
+
+fn MapStrStr_get(map: MapStrStr, key: str) -> str {
+    let index: i32 = MapStrStr_index(map, key);
+    if (index < 0) { return ""; }
+    return map.values[index];
+}
+
+fn MapStrStr_put(map: MapStrStr, key: str, value: str) -> void {
+    let index: i32 = MapStrStr_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrStr_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapStrStr_length(map: MapStrStr) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapStrStr_delete(map: MapStrStr, key: str) -> void {
+    let index: i32 = MapStrStr_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrStr_rehash(map, len(map.buckets)); }
+}
+
+class MapStrArraystr {
+    pub let keys: []str = [];
+    pub let buckets: []i32 = [];
+    pub let values: [][]str = [];
+}
+
+fn MapStrArraystr_index(map: MapStrArraystr, key: str) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapStrArraystr_rehash(map: MapStrArraystr, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapStrArraystr_has(map: MapStrArraystr, key: str) -> bool {
+    return MapStrArraystr_index(map, key) >= 0;
+}
+
+fn MapStrArraystr_get(map: MapStrArraystr, key: str) -> []str {
+    let index: i32 = MapStrArraystr_index(map, key);
+    if (index < 0) { return []; }
+    return map.values[index];
+}
+
+fn MapStrArraystr_put(map: MapStrArraystr, key: str, value: []str) -> void {
+    let index: i32 = MapStrArraystr_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrArraystr_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapStrArraystr_length(map: MapStrArraystr) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapStrArraystr_delete(map: MapStrArraystr, key: str) -> void {
+    let index: i32 = MapStrArraystr_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrArraystr_rehash(map, len(map.buckets)); }
+}
+
+class MapI32Bool {
+    pub let keys: []i32 = [];
+    pub let buckets: []i32 = [];
+    pub let values: []bool = [];
+}
+
+fn MapI32Bool_index(map: MapI32Bool, key: i32) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = (key & 2147483647) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapI32Bool_rehash(map: MapI32Bool, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = (map.keys[i] & 2147483647) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapI32Bool_has(map: MapI32Bool, key: i32) -> bool {
+    return MapI32Bool_index(map, key) >= 0;
+}
+
+fn MapI32Bool_get(map: MapI32Bool, key: i32) -> bool {
+    let index: i32 = MapI32Bool_index(map, key);
+    if (index < 0) { return false; }
+    return map.values[index];
+}
+
+fn MapI32Bool_put(map: MapI32Bool, key: i32, value: bool) -> void {
+    let index: i32 = MapI32Bool_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapI32Bool_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = (key & 2147483647) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapI32Bool_length(map: MapI32Bool) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapI32Bool_delete(map: MapI32Bool, key: i32) -> void {
+    let index: i32 = MapI32Bool_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapI32Bool_rehash(map, len(map.buckets)); }
+}
+
+class MapStrBool {
+    pub let keys: []str = [];
+    pub let buckets: []i32 = [];
+    pub let values: []bool = [];
+}
+
+fn MapStrBool_index(map: MapStrBool, key: str) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapStrBool_rehash(map: MapStrBool, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapStrBool_has(map: MapStrBool, key: str) -> bool {
+    return MapStrBool_index(map, key) >= 0;
+}
+
+fn MapStrBool_get(map: MapStrBool, key: str) -> bool {
+    let index: i32 = MapStrBool_index(map, key);
+    if (index < 0) { return false; }
+    return map.values[index];
+}
+
+fn MapStrBool_put(map: MapStrBool, key: str, value: bool) -> void {
+    let index: i32 = MapStrBool_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrBool_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapStrBool_length(map: MapStrBool) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapStrBool_delete(map: MapStrBool, key: str) -> void {
+    let index: i32 = MapStrBool_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrBool_rehash(map, len(map.buckets)); }
+}
+
+class MapI32I32 {
+    pub let keys: []i32 = [];
+    pub let buckets: []i32 = [];
+    pub let values: []i32 = [];
+}
+
+fn MapI32I32_index(map: MapI32I32, key: i32) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = (key & 2147483647) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapI32I32_rehash(map: MapI32I32, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = (map.keys[i] & 2147483647) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapI32I32_has(map: MapI32I32, key: i32) -> bool {
+    return MapI32I32_index(map, key) >= 0;
+}
+
+fn MapI32I32_get(map: MapI32I32, key: i32) -> i32 {
+    let index: i32 = MapI32I32_index(map, key);
+    if (index < 0) { return 0; }
+    return map.values[index];
+}
+
+fn MapI32I32_put(map: MapI32I32, key: i32, value: i32) -> void {
+    let index: i32 = MapI32I32_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapI32I32_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = (key & 2147483647) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapI32I32_length(map: MapI32I32) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapI32I32_delete(map: MapI32I32, key: i32) -> void {
+    let index: i32 = MapI32I32_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapI32I32_rehash(map, len(map.buckets)); }
+}
+
+class MapI32Str {
+    pub let keys: []i32 = [];
+    pub let buckets: []i32 = [];
+    pub let values: []str = [];
+}
+
+fn MapI32Str_index(map: MapI32Str, key: i32) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = (key & 2147483647) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapI32Str_rehash(map: MapI32Str, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = (map.keys[i] & 2147483647) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapI32Str_has(map: MapI32Str, key: i32) -> bool {
+    return MapI32Str_index(map, key) >= 0;
+}
+
+fn MapI32Str_get(map: MapI32Str, key: i32) -> str {
+    let index: i32 = MapI32Str_index(map, key);
+    if (index < 0) { return ""; }
+    return map.values[index];
+}
+
+fn MapI32Str_put(map: MapI32Str, key: i32, value: str) -> void {
+    let index: i32 = MapI32Str_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapI32Str_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = (key & 2147483647) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapI32Str_length(map: MapI32Str) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapI32Str_delete(map: MapI32Str, key: i32) -> void {
+    let index: i32 = MapI32Str_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapI32Str_rehash(map, len(map.buckets)); }
+}
+
+class MapStrArraycodegenfuncoverloadentry {
+    pub let keys: []str = [];
+    pub let buckets: []i32 = [];
+    pub let values: [][]CodegenFuncOverloadEntry = [];
+}
+
+fn MapStrArraycodegenfuncoverloadentry_index(map: MapStrArraycodegenfuncoverloadentry, key: str) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapStrArraycodegenfuncoverloadentry_rehash(map: MapStrArraycodegenfuncoverloadentry, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapStrArraycodegenfuncoverloadentry_has(map: MapStrArraycodegenfuncoverloadentry, key: str) -> bool {
+    return MapStrArraycodegenfuncoverloadentry_index(map, key) >= 0;
+}
+
+fn MapStrArraycodegenfuncoverloadentry_get(map: MapStrArraycodegenfuncoverloadentry, key: str) -> []CodegenFuncOverloadEntry {
+    let index: i32 = MapStrArraycodegenfuncoverloadentry_index(map, key);
+    if (index < 0) { return []; }
+    return map.values[index];
+}
+
+fn MapStrArraycodegenfuncoverloadentry_put(map: MapStrArraycodegenfuncoverloadentry, key: str, value: []CodegenFuncOverloadEntry) -> void {
+    let index: i32 = MapStrArraycodegenfuncoverloadentry_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrArraycodegenfuncoverloadentry_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapStrArraycodegenfuncoverloadentry_length(map: MapStrArraycodegenfuncoverloadentry) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapStrArraycodegenfuncoverloadentry_delete(map: MapStrArraycodegenfuncoverloadentry, key: str) -> void {
+    let index: i32 = MapStrArraycodegenfuncoverloadentry_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrArraycodegenfuncoverloadentry_rehash(map, len(map.buckets)); }
+}
+
+class MapStrI32 {
+    pub let keys: []str = [];
+    pub let buckets: []i32 = [];
+    pub let values: []i32 = [];
+}
+
+fn MapStrI32_index(map: MapStrI32, key: str) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapStrI32_rehash(map: MapStrI32, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapStrI32_has(map: MapStrI32, key: str) -> bool {
+    return MapStrI32_index(map, key) >= 0;
+}
+
+fn MapStrI32_get(map: MapStrI32, key: str) -> i32 {
+    let index: i32 = MapStrI32_index(map, key);
+    if (index < 0) { return 0; }
+    return map.values[index];
+}
+
+fn MapStrI32_put(map: MapStrI32, key: str, value: i32) -> void {
+    let index: i32 = MapStrI32_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrI32_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapStrI32_length(map: MapStrI32) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapStrI32_delete(map: MapStrI32, key: str) -> void {
+    let index: i32 = MapStrI32_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrI32_rehash(map, len(map.buckets)); }
+}
+
+class MapStrImportsimportedmodule {
+    pub let keys: []str = [];
+    pub let buckets: []i32 = [];
+    pub let values: []ImportsImportedModule = [];
+}
+
+fn MapStrImportsimportedmodule_index(map: MapStrImportsimportedmodule, key: str) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapStrImportsimportedmodule_rehash(map: MapStrImportsimportedmodule, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapStrImportsimportedmodule_has(map: MapStrImportsimportedmodule, key: str) -> bool {
+    return MapStrImportsimportedmodule_index(map, key) >= 0;
+}
+
+fn MapStrImportsimportedmodule_get(map: MapStrImportsimportedmodule, key: str) -> ImportsImportedModule {
+    let index: i32 = MapStrImportsimportedmodule_index(map, key);
+    if (index < 0) { return null; }
+    return map.values[index];
+}
+
+fn MapStrImportsimportedmodule_put(map: MapStrImportsimportedmodule, key: str, value: ImportsImportedModule) -> void {
+    let index: i32 = MapStrImportsimportedmodule_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrImportsimportedmodule_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapStrImportsimportedmodule_length(map: MapStrImportsimportedmodule) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapStrImportsimportedmodule_delete(map: MapStrImportsimportedmodule, key: str) -> void {
+    let index: i32 = MapStrImportsimportedmodule_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrImportsimportedmodule_rehash(map, len(map.buckets)); }
+}
+
+class MapStrArrayastclassbinding {
+    pub let keys: []str = [];
+    pub let buckets: []i32 = [];
+    pub let values: [][]AstClassBinding = [];
+}
+
+fn MapStrArrayastclassbinding_index(map: MapStrArrayastclassbinding, key: str) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapStrArrayastclassbinding_rehash(map: MapStrArrayastclassbinding, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapStrArrayastclassbinding_has(map: MapStrArrayastclassbinding, key: str) -> bool {
+    return MapStrArrayastclassbinding_index(map, key) >= 0;
+}
+
+fn MapStrArrayastclassbinding_get(map: MapStrArrayastclassbinding, key: str) -> []AstClassBinding {
+    let index: i32 = MapStrArrayastclassbinding_index(map, key);
+    if (index < 0) { return []; }
+    return map.values[index];
+}
+
+fn MapStrArrayastclassbinding_put(map: MapStrArrayastclassbinding, key: str, value: []AstClassBinding) -> void {
+    let index: i32 = MapStrArrayastclassbinding_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrArrayastclassbinding_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapStrArrayastclassbinding_length(map: MapStrArrayastclassbinding) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapStrArrayastclassbinding_delete(map: MapStrArrayastclassbinding, key: str) -> void {
+    let index: i32 = MapStrArrayastclassbinding_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrArrayastclassbinding_rehash(map, len(map.buckets)); }
+}
+
+class MapAstnodeBool {
+    pub let keys: []AstNode = [];
+    pub let values: []bool = [];
+}
+
+fn MapAstnodeBool_index(map: MapAstnodeBool, key: AstNode) -> i32 {
+    if (map == null) { return -1; }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        if (map.keys[i] == key) { return i; }
+    }
+    return -1;
+}
+
+fn MapAstnodeBool_has(map: MapAstnodeBool, key: AstNode) -> bool {
+    return MapAstnodeBool_index(map, key) >= 0;
+}
+
+fn MapAstnodeBool_get(map: MapAstnodeBool, key: AstNode) -> bool {
+    let index: i32 = MapAstnodeBool_index(map, key);
+    if (index < 0) { return false; }
+    return map.values[index];
+}
+
+fn MapAstnodeBool_put(map: MapAstnodeBool, key: AstNode, value: bool) -> void {
+    let index: i32 = MapAstnodeBool_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+}
+
+fn MapAstnodeBool_length(map: MapAstnodeBool) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapAstnodeBool_delete(map: MapAstnodeBool, key: AstNode) -> void {
+    let index: i32 = MapAstnodeBool_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+}
+
+class MapImportsfnkeyBool {
+    pub let keys: []ImportsFnKey = [];
+    pub let buckets: []i32 = [];
+    pub let values: []bool = [];
+}
+
+fn MapImportsfnkeyBool_index(map: MapImportsfnkeyBool, key: ImportsFnKey) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i].alias == key.alias && map.keys[i].sig == key.sig) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = ((compiler_hash_string(key.alias) * 33 ^ compiler_hash_string(key.sig)) & 2147483647) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i].alias == key.alias && map.keys[i].sig == key.sig) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapImportsfnkeyBool_rehash(map: MapImportsfnkeyBool, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = ((compiler_hash_string(map.keys[i].alias) * 33 ^ compiler_hash_string(map.keys[i].sig)) & 2147483647) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapImportsfnkeyBool_has(map: MapImportsfnkeyBool, key: ImportsFnKey) -> bool {
+    return MapImportsfnkeyBool_index(map, key) >= 0;
+}
+
+fn MapImportsfnkeyBool_get(map: MapImportsfnkeyBool, key: ImportsFnKey) -> bool {
+    let index: i32 = MapImportsfnkeyBool_index(map, key);
+    if (index < 0) { return false; }
+    return map.values[index];
+}
+
+fn MapImportsfnkeyBool_put(map: MapImportsfnkeyBool, key: ImportsFnKey, value: bool) -> void {
+    let index: i32 = MapImportsfnkeyBool_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapImportsfnkeyBool_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = ((compiler_hash_string(key.alias) * 33 ^ compiler_hash_string(key.sig)) & 2147483647) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapImportsfnkeyBool_length(map: MapImportsfnkeyBool) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapImportsfnkeyBool_delete(map: MapImportsfnkeyBool, key: ImportsFnKey) -> void {
+    let index: i32 = MapImportsfnkeyBool_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapImportsfnkeyBool_rehash(map, len(map.buckets)); }
+}
+
+class MapStrArrayimportssigorigin {
+    pub let keys: []str = [];
+    pub let buckets: []i32 = [];
+    pub let values: [][]ImportsSigOrigin = [];
+}
+
+fn MapStrArrayimportssigorigin_index(map: MapStrArrayimportssigorigin, key: str) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapStrArrayimportssigorigin_rehash(map: MapStrArrayimportssigorigin, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapStrArrayimportssigorigin_has(map: MapStrArrayimportssigorigin, key: str) -> bool {
+    return MapStrArrayimportssigorigin_index(map, key) >= 0;
+}
+
+fn MapStrArrayimportssigorigin_get(map: MapStrArrayimportssigorigin, key: str) -> []ImportsSigOrigin {
+    let index: i32 = MapStrArrayimportssigorigin_index(map, key);
+    if (index < 0) { return []; }
+    return map.values[index];
+}
+
+fn MapStrArrayimportssigorigin_put(map: MapStrArrayimportssigorigin, key: str, value: []ImportsSigOrigin) -> void {
+    let index: i32 = MapStrArrayimportssigorigin_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrArrayimportssigorigin_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapStrArrayimportssigorigin_length(map: MapStrArrayimportssigorigin) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapStrArrayimportssigorigin_delete(map: MapStrArrayimportssigorigin, key: str) -> void {
+    let index: i32 = MapStrArrayimportssigorigin_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrArrayimportssigorigin_rehash(map, len(map.buckets)); }
+}
+
+class MapStrMapstrarrayimportssigorigin {
+    pub let keys: []str = [];
+    pub let buckets: []i32 = [];
+    pub let values: []MapStrArrayimportssigorigin = [];
+}
+
+fn MapStrMapstrarrayimportssigorigin_index(map: MapStrMapstrarrayimportssigorigin, key: str) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapStrMapstrarrayimportssigorigin_rehash(map: MapStrMapstrarrayimportssigorigin, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapStrMapstrarrayimportssigorigin_has(map: MapStrMapstrarrayimportssigorigin, key: str) -> bool {
+    return MapStrMapstrarrayimportssigorigin_index(map, key) >= 0;
+}
+
+fn MapStrMapstrarrayimportssigorigin_get(map: MapStrMapstrarrayimportssigorigin, key: str) -> MapStrArrayimportssigorigin {
+    let index: i32 = MapStrMapstrarrayimportssigorigin_index(map, key);
+    if (index < 0) { return null; }
+    return map.values[index];
+}
+
+fn MapStrMapstrarrayimportssigorigin_put(map: MapStrMapstrarrayimportssigorigin, key: str, value: MapStrArrayimportssigorigin) -> void {
+    let index: i32 = MapStrMapstrarrayimportssigorigin_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrMapstrarrayimportssigorigin_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapStrMapstrarrayimportssigorigin_length(map: MapStrMapstrarrayimportssigorigin) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapStrMapstrarrayimportssigorigin_delete(map: MapStrMapstrarrayimportssigorigin, key: str) -> void {
+    let index: i32 = MapStrMapstrarrayimportssigorigin_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrMapstrarrayimportssigorigin_rehash(map, len(map.buckets)); }
+}
+
+class MapStrSemanticfieldinfo {
+    pub let keys: []str = [];
+    pub let buckets: []i32 = [];
+    pub let values: []SemanticFieldInfo = [];
+}
+
+fn MapStrSemanticfieldinfo_index(map: MapStrSemanticfieldinfo, key: str) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapStrSemanticfieldinfo_rehash(map: MapStrSemanticfieldinfo, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapStrSemanticfieldinfo_has(map: MapStrSemanticfieldinfo, key: str) -> bool {
+    return MapStrSemanticfieldinfo_index(map, key) >= 0;
+}
+
+fn MapStrSemanticfieldinfo_get(map: MapStrSemanticfieldinfo, key: str) -> SemanticFieldInfo {
+    let index: i32 = MapStrSemanticfieldinfo_index(map, key);
+    if (index < 0) { return null; }
+    return map.values[index];
+}
+
+fn MapStrSemanticfieldinfo_put(map: MapStrSemanticfieldinfo, key: str, value: SemanticFieldInfo) -> void {
+    let index: i32 = MapStrSemanticfieldinfo_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrSemanticfieldinfo_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapStrSemanticfieldinfo_length(map: MapStrSemanticfieldinfo) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapStrSemanticfieldinfo_delete(map: MapStrSemanticfieldinfo, key: str) -> void {
+    let index: i32 = MapStrSemanticfieldinfo_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrSemanticfieldinfo_rehash(map, len(map.buckets)); }
+}
+
+class MapStrArraysemanticmethodinfo {
+    pub let keys: []str = [];
+    pub let buckets: []i32 = [];
+    pub let values: [][]SemanticMethodInfo = [];
+}
+
+fn MapStrArraysemanticmethodinfo_index(map: MapStrArraysemanticmethodinfo, key: str) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapStrArraysemanticmethodinfo_rehash(map: MapStrArraysemanticmethodinfo, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapStrArraysemanticmethodinfo_has(map: MapStrArraysemanticmethodinfo, key: str) -> bool {
+    return MapStrArraysemanticmethodinfo_index(map, key) >= 0;
+}
+
+fn MapStrArraysemanticmethodinfo_get(map: MapStrArraysemanticmethodinfo, key: str) -> []SemanticMethodInfo {
+    let index: i32 = MapStrArraysemanticmethodinfo_index(map, key);
+    if (index < 0) { return []; }
+    return map.values[index];
+}
+
+fn MapStrArraysemanticmethodinfo_put(map: MapStrArraysemanticmethodinfo, key: str, value: []SemanticMethodInfo) -> void {
+    let index: i32 = MapStrArraysemanticmethodinfo_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrArraysemanticmethodinfo_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapStrArraysemanticmethodinfo_length(map: MapStrArraysemanticmethodinfo) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapStrArraysemanticmethodinfo_delete(map: MapStrArraysemanticmethodinfo, key: str) -> void {
+    let index: i32 = MapStrArraysemanticmethodinfo_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrArraysemanticmethodinfo_rehash(map, len(map.buckets)); }
+}
+
+class MapAstnodeSemanticclassinfo {
+    pub let keys: []AstNode = [];
+    pub let values: []SemanticClassInfo = [];
+}
+
+fn MapAstnodeSemanticclassinfo_index(map: MapAstnodeSemanticclassinfo, key: AstNode) -> i32 {
+    if (map == null) { return -1; }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        if (map.keys[i] == key) { return i; }
+    }
+    return -1;
+}
+
+fn MapAstnodeSemanticclassinfo_has(map: MapAstnodeSemanticclassinfo, key: AstNode) -> bool {
+    return MapAstnodeSemanticclassinfo_index(map, key) >= 0;
+}
+
+fn MapAstnodeSemanticclassinfo_get(map: MapAstnodeSemanticclassinfo, key: AstNode) -> SemanticClassInfo {
+    let index: i32 = MapAstnodeSemanticclassinfo_index(map, key);
+    if (index < 0) { return null; }
+    return map.values[index];
+}
+
+fn MapAstnodeSemanticclassinfo_put(map: MapAstnodeSemanticclassinfo, key: AstNode, value: SemanticClassInfo) -> void {
+    let index: i32 = MapAstnodeSemanticclassinfo_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+}
+
+fn MapAstnodeSemanticclassinfo_length(map: MapAstnodeSemanticclassinfo) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapAstnodeSemanticclassinfo_delete(map: MapAstnodeSemanticclassinfo, key: AstNode) -> void {
+    let index: i32 = MapAstnodeSemanticclassinfo_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+}
+
+class MapStrSemanticclassinfo {
+    pub let keys: []str = [];
+    pub let buckets: []i32 = [];
+    pub let values: []SemanticClassInfo = [];
+}
+
+fn MapStrSemanticclassinfo_index(map: MapStrSemanticclassinfo, key: str) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapStrSemanticclassinfo_rehash(map: MapStrSemanticclassinfo, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapStrSemanticclassinfo_has(map: MapStrSemanticclassinfo, key: str) -> bool {
+    return MapStrSemanticclassinfo_index(map, key) >= 0;
+}
+
+fn MapStrSemanticclassinfo_get(map: MapStrSemanticclassinfo, key: str) -> SemanticClassInfo {
+    let index: i32 = MapStrSemanticclassinfo_index(map, key);
+    if (index < 0) { return null; }
+    return map.values[index];
+}
+
+fn MapStrSemanticclassinfo_put(map: MapStrSemanticclassinfo, key: str, value: SemanticClassInfo) -> void {
+    let index: i32 = MapStrSemanticclassinfo_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrSemanticclassinfo_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapStrSemanticclassinfo_length(map: MapStrSemanticclassinfo) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapStrSemanticclassinfo_delete(map: MapStrSemanticclassinfo, key: str) -> void {
+    let index: i32 = MapStrSemanticclassinfo_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrSemanticclassinfo_rehash(map, len(map.buckets)); }
+}
+
+class MapStrMapstrsemanticclassinfo {
+    pub let keys: []str = [];
+    pub let buckets: []i32 = [];
+    pub let values: []MapStrSemanticclassinfo = [];
+}
+
+fn MapStrMapstrsemanticclassinfo_index(map: MapStrMapstrsemanticclassinfo, key: str) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapStrMapstrsemanticclassinfo_rehash(map: MapStrMapstrsemanticclassinfo, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapStrMapstrsemanticclassinfo_has(map: MapStrMapstrsemanticclassinfo, key: str) -> bool {
+    return MapStrMapstrsemanticclassinfo_index(map, key) >= 0;
+}
+
+fn MapStrMapstrsemanticclassinfo_get(map: MapStrMapstrsemanticclassinfo, key: str) -> MapStrSemanticclassinfo {
+    let index: i32 = MapStrMapstrsemanticclassinfo_index(map, key);
+    if (index < 0) { return null; }
+    return map.values[index];
+}
+
+fn MapStrMapstrsemanticclassinfo_put(map: MapStrMapstrsemanticclassinfo, key: str, value: MapStrSemanticclassinfo) -> void {
+    let index: i32 = MapStrMapstrsemanticclassinfo_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrMapstrsemanticclassinfo_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapStrMapstrsemanticclassinfo_length(map: MapStrMapstrsemanticclassinfo) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapStrMapstrsemanticclassinfo_delete(map: MapStrMapstrsemanticclassinfo, key: str) -> void {
+    let index: i32 = MapStrMapstrsemanticclassinfo_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrMapstrsemanticclassinfo_rehash(map, len(map.buckets)); }
+}
+
+class MapStrSemanticscope {
+    pub let keys: []str = [];
+    pub let buckets: []i32 = [];
+    pub let values: []SemanticScope = [];
+}
+
+fn MapStrSemanticscope_index(map: MapStrSemanticscope, key: str) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapStrSemanticscope_rehash(map: MapStrSemanticscope, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapStrSemanticscope_has(map: MapStrSemanticscope, key: str) -> bool {
+    return MapStrSemanticscope_index(map, key) >= 0;
+}
+
+fn MapStrSemanticscope_get(map: MapStrSemanticscope, key: str) -> SemanticScope {
+    let index: i32 = MapStrSemanticscope_index(map, key);
+    if (index < 0) { return null; }
+    return map.values[index];
+}
+
+fn MapStrSemanticscope_put(map: MapStrSemanticscope, key: str, value: SemanticScope) -> void {
+    let index: i32 = MapStrSemanticscope_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrSemanticscope_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapStrSemanticscope_length(map: MapStrSemanticscope) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapStrSemanticscope_delete(map: MapStrSemanticscope, key: str) -> void {
+    let index: i32 = MapStrSemanticscope_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrSemanticscope_rehash(map, len(map.buckets)); }
+}
+
+class MapStrSemanticsymbol {
+    pub let keys: []str = [];
+    pub let buckets: []i32 = [];
+    pub let values: []SemanticSymbol = [];
+}
+
+fn MapStrSemanticsymbol_index(map: MapStrSemanticsymbol, key: str) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapStrSemanticsymbol_rehash(map: MapStrSemanticsymbol, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapStrSemanticsymbol_has(map: MapStrSemanticsymbol, key: str) -> bool {
+    return MapStrSemanticsymbol_index(map, key) >= 0;
+}
+
+fn MapStrSemanticsymbol_get(map: MapStrSemanticsymbol, key: str) -> SemanticSymbol {
+    let index: i32 = MapStrSemanticsymbol_index(map, key);
+    if (index < 0) { return null; }
+    return map.values[index];
+}
+
+fn MapStrSemanticsymbol_put(map: MapStrSemanticsymbol, key: str, value: SemanticSymbol) -> void {
+    let index: i32 = MapStrSemanticsymbol_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrSemanticsymbol_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapStrSemanticsymbol_length(map: MapStrSemanticsymbol) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapStrSemanticsymbol_delete(map: MapStrSemanticsymbol, key: str) -> void {
+    let index: i32 = MapStrSemanticsymbol_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrSemanticsymbol_rehash(map, len(map.buckets)); }
+}
+
+class MapStrSemantictype {
+    pub let keys: []str = [];
+    pub let buckets: []i32 = [];
+    pub let values: []SemanticType = [];
+}
+
+fn MapStrSemantictype_index(map: MapStrSemantictype, key: str) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapStrSemantictype_rehash(map: MapStrSemantictype, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapStrSemantictype_has(map: MapStrSemantictype, key: str) -> bool {
+    return MapStrSemantictype_index(map, key) >= 0;
+}
+
+fn MapStrSemantictype_get(map: MapStrSemantictype, key: str) -> SemanticType {
+    let index: i32 = MapStrSemantictype_index(map, key);
+    if (index < 0) { return null; }
+    return map.values[index];
+}
+
+fn MapStrSemantictype_put(map: MapStrSemantictype, key: str, value: SemanticType) -> void {
+    let index: i32 = MapStrSemantictype_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrSemantictype_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapStrSemantictype_length(map: MapStrSemantictype) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapStrSemantictype_delete(map: MapStrSemantictype, key: str) -> void {
+    let index: i32 = MapStrSemantictype_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrSemantictype_rehash(map, len(map.buckets)); }
+}
+
+class MapStrArraysemanticsymbol {
+    pub let keys: []str = [];
+    pub let buckets: []i32 = [];
+    pub let values: [][]SemanticSymbol = [];
+}
+
+fn MapStrArraysemanticsymbol_index(map: MapStrArraysemanticsymbol, key: str) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapStrArraysemanticsymbol_rehash(map: MapStrArraysemanticsymbol, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapStrArraysemanticsymbol_has(map: MapStrArraysemanticsymbol, key: str) -> bool {
+    return MapStrArraysemanticsymbol_index(map, key) >= 0;
+}
+
+fn MapStrArraysemanticsymbol_get(map: MapStrArraysemanticsymbol, key: str) -> []SemanticSymbol {
+    let index: i32 = MapStrArraysemanticsymbol_index(map, key);
+    if (index < 0) { return []; }
+    return map.values[index];
+}
+
+fn MapStrArraysemanticsymbol_put(map: MapStrArraysemanticsymbol, key: str, value: []SemanticSymbol) -> void {
+    let index: i32 = MapStrArraysemanticsymbol_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrArraysemanticsymbol_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapStrArraysemanticsymbol_length(map: MapStrArraysemanticsymbol) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapStrArraysemanticsymbol_delete(map: MapStrArraysemanticsymbol, key: str) -> void {
+    let index: i32 = MapStrArraysemanticsymbol_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrArraysemanticsymbol_rehash(map, len(map.buckets)); }
+}
+
+class MapStrSemanticbuiltininfo {
+    pub let keys: []str = [];
+    pub let buckets: []i32 = [];
+    pub let values: []SemanticBuiltinInfo = [];
+}
+
+fn MapStrSemanticbuiltininfo_index(map: MapStrSemanticbuiltininfo, key: str) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapStrSemanticbuiltininfo_rehash(map: MapStrSemanticbuiltininfo, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapStrSemanticbuiltininfo_has(map: MapStrSemanticbuiltininfo, key: str) -> bool {
+    return MapStrSemanticbuiltininfo_index(map, key) >= 0;
+}
+
+fn MapStrSemanticbuiltininfo_get(map: MapStrSemanticbuiltininfo, key: str) -> SemanticBuiltinInfo {
+    let index: i32 = MapStrSemanticbuiltininfo_index(map, key);
+    if (index < 0) { return new SemanticBuiltinInfo(); }
+    return map.values[index];
+}
+
+fn MapStrSemanticbuiltininfo_put(map: MapStrSemanticbuiltininfo, key: str, value: SemanticBuiltinInfo) -> void {
+    let index: i32 = MapStrSemanticbuiltininfo_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrSemanticbuiltininfo_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapStrSemanticbuiltininfo_length(map: MapStrSemanticbuiltininfo) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapStrSemanticbuiltininfo_delete(map: MapStrSemanticbuiltininfo, key: str) -> void {
+    let index: i32 = MapStrSemanticbuiltininfo_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrSemanticbuiltininfo_rehash(map, len(map.buckets)); }
+}
+
+class MapAstnodeStr {
+    pub let keys: []AstNode = [];
+    pub let values: []str = [];
+}
+
+fn MapAstnodeStr_index(map: MapAstnodeStr, key: AstNode) -> i32 {
+    if (map == null) { return -1; }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        if (map.keys[i] == key) { return i; }
+    }
+    return -1;
+}
+
+fn MapAstnodeStr_has(map: MapAstnodeStr, key: AstNode) -> bool {
+    return MapAstnodeStr_index(map, key) >= 0;
+}
+
+fn MapAstnodeStr_get(map: MapAstnodeStr, key: AstNode) -> str {
+    let index: i32 = MapAstnodeStr_index(map, key);
+    if (index < 0) { return ""; }
+    return map.values[index];
+}
+
+fn MapAstnodeStr_put(map: MapAstnodeStr, key: AstNode, value: str) -> void {
+    let index: i32 = MapAstnodeStr_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+}
+
+fn MapAstnodeStr_length(map: MapAstnodeStr) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapAstnodeStr_delete(map: MapAstnodeStr, key: AstNode) -> void {
+    let index: i32 = MapAstnodeStr_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+}
+
+class MapStrMapstrbool {
+    pub let keys: []str = [];
+    pub let buckets: []i32 = [];
+    pub let values: []MapStrBool = [];
+}
+
+fn MapStrMapstrbool_index(map: MapStrMapstrbool, key: str) -> i32 {
+    if (map == null) { return -1; }
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
+        if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    return -1;
+}
+
+fn MapStrMapstrbool_rehash(map: MapStrMapstrbool, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
+}
+
+fn MapStrMapstrbool_has(map: MapStrMapstrbool, key: str) -> bool {
+    return MapStrMapstrbool_index(map, key) >= 0;
+}
+
+fn MapStrMapstrbool_get(map: MapStrMapstrbool, key: str) -> MapStrBool {
+    let index: i32 = MapStrMapstrbool_index(map, key);
+    if (index < 0) { return null; }
+    return map.values[index];
+}
+
+fn MapStrMapstrbool_put(map: MapStrMapstrbool, key: str, value: MapStrBool) -> void {
+    let index: i32 = MapStrMapstrbool_index(map, key);
+    if (index >= 0) { map.values[index] = value; return; }
+    array_append(map.keys, key);
+    array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrMapstrbool_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
+}
+
+fn MapStrMapstrbool_length(map: MapStrMapstrbool) -> i32 {
+    if (map == null) { return 0; }
+    return len(map.keys);
+}
+
+fn MapStrMapstrbool_delete(map: MapStrMapstrbool, key: str) -> void {
+    let index: i32 = MapStrMapstrbool_index(map, key);
+    if (index < 0) { return; }
+    for (let i: i32 = index; i + 1 < len(map.keys); i++) {
+        map.keys[i] = map.keys[i + 1];
+        map.values[i] = map.values[i + 1];
+    }
+    array_pop(map.keys);
+    array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrMapstrbool_rehash(map, len(map.buckets)); }
+}
+
+fn array_Str(count: i32) -> []str {
+    let result: []str = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, ""); }
+    return result;
+}
+
+fn append_Str(items: []str, value: str) -> []str {
+    if (len(items) == 0) { items = []; }
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Str(items: []str, more: []str) -> []str {
+    if (len(items) == 0 && len(more) != 0) { items = []; }
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Str(items: []str, start: i32, end: i32) -> []str {
+    let result: []str = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Str(items: []str, value: str) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Lexertoken(count: i32) -> []LexerToken {
+    let result: []LexerToken = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, new LexerToken()); }
+    return result;
+}
+
+fn append_Lexertoken(items: []LexerToken, value: LexerToken) -> []LexerToken {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Lexertoken(items: []LexerToken, more: []LexerToken) -> []LexerToken {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Lexertoken(items: []LexerToken, start: i32, end: i32) -> []LexerToken {
+    let result: []LexerToken = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Lexertoken(items: []LexerToken, value: LexerToken) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Lexerlexerror(count: i32) -> []LexerLexError {
+    let result: []LexerLexError = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, new LexerLexError()); }
+    return result;
+}
+
+fn append_Lexerlexerror(items: []LexerLexError, value: LexerLexError) -> []LexerLexError {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Lexerlexerror(items: []LexerLexError, more: []LexerLexError) -> []LexerLexError {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Lexerlexerror(items: []LexerLexError, start: i32, end: i32) -> []LexerLexError {
+    let result: []LexerLexError = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Lexerlexerror(items: []LexerLexError, value: LexerLexError) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Parserparseerror(count: i32) -> []ParserParseError {
+    let result: []ParserParseError = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, new ParserParseError()); }
+    return result;
+}
+
+fn append_Parserparseerror(items: []ParserParseError, value: ParserParseError) -> []ParserParseError {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Parserparseerror(items: []ParserParseError, more: []ParserParseError) -> []ParserParseError {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Parserparseerror(items: []ParserParseError, start: i32, end: i32) -> []ParserParseError {
+    let result: []ParserParseError = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Parserparseerror(items: []ParserParseError, value: ParserParseError) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Semanticimportedfunc(count: i32) -> []SemanticImportedFunc {
+    let result: []SemanticImportedFunc = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, new SemanticImportedFunc()); }
+    return result;
+}
+
+fn append_Semanticimportedfunc(items: []SemanticImportedFunc, value: SemanticImportedFunc) -> []SemanticImportedFunc {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Semanticimportedfunc(items: []SemanticImportedFunc, more: []SemanticImportedFunc) -> []SemanticImportedFunc {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Semanticimportedfunc(items: []SemanticImportedFunc, start: i32, end: i32) -> []SemanticImportedFunc {
+    let result: []SemanticImportedFunc = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Semanticimportedfunc(items: []SemanticImportedFunc, value: SemanticImportedFunc) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Importsresolveerror(count: i32) -> []ImportsResolveError {
+    let result: []ImportsResolveError = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, null); }
+    return result;
+}
+
+fn append_Importsresolveerror(items: []ImportsResolveError, value: ImportsResolveError) -> []ImportsResolveError {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Importsresolveerror(items: []ImportsResolveError, more: []ImportsResolveError) -> []ImportsResolveError {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Importsresolveerror(items: []ImportsResolveError, start: i32, end: i32) -> []ImportsResolveError {
+    let result: []ImportsResolveError = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Importsresolveerror(items: []ImportsResolveError, value: ImportsResolveError) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Importsimportedmodule(count: i32) -> []ImportsImportedModule {
+    let result: []ImportsImportedModule = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, null); }
+    return result;
+}
+
+fn append_Importsimportedmodule(items: []ImportsImportedModule, value: ImportsImportedModule) -> []ImportsImportedModule {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Importsimportedmodule(items: []ImportsImportedModule, more: []ImportsImportedModule) -> []ImportsImportedModule {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Importsimportedmodule(items: []ImportsImportedModule, start: i32, end: i32) -> []ImportsImportedModule {
+    let result: []ImportsImportedModule = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Importsimportedmodule(items: []ImportsImportedModule, value: ImportsImportedModule) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Astnode(count: i32) -> []AstNode {
+    let result: []AstNode = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, null); }
+    return result;
+}
+
+fn append_Astnode(items: []AstNode, value: AstNode) -> []AstNode {
+    if (len(items) == 0) { items = []; }
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Astnode(items: []AstNode, more: []AstNode) -> []AstNode {
+    if (len(items) == 0 && len(more) != 0) { items = []; }
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Astnode(items: []AstNode, start: i32, end: i32) -> []AstNode {
+    let result: []AstNode = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Astnode(items: []AstNode, value: AstNode) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Semanticdiagnostic(count: i32) -> []SemanticDiagnostic {
+    let result: []SemanticDiagnostic = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, new SemanticDiagnostic()); }
+    return result;
+}
+
+fn append_Semanticdiagnostic(items: []SemanticDiagnostic, value: SemanticDiagnostic) -> []SemanticDiagnostic {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Semanticdiagnostic(items: []SemanticDiagnostic, more: []SemanticDiagnostic) -> []SemanticDiagnostic {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Semanticdiagnostic(items: []SemanticDiagnostic, start: i32, end: i32) -> []SemanticDiagnostic {
+    let result: []SemanticDiagnostic = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Semanticdiagnostic(items: []SemanticDiagnostic, value: SemanticDiagnostic) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_I32(count: i32) -> []i32 {
+    let result: []i32 = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, 0); }
+    return result;
+}
+
+fn append_I32(items: []i32, value: i32) -> []i32 {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_I32(items: []i32, more: []i32) -> []i32 {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_I32(items: []i32, start: i32, end: i32) -> []i32 {
+    let result: []i32 = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_I32(items: []i32, value: i32) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Astclassfield(count: i32) -> []AstClassField {
+    let result: []AstClassField = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, null); }
+    return result;
+}
+
+fn append_Astclassfield(items: []AstClassField, value: AstClassField) -> []AstClassField {
+    if (len(items) == 0) { items = []; }
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Astclassfield(items: []AstClassField, more: []AstClassField) -> []AstClassField {
+    if (len(items) == 0 && len(more) != 0) { items = []; }
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Astclassfield(items: []AstClassField, start: i32, end: i32) -> []AstClassField {
+    let result: []AstClassField = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Astclassfield(items: []AstClassField, value: AstClassField) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Astclassmethod(count: i32) -> []AstClassMethod {
+    let result: []AstClassMethod = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, null); }
+    return result;
+}
+
+fn append_Astclassmethod(items: []AstClassMethod, value: AstClassMethod) -> []AstClassMethod {
+    if (len(items) == 0) { items = []; }
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Astclassmethod(items: []AstClassMethod, more: []AstClassMethod) -> []AstClassMethod {
+    if (len(items) == 0 && len(more) != 0) { items = []; }
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Astclassmethod(items: []AstClassMethod, start: i32, end: i32) -> []AstClassMethod {
+    let result: []AstClassMethod = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Astclassmethod(items: []AstClassMethod, value: AstClassMethod) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Astparam(count: i32) -> []AstParam {
+    let result: []AstParam = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, null); }
+    return result;
+}
+
+fn append_Astparam(items: []AstParam, value: AstParam) -> []AstParam {
+    if (len(items) == 0) { items = []; }
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Astparam(items: []AstParam, more: []AstParam) -> []AstParam {
+    if (len(items) == 0 && len(more) != 0) { items = []; }
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Astparam(items: []AstParam, start: i32, end: i32) -> []AstParam {
+    let result: []AstParam = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Astparam(items: []AstParam, value: AstParam) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Codegenoperand(count: i32) -> []CodegenOperand {
+    let result: []CodegenOperand = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, new CodegenOperand()); }
+    return result;
+}
+
+fn append_Codegenoperand(items: []CodegenOperand, value: CodegenOperand) -> []CodegenOperand {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Codegenoperand(items: []CodegenOperand, more: []CodegenOperand) -> []CodegenOperand {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Codegenoperand(items: []CodegenOperand, start: i32, end: i32) -> []CodegenOperand {
+    let result: []CodegenOperand = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Codegenoperand(items: []CodegenOperand, value: CodegenOperand) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Codegenirfunc(count: i32) -> []CodegenIRFunc {
+    let result: []CodegenIRFunc = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, null); }
+    return result;
+}
+
+fn append_Codegenirfunc(items: []CodegenIRFunc, value: CodegenIRFunc) -> []CodegenIRFunc {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Codegenirfunc(items: []CodegenIRFunc, more: []CodegenIRFunc) -> []CodegenIRFunc {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Codegenirfunc(items: []CodegenIRFunc, start: i32, end: i32) -> []CodegenIRFunc {
+    let result: []CodegenIRFunc = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Codegenirfunc(items: []CodegenIRFunc, value: CodegenIRFunc) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Codegenirinstr(count: i32) -> []CodegenIRInstr {
+    let result: []CodegenIRInstr = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, new CodegenIRInstr()); }
+    return result;
+}
+
+fn append_Codegenirinstr(items: []CodegenIRInstr, value: CodegenIRInstr) -> []CodegenIRInstr {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Codegenirinstr(items: []CodegenIRInstr, more: []CodegenIRInstr) -> []CodegenIRInstr {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Codegenirinstr(items: []CodegenIRInstr, start: i32, end: i32) -> []CodegenIRInstr {
+    let result: []CodegenIRInstr = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Codegenirinstr(items: []CodegenIRInstr, value: CodegenIRInstr) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Codegenirstringconst(count: i32) -> []CodegenIRStringConst {
+    let result: []CodegenIRStringConst = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, new CodegenIRStringConst()); }
+    return result;
+}
+
+fn append_Codegenirstringconst(items: []CodegenIRStringConst, value: CodegenIRStringConst) -> []CodegenIRStringConst {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Codegenirstringconst(items: []CodegenIRStringConst, more: []CodegenIRStringConst) -> []CodegenIRStringConst {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Codegenirstringconst(items: []CodegenIRStringConst, start: i32, end: i32) -> []CodegenIRStringConst {
+    let result: []CodegenIRStringConst = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Codegenirstringconst(items: []CodegenIRStringConst, value: CodegenIRStringConst) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Codegenirglobal(count: i32) -> []CodegenIRGlobal {
+    let result: []CodegenIRGlobal = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, new CodegenIRGlobal()); }
+    return result;
+}
+
+fn append_Codegenirglobal(items: []CodegenIRGlobal, value: CodegenIRGlobal) -> []CodegenIRGlobal {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Codegenirglobal(items: []CodegenIRGlobal, more: []CodegenIRGlobal) -> []CodegenIRGlobal {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Codegenirglobal(items: []CodegenIRGlobal, start: i32, end: i32) -> []CodegenIRGlobal {
+    let result: []CodegenIRGlobal = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Codegenirglobal(items: []CodegenIRGlobal, value: CodegenIRGlobal) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Codegenfuncoverloadentry(count: i32) -> []CodegenFuncOverloadEntry {
+    let result: []CodegenFuncOverloadEntry = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, new CodegenFuncOverloadEntry()); }
+    return result;
+}
+
+fn append_Codegenfuncoverloadentry(items: []CodegenFuncOverloadEntry, value: CodegenFuncOverloadEntry) -> []CodegenFuncOverloadEntry {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Codegenfuncoverloadentry(items: []CodegenFuncOverloadEntry, more: []CodegenFuncOverloadEntry) -> []CodegenFuncOverloadEntry {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Codegenfuncoverloadentry(items: []CodegenFuncOverloadEntry, start: i32, end: i32) -> []CodegenFuncOverloadEntry {
+    let result: []CodegenFuncOverloadEntry = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Codegenfuncoverloadentry(items: []CodegenFuncOverloadEntry, value: CodegenFuncOverloadEntry) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Astclassbinding(count: i32) -> []AstClassBinding {
+    let result: []AstClassBinding = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, new AstClassBinding()); }
+    return result;
+}
+
+fn append_Astclassbinding(items: []AstClassBinding, value: AstClassBinding) -> []AstClassBinding {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Astclassbinding(items: []AstClassBinding, more: []AstClassBinding) -> []AstClassBinding {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Astclassbinding(items: []AstClassBinding, start: i32, end: i32) -> []AstClassBinding {
+    let result: []AstClassBinding = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Astclassbinding(items: []AstClassBinding, value: AstClassBinding) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Importssigorigin(count: i32) -> []ImportsSigOrigin {
+    let result: []ImportsSigOrigin = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, new ImportsSigOrigin()); }
+    return result;
+}
+
+fn append_Importssigorigin(items: []ImportsSigOrigin, value: ImportsSigOrigin) -> []ImportsSigOrigin {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Importssigorigin(items: []ImportsSigOrigin, more: []ImportsSigOrigin) -> []ImportsSigOrigin {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Importssigorigin(items: []ImportsSigOrigin, start: i32, end: i32) -> []ImportsSigOrigin {
+    let result: []ImportsSigOrigin = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Importssigorigin(items: []ImportsSigOrigin, value: ImportsSigOrigin) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Semanticmethodinfo(count: i32) -> []SemanticMethodInfo {
+    let result: []SemanticMethodInfo = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, null); }
+    return result;
+}
+
+fn append_Semanticmethodinfo(items: []SemanticMethodInfo, value: SemanticMethodInfo) -> []SemanticMethodInfo {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Semanticmethodinfo(items: []SemanticMethodInfo, more: []SemanticMethodInfo) -> []SemanticMethodInfo {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Semanticmethodinfo(items: []SemanticMethodInfo, start: i32, end: i32) -> []SemanticMethodInfo {
+    let result: []SemanticMethodInfo = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Semanticmethodinfo(items: []SemanticMethodInfo, value: SemanticMethodInfo) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Semantictype(count: i32) -> []SemanticType {
+    let result: []SemanticType = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, null); }
+    return result;
+}
+
+fn append_Semantictype(items: []SemanticType, value: SemanticType) -> []SemanticType {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Semantictype(items: []SemanticType, more: []SemanticType) -> []SemanticType {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Semantictype(items: []SemanticType, start: i32, end: i32) -> []SemanticType {
+    let result: []SemanticType = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Semantictype(items: []SemanticType, value: SemanticType) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Semanticclassmethodbody(count: i32) -> []SemanticClassMethodBody {
+    let result: []SemanticClassMethodBody = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, new SemanticClassMethodBody()); }
+    return result;
+}
+
+fn append_Semanticclassmethodbody(items: []SemanticClassMethodBody, value: SemanticClassMethodBody) -> []SemanticClassMethodBody {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Semanticclassmethodbody(items: []SemanticClassMethodBody, more: []SemanticClassMethodBody) -> []SemanticClassMethodBody {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Semanticclassmethodbody(items: []SemanticClassMethodBody, start: i32, end: i32) -> []SemanticClassMethodBody {
+    let result: []SemanticClassMethodBody = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Semanticclassmethodbody(items: []SemanticClassMethodBody, value: SemanticClassMethodBody) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}
+
+fn array_Semanticsymbol(count: i32) -> []SemanticSymbol {
+    let result: []SemanticSymbol = [];
+    for (let i: i32 = 0; i < count; i++) { array_append(result, null); }
+    return result;
+}
+
+fn append_Semanticsymbol(items: []SemanticSymbol, value: SemanticSymbol) -> []SemanticSymbol {
+    array_append(items, value);
+    return items;
+}
+
+fn extend_Semanticsymbol(items: []SemanticSymbol, more: []SemanticSymbol) -> []SemanticSymbol {
+    let count: i32 = len(more);
+    for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
+    return items;
+}
+
+fn slice_Semanticsymbol(items: []SemanticSymbol, start: i32, end: i32) -> []SemanticSymbol {
+    let result: []SemanticSymbol = [];
+    for (let i: i32 = start; i < end; i++) { array_append(result, items[i]); }
+    return result;
+}
+
+fn contains_Semanticsymbol(items: []SemanticSymbol, value: SemanticSymbol) -> bool {
+    for (let i: i32 = 0; i < len(items); i++) {
+        if (items[i] == value) { return true; }
+    }
+    return false;
+}

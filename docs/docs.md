@@ -161,11 +161,25 @@ These are provided by the compiler without any import:
 
 | Builtin                         | Notes                                          |
 | ------------------------------- | ---------------------------------------------- |
-| `len(s: str) -> i32`            | length of a string                             |
+| `len(value) -> i32`             | length of a string or array, including class arrays |
 | `array_append(xs: []T, v: T)`   | grow an array                                  |
 | `mov(reg, value)`               | inline asm: load register                      |
 | `syscall()`                     | inline asm: trigger a system call              |
 | `push(reg)` / `pop(reg)`        | inline asm: stack manipulation                 |
+| `store_word(address, value)`   | write one native pointer-width word (8 bytes on 64-bit targets, 4 on x86) |
+| `store_byte(address, value)`   | write the low byte to memory                    |
+| `load8` / `load32` / `load64`   | raw memory reads; `load32` sign-extends          |
+| `gc_collect()`                 | collect unreachable heap allocations           |
+| `alloc_string(size) -> str`     | allocate GC-tracked writable bytes and a trailing zero; initialize the bytes before reading them |
+
+`alloc_string` is a low-level primitive for library authors. Its size must be
+non-negative and fit in the target address space. It reserves `size + 1` bytes
+and writes a zero byte at offset `size`; the preceding bytes are uninitialized.
+Application code can use `make_buffer(size)` for a space-filled buffer,
+`copy_bytes(address, count)` for an owned copy, or `StringBuilder` for text.
+
+Class references can be `null`. The `&&` and `||` operators short-circuit, so
+`value != null && value.field > 0` safely guards the field access.
 
 > Inline-asm builtins are only useful when writing freestanding code without
 > the standard library. Most user code should call `std.print`, `std.exit`,
@@ -183,15 +197,22 @@ and other libraries in the [Nox registry](https://github.com/MJDaws0n/Nox/blob/m
 novus [flags] <file.nov>
 
 Flags:
-  --target=<triple>     Compile target: darwin/arm64, linux/amd64,
-                        linux/arm64, linux/386, windows/amd64
-  --keep-asm            Don't delete the generated .s file
-  --print-ir            Dump IR to stdout
-  --help                Show help
-  --version             Show version
+  --target=<os/arch>    Select the compilation target
+  --heap-size=<size>    Heap reservation, e.g. 64m or 1g (default: 64m)
+  --gc-entries=<N>      Maximum tracked allocations (default: 65536)
+  --asm-only           Emit assembly without assembling or linking
+  --skip-link          Assemble without linking
+  --debug              Print tokens, AST, IR and toolchain details
 ```
 
 Artifacts go to `build/<target>/<name>[.exe]`.
+
+Run `novus` without arguments to display usage. Supported targets are
+`darwin/arm64`, `darwin/amd64`, `linux/amd64`, `linux/arm64`, `linux/386`,
+`windows/amd64`, and `windows/arm64`. The 32-bit Linux backend supports full-width
+`i64`/`u64` values and floating-point operations, and can compile the compiler itself; see the
+[verification matrix](testing-matrix.md) for the distinction between compiler
+hosts and compilation targets.
 
 ---
 

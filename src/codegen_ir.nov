@@ -1,0 +1,147 @@
+module codegen_ir;
+
+import model;
+import runtime;
+
+fn codegen_Operand_String(o: CodegenOperand) -> str {
+    {
+        let choice_352: i32 = o.Kind;
+        if ((choice_352 == 0)) {
+            return "<none>";
+        } else if ((choice_352 == 1)) {
+            return ("v" + runtime_string_i32(o.Reg));
+        } else if ((choice_352 == 2)) {
+            return ("%" + o.PhysReg);
+        } else if ((choice_352 == 3)) {
+            return ("$" + runtime_string_i64(o.Imm));
+        } else if ((choice_352 == 4)) {
+            return ("str_" + runtime_string_i64(o.Imm));
+        } else if ((choice_352 == 5)) {
+            return o.Label;
+        } else if ((choice_352 == 6)) {
+            if ((o.MemOffset != 0)) {
+                return ("[" + o.MemBase + " + " + runtime_string_i64(o.MemOffset) + "]");
+            }
+            return ("[" + o.MemBase + "]");
+        } else {
+            return "?";
+        }
+    }
+}
+
+// Convenience constructors for operands.
+fn codegen_VReg(n: i32) -> CodegenOperand {
+    return make_CodegenOperand_12(1, n);
+}
+
+fn codegen_PReg(name: str) -> CodegenOperand {
+    return make_CodegenOperand_13(2, name);
+}
+
+fn codegen_Imm(val: i64) -> CodegenOperand {
+    return make_CodegenOperand_14(3, val);
+}
+
+fn codegen_StrRef(idx: i32) -> CodegenOperand {
+    return make_CodegenOperand_14(4, runtime_to_i64(idx));
+}
+
+fn codegen_LabelOp(name: str) -> CodegenOperand {
+    return make_CodegenOperand_15(5, name);
+}
+
+fn codegen_Mem(base: str, off: i64) -> CodegenOperand {
+    return make_CodegenOperand_16(6, base, off);
+}
+
+fn codegen_None() -> CodegenOperand {
+    return CompilerState.codegen_noneOperand;
+}
+
+fn codegen_IROp_String(op: i32) -> str {
+    {
+        let s: str = MapI32Str_get(CompilerState.codegen_irOpNames, op);
+        let ok: bool = MapI32Str_has(CompilerState.codegen_irOpNames, op);
+        if (ok) {
+            return s;
+        }
+    }
+    return ("irop_" + runtime_string_i32(op));
+}
+
+fn codegen_IRInstr_String(i: CodegenIRInstr) -> str {
+    let s: str = codegen_IROp_String(i.Op);
+    if ((i.Dst.Kind != 0)) {
+        s = (s + (" " + codegen_Operand_String(i.Dst)));
+    }
+    if ((i.Src1.Kind != 0)) {
+        s = (s + (", " + codegen_Operand_String(i.Src1)));
+    }
+    if ((i.Src2.Kind != 0)) {
+        s = (s + (", " + codegen_Operand_String(i.Src2)));
+    }
+    {
+        let items_354: []CodegenOperand = i.Args;
+        let count_356: i32 = len(items_354);
+        for (let index_355: i32 = 0; index_355 < count_356; index_355++) {
+            let a: CodegenOperand = items_354[index_355];
+            s = (s + (", " + codegen_Operand_String(a)));
+        }
+    }
+    return s;
+}
+
+// Emit appends an instruction to the function.
+fn codegen_IRFunc_Emit(f: CodegenIRFunc, instr: CodegenIRInstr) -> void {
+    f.Instrs = append_Codegenirinstr(f.Instrs, copy_CodegenIRInstr(instr));
+}
+
+// AddString registers a string constant and returns its index.
+fn codegen_IRModule_AddString(m: CodegenIRModule, value: ByteBuffer) -> i32 {
+    {
+        let items_357: []CodegenIRStringConst = m.Strings;
+        let count_359: i32 = len(items_357);
+        for (let index_358: i32 = 0; index_358 < count_359; index_358++) {
+            let i: i32 = index_358;
+            let s: CodegenIRStringConst = items_357[index_358];
+            if (s.Value.equals(value)) {
+                return i;
+            }
+        }
+    }
+    let idx: i32 = len(m.Strings);
+    m.Strings = append_Codegenirstringconst(m.Strings, make_CodegenIRStringConst_18(("_str_" + runtime_string_i32(idx)), value));
+    return idx;
+}
+
+// DebugDump returns a human-readable representation of the entire IR module.
+fn codegen_IRModule_DebugDump(m: CodegenIRModule) -> str {
+    let s: StringBuilder = new StringBuilder();
+    s.append(("=== IR Module (entry: " + m.EntryFunc + ", " + runtime_string_i32(len(m.Strings)) + " strings, " + runtime_string_i32(len(m.Functions)) + " functions) ===\n"));
+    {
+        let items_360: []CodegenIRStringConst = m.Strings;
+        let count_362: i32 = len(items_360);
+        for (let index_361: i32 = 0; index_361 < count_362; index_361++) {
+            let i: i32 = index_361;
+            let str_value: CodegenIRStringConst = items_360[index_361];
+            s.append(("  .str[" + runtime_string_i32(i) + "] " + str_value.Label + " = " + codegen_gasQuoteString(str_value.Value) + "\n"));
+        }
+    }
+    {
+        let items_363: []CodegenIRFunc = m.Functions;
+        let count_365: i32 = len(items_363);
+        for (let index_364: i32 = 0; index_364 < count_365; index_364++) {
+            let fn_value: CodegenIRFunc = items_363[index_364];
+            s.append(("\nfunc " + fn_value.Name + " (params=" + runtime_string_i32(fn_value.ParamCount) + ", locals=" + runtime_string_i32(fn_value.Locals) + ", frame=" + runtime_string_i32(fn_value.FrameSize) + "):\n"));
+            {
+                let items_366: []CodegenIRInstr = fn_value.Instrs;
+                let count_368: i32 = len(items_366);
+                for (let index_367: i32 = 0; index_367 < count_368; index_367++) {
+                    let instr: CodegenIRInstr = items_366[index_367];
+                    s.append(("  " + codegen_IRInstr_String(instr) + "\n"));
+                }
+            }
+        }
+    }
+    return s.text();
+}

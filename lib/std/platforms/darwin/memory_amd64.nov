@@ -1,0 +1,2 @@
+module memory_darwin_amd64;
+import ../../core/memory;

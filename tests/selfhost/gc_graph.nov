@@ -1,0 +1,33 @@
+module gc_graph;
+import ../../lib/std;
+class Item { pub let value: i32 = 0; }
+class Holder {
+    pub let keys: []str = [];
+    pub let values: []Item = [];
+    pub static let root: Holder = null;
+}
+fn populate() -> void {
+    Holder.root = new Holder();
+    for (let i: i32 = 0; i < 100; i++) {
+        let item: Item = new Item();
+        item.value = i + 1000;
+        array_append(Holder.root.keys, i32_to_str(i));
+        array_append(Holder.root.values, item);
+    }
+}
+fn garbage() -> void {
+    for (let i: i32 = 0; i < 2000; i++) {
+        let item: Item = new Item();
+        item.value = i;
+    }
+}
+fn main() -> i32 {
+    populate();
+    garbage();
+    gc_collect();
+    for (let i: i32 = 0; i < 100; i++) {
+        if (Holder.root.values[i].value != i + 1000) { print("bad " + i32_to_str(i) + " = " + i32_to_str(Holder.root.values[i].value)); return 1; }
+    }
+    print("passed");
+    return 0;
+}

@@ -1,0 +1,1068 @@
+package codegen
+
+import (
+	"fmt"
+	"strings"
+)
+
+// ---------------------------------------------------------------------------
+// x86 (32-bit) Assembly Emitter
+//
+// Produces GAS (AT&T syntax) assembly for 32-bit Linux (ELF).
+// Uses eight-byte stack arguments and returns 64-bit values in edx:eax.
+// ---------------------------------------------------------------------------
+
+// EmitX86 converts an IRModule to x86 (32-bit) assembly text.
+func EmitX86(mod *IRModule, target *Target) string {
+	target.EnsureHeapDefaults()
+	mod = withCollector(mod, target)
+	e := &x86Emitter{
+		mod:    mod,
+		target: target,
+		b:      &strings.Builder{},
+	}
+	e.emit()
+	return e.b.String()
+}
+
+type x86Emitter struct {
+	mod    *IRModule
+	target *Target
+	b      *strings.Builder
+	nextID int
+	fn     *IRFunc
+}
+
+func (e *x86Emitter) uniqueID() int {
+	id := e.nextID
+	e.nextID++
+	return id
+}
+
+func (e *x86Emitter) computeFrameSize(fn *IRFunc) int {
+	maxVReg := 0
+	for _, instr := range fn.Instrs {
+		for _, op := range []Operand{instr.Dst, instr.Src1, instr.Src2} {
+			if op.Kind == OpVirtReg && op.Reg+1 > maxVReg {
+				maxVReg = op.Reg + 1
+			}
+		}
+		for _, op := range instr.Args {
+			if op.Kind == OpVirtReg && op.Reg+1 > maxVReg {
+				maxVReg = op.Reg + 1
+			}
+		}
+	}
+	totalSlots := fn.Locals + maxVReg + 4
+	size := totalSlots * 8
+	if size%16 != 0 {
+		size += 16 - (size % 16)
+	}
+	if size < 16 {
+		size = 16
+	}
+	return size
+}
+
+func (e *x86Emitter) vregOffset(fn *IRFunc, reg int) int {
+	return -((fn.Locals + reg + 1) * 8)
+}
+
+func (e *x86Emitter) emit() {
+	w := e.b
+
+	// Data section.
+	if len(e.mod.Strings) > 0 {
+		w.WriteString(".data\n")
+		for _, s := range e.mod.Strings {
+			w.WriteString(fmt.Sprintf("%s:\n", s.Label))
+			w.WriteString(fmt.Sprintf("    .asciz %s\n", gasQuoteString(s.Value)))
+			w.WriteString(fmt.Sprintf("%s_len:\n", s.Label))
+			w.WriteString(fmt.Sprintf("    .long %d\n", len(s.Value)))
+		}
+		w.WriteString("\n")
+	}
+
+	// BSS: bump-allocator heap.
+	if e.usesHeap() {
+		w.WriteString(".bss\n")
+		w.WriteString("_novus_heap:\n")
+		w.WriteString(fmt.Sprintf("    .space %d\n", e.target.HeapSize))
+		w.WriteString("_novus_heap_ptr:\n")
+		w.WriteString("    .space 4\n")
+		// GC metadata (32-bit: 4-byte pointers, entries are {ptr(4), size(4), mark(4)} = 12 bytes).
+		w.WriteString("_novus_gc_table:\n")
+		w.WriteString(fmt.Sprintf("    .space %d\n", e.target.GCEntries*12))
+		w.WriteString("_novus_gc_count:\n")
+		w.WriteString("    .space 4\n")
+		w.WriteString("_novus_gc_threshold:\n")
+		w.WriteString("    .space 4\n")
+		w.WriteString("_novus_gc_freelist:\n")
+		w.WriteString("    .space 256\n")
+		w.WriteString("_novus_gc_stack_bottom:\n")
+		w.WriteString("    .space 4\n\n")
+	}
+
+	// Global values are eight bytes, including on this 32-bit target.
+	if len(e.mod.Globals) > 0 {
+		w.WriteString(".data\n")
+		for _, g := range e.mod.Globals {
+			w.WriteString(fmt.Sprintf("%s:\n", g.Name))
+			if g.InitStr >= 0 {
+				strLabel := e.mod.Strings[g.InitStr].Label
+				w.WriteString(fmt.Sprintf("    .long %s\n    .long 0\n", strLabel))
+			} else {
+				w.WriteString(fmt.Sprintf("    .quad %d\n", g.InitImm))
+			}
+		}
+		w.WriteString("\n")
+	}
+
+	// Text section.
+	w.WriteString(".text\n")
+	w.WriteString(".globl _start\n")
+	w.WriteString(".globl main\n\n")
+
+	// _start entry point calls main and exits.
+	w.WriteString("_start:\n")
+	if e.usesHeap() {
+		w.WriteString("    movl %esp, _novus_gc_stack_bottom\n")
+		w.WriteString("    movl $256, _novus_gc_threshold\n")
+	}
+	if hasRuntimeEnvpGlobal(e.mod) {
+		envpSym := e.target.Sym(runtimeEnvpGlobal)
+		w.WriteString("    movl (%esp), %eax\n")
+		w.WriteString("    leal 8(%esp,%eax,4), %edx\n")
+		w.WriteString(fmt.Sprintf("    movl %%edx, %s\n", envpSym))
+	}
+	w.WriteString("    movl (%esp), %eax\n    leal 4(%esp), %ecx\n    pushl $0\n    pushl %ecx\n    pushl $0\n    pushl %eax\n    call main\n    addl $16, %esp\n")
+	w.WriteString("    movl %eax, %ebx\n")
+	w.WriteString("    movl $1, %eax\n") // exit syscall
+	w.WriteString("    int $0x80\n\n")
+
+	for _, fn := range e.mod.Functions {
+		e.emitFunction(fn)
+	}
+
+	e.emitWideDivisionRuntime()
+	if e.usesHeap() {
+		e.emitX86GCRuntime()
+	}
+}
+
+func (e *x86Emitter) emitFunction(fn *IRFunc) {
+	w := e.b
+	e.fn = fn
+	frameSize := e.computeFrameSize(fn)
+
+	w.WriteString(fmt.Sprintf("%s:\n", fn.Name))
+	w.WriteString("    pushl %ebp\n")
+	w.WriteString("    movl %esp, %ebp\n")
+	if frameSize > 0 {
+		w.WriteString(fmt.Sprintf("    subl $%d, %%esp\n", frameSize))
+	}
+
+	w.WriteString("    pushl %ebx\n    pushl %esi\n    pushl %edi\n")
+	for _, instr := range fn.Instrs {
+		e.emitInstr(fn, instr)
+	}
+
+	w.WriteString("\n")
+	e.fn = nil
+}
+
+func (e *x86Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
+	if e.emitWide(instr) {
+		return
+	}
+	w := e.b
+
+	switch instr.Op {
+	case IRLabel:
+		if instr.Dst.Kind == OpLabel && instr.Dst.Label != fn.Name {
+			w.WriteString(fmt.Sprintf("%s:\n", instr.Dst.Label))
+		}
+
+	case IRComment:
+		if instr.Src1.Kind == OpLabel {
+			w.WriteString(fmt.Sprintf("    ## %s\n", instr.Src1.Label))
+		}
+
+	case IRMov:
+		src := e.operand(instr.Src1)
+		dst := e.operand(instr.Dst)
+		if isMemOperand(instr.Src1) && isMemOperand(instr.Dst) {
+			w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src))
+			w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+		} else {
+			w.WriteString(fmt.Sprintf("    movl %s, %s\n", src, dst))
+		}
+
+	case IRLea:
+		src := e.leaOperand(instr.Src1)
+		dst := e.operand(instr.Dst)
+		if isMemOperand(instr.Dst) {
+			w.WriteString(fmt.Sprintf("    leal %s, %%eax\n", src))
+			w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+		} else {
+			w.WriteString(fmt.Sprintf("    leal %s, %s\n", src, dst))
+		}
+
+	case IRLoad:
+		src := e.memOperand(instr.Src1)
+		dst := e.operand(instr.Dst)
+		if isMemOperand(instr.Src1) && isMemOperand(instr.Dst) {
+			w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src))
+			w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+		} else {
+			w.WriteString(fmt.Sprintf("    movl %s, %s\n", src, dst))
+		}
+
+	case IRStore:
+		if instr.Src2.Kind != OpNone {
+			w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", e.operand(instr.Src2)))
+			w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", e.operand(instr.Src1)))
+			w.WriteString("    movl %eax, (%ecx)\n")
+			break
+		}
+		src := e.operand(instr.Src1)
+		if instr.Src2.Kind != OpNone {
+			addr := e.operand(instr.Src2)
+			w.WriteString(fmt.Sprintf("    movl %s, (%s)\n", src, stripPercent(addr)))
+		} else {
+			dst := e.memOperand(instr.Dst)
+			if isMemOperand(instr.Src1) && isMemOperand(instr.Dst) {
+				w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src))
+				w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+			} else {
+				w.WriteString(fmt.Sprintf("    movl %s, %s\n", src, dst))
+			}
+		}
+
+	case IRPush:
+		src := e.operand(instr.Src1)
+		w.WriteString(fmt.Sprintf("    pushl %s\n", src))
+
+	case IRPop:
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    popl %s\n", dst))
+
+	case IRAdd:
+		e.emitBinOp(instr, "addl")
+	case IRSub:
+		e.emitBinOp(instr, "subl")
+	case IRMul:
+		src1 := e.operand(instr.Src1)
+		src2 := e.operand(instr.Src2)
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src1))
+		w.WriteString(fmt.Sprintf("    imull %s, %%eax\n", src2))
+		w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+	case IRDiv:
+		src1 := e.operand(instr.Src1)
+		src2 := e.operand(instr.Src2)
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src1))
+		w.WriteString("    cdq\n")
+		w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", src2))
+		w.WriteString("    idivl %ecx\n")
+		w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+	case IRUDiv:
+		src1 := e.operand(instr.Src1)
+		src2 := e.operand(instr.Src2)
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src1))
+		w.WriteString("    xorl %edx, %edx\n")
+		w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", src2))
+		w.WriteString("    divl %ecx\n")
+		w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+	case IRMod:
+		src1 := e.operand(instr.Src1)
+		src2 := e.operand(instr.Src2)
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src1))
+		w.WriteString("    cdq\n")
+		w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", src2))
+		w.WriteString("    idivl %ecx\n")
+		w.WriteString(fmt.Sprintf("    movl %%edx, %s\n", dst))
+	case IRUMod:
+		src1 := e.operand(instr.Src1)
+		src2 := e.operand(instr.Src2)
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src1))
+		w.WriteString("    xorl %edx, %edx\n")
+		w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", src2))
+		w.WriteString("    divl %ecx\n")
+		w.WriteString(fmt.Sprintf("    movl %%edx, %s\n", dst))
+
+	case IRNeg:
+		src := e.operand(instr.Src1)
+		dst := e.operand(instr.Dst)
+		if isMemOperand(instr.Src1) && isMemOperand(instr.Dst) {
+			w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src))
+			w.WriteString("    negl %eax\n")
+			w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+		} else {
+			w.WriteString(fmt.Sprintf("    movl %s, %s\n", src, dst))
+			w.WriteString(fmt.Sprintf("    negl %s\n", dst))
+		}
+
+	case IRNot:
+		src := e.operand(instr.Src1)
+		dst := e.operand(instr.Dst)
+		if isMemOperand(instr.Src1) && isMemOperand(instr.Dst) {
+			w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src))
+			w.WriteString("    xorl $1, %eax\n")
+			w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+		} else {
+			w.WriteString(fmt.Sprintf("    movl %s, %s\n", src, dst))
+			w.WriteString(fmt.Sprintf("    xorl $1, %s\n", dst))
+		}
+
+	case IRAnd:
+		e.emitBinOp(instr, "andl")
+	case IROr:
+		e.emitBinOp(instr, "orl")
+	case IRXor:
+		e.emitBinOp(instr, "xorl")
+	case IRShl:
+		src1 := e.operand(instr.Src1)
+		dst := e.operand(instr.Dst)
+		if isMemOperand(instr.Src1) && isMemOperand(instr.Dst) {
+			w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src1))
+			if instr.Src2.Kind == OpImmediate {
+				w.WriteString(fmt.Sprintf("    shll $%d, %%eax\n", instr.Src2.Imm))
+			} else {
+				src2 := e.operand(instr.Src2)
+				w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", src2))
+				w.WriteString("    shll %cl, %eax\n")
+			}
+			w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+		} else {
+			w.WriteString(fmt.Sprintf("    movl %s, %s\n", src1, dst))
+			if instr.Src2.Kind == OpImmediate {
+				w.WriteString(fmt.Sprintf("    shll $%d, %s\n", instr.Src2.Imm, dst))
+			} else {
+				src2 := e.operand(instr.Src2)
+				w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", src2))
+				w.WriteString(fmt.Sprintf("    shll %%cl, %s\n", dst))
+			}
+		}
+	case IRShr:
+		src1 := e.operand(instr.Src1)
+		dst := e.operand(instr.Dst)
+		if isMemOperand(instr.Src1) && isMemOperand(instr.Dst) {
+			w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src1))
+			if instr.Src2.Kind == OpImmediate {
+				w.WriteString(fmt.Sprintf("    sarl $%d, %%eax\n", instr.Src2.Imm))
+			} else {
+				src2 := e.operand(instr.Src2)
+				w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", src2))
+				w.WriteString("    sarl %cl, %eax\n")
+			}
+			w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+		} else {
+			w.WriteString(fmt.Sprintf("    movl %s, %s\n", src1, dst))
+			if instr.Src2.Kind == OpImmediate {
+				w.WriteString(fmt.Sprintf("    sarl $%d, %s\n", instr.Src2.Imm, dst))
+			} else {
+				src2 := e.operand(instr.Src2)
+				w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", src2))
+				w.WriteString(fmt.Sprintf("    sarl %%cl, %s\n", dst))
+			}
+		}
+	case IRBitNot:
+		src := e.operand(instr.Src1)
+		dst := e.operand(instr.Dst)
+		if isMemOperand(instr.Src1) && isMemOperand(instr.Dst) {
+			w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src))
+			w.WriteString("    notl %eax\n")
+			w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+		} else {
+			w.WriteString(fmt.Sprintf("    movl %s, %s\n", src, dst))
+			w.WriteString(fmt.Sprintf("    notl %s\n", dst))
+		}
+
+	case IRCmpEq:
+		e.emitCmp(instr, "sete")
+	case IRCmpNe:
+		e.emitCmp(instr, "setne")
+	case IRCmpLt:
+		e.emitCmp(instr, "setl")
+	case IRCmpLe:
+		e.emitCmp(instr, "setle")
+	case IRCmpGt:
+		e.emitCmp(instr, "setg")
+	case IRCmpGe:
+		e.emitCmp(instr, "setge")
+	case IRUCmpLt:
+		e.emitCmp(instr, "setb")
+	case IRUCmpLe:
+		e.emitCmp(instr, "setbe")
+	case IRUCmpGt:
+		e.emitCmp(instr, "seta")
+	case IRUCmpGe:
+		e.emitCmp(instr, "setae")
+
+	case IRJmp:
+		w.WriteString(fmt.Sprintf("    jmp %s\n", instr.Dst.Label))
+
+	case IRJmpIf:
+		src := e.operand(instr.Src1)
+		if isMemOperand(instr.Src1) {
+			w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src))
+			w.WriteString("    testl %eax, %eax\n")
+		} else {
+			w.WriteString(fmt.Sprintf("    testl %s, %s\n", src, src))
+		}
+		w.WriteString(fmt.Sprintf("    jnz %s\n", instr.Dst.Label))
+
+	case IRJmpNot:
+		src := e.operand(instr.Src1)
+		if isMemOperand(instr.Src1) {
+			w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src))
+			w.WriteString("    testl %eax, %eax\n")
+		} else {
+			w.WriteString(fmt.Sprintf("    testl %s, %s\n", src, src))
+		}
+		w.WriteString(fmt.Sprintf("    jz %s\n", instr.Dst.Label))
+
+	case IRCall:
+		e.emitCall(fn, instr)
+
+	case IRRet:
+		if instr.Src1.Kind != OpNone {
+			src := e.operand(instr.Src1)
+			w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src))
+		}
+		frameSize := e.computeFrameSize(fn)
+		if frameSize > 0 {
+			w.WriteString(fmt.Sprintf("    addl $%d, %%esp\n", frameSize))
+		}
+		w.WriteString("    popl %ebp\n")
+		w.WriteString("    ret\n")
+
+	case IRSyscall:
+		w.WriteString("    int $0x80\n")
+
+	case IRInt:
+		if instr.Src1.Kind == OpImmediate {
+			w.WriteString(fmt.Sprintf("    int $0x%x\n", instr.Src1.Imm))
+		} else {
+			w.WriteString("    int $0x80\n")
+		}
+
+	case IRNop:
+		w.WriteString("    nop\n")
+
+	case IRSetReg:
+		dst := e.operand(instr.Dst)
+		src := e.operand(instr.Src1)
+		w.WriteString(fmt.Sprintf("    movl %s, %s\n", src, dst))
+
+	case IRGetReg:
+		src := e.operand(instr.Src1)
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl %s, %s\n", src, dst))
+
+	case IRSetFlag, IRGetFlag:
+		e.emitFlagOp(instr)
+
+	case IRStrLen:
+		e.emitStrLen(instr)
+	case IRStrIndex:
+		e.emitStrIndex(instr)
+	case IRStoreByte:
+		addr := e.operand(instr.Dst)
+		src := e.operand(instr.Src1)
+		w.WriteString(fmt.Sprintf("    movb %s, (%s)\n", src, stripPercent(addr)))
+	case IRStrConcat:
+		e.emitStrConcat(instr)
+	case IRStrCmpEq:
+		e.emitStrCmpEq(instr)
+
+	// Memory load (32-bit).
+	case IRLoad8:
+		src := e.operand(instr.Src1)
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src))
+		w.WriteString("    movzbl (%eax), %eax\n")
+		w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+	case IRNarrow:
+		w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", e.operand(instr.Src1)))
+		switch instr.Src2.Imm {
+		case 8:
+			w.WriteString("    movsbl %al, %eax\n")
+		case 16:
+			w.WriteString("    movswl %ax, %eax\n")
+		case -8:
+			w.WriteString("    movzbl %al, %eax\n")
+		case -16:
+			w.WriteString("    movzwl %ax, %eax\n")
+		}
+		w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", e.operand(instr.Dst)))
+	case IRUShr:
+		w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", e.operand(instr.Src1)))
+		w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", e.operand(instr.Src2)))
+		w.WriteString("    shrl %cl, %eax\n")
+		w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", e.operand(instr.Dst)))
+
+	case IRLoad32:
+		src := e.operand(instr.Src1)
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src))
+		w.WriteString("    movl (%eax), %eax\n")
+		w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+	case IRLoad64:
+		// 32-bit can only handle lower 32 bits of a 64-bit value.
+		src := e.operand(instr.Src1)
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src))
+		w.WriteString("    movl (%eax), %eax\n")
+		w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+
+	// Array operations (32-bit, 4-byte elements).
+	case IRHeapAlloc:
+		instr.Src1, instr.Args = LabelOp("_novus_gc_alloc"), []Operand{instr.Src1}
+		e.emitCall(fn, instr)
+	case IRArrayNew:
+		e.emitArrayNew(instr)
+	case IRArrayGet:
+		e.emitArrayGet(instr)
+	case IRArraySet:
+		e.emitArraySet(instr)
+	case IRArrayAppend:
+		e.emitArrayAppend(instr)
+	case IRArrayPop:
+		e.emitArrayPop(instr)
+	case IRArrayLen:
+		e.emitArrayLen(instr)
+	case IRWinCall:
+		w.WriteString("    ## win_call: Windows API calls not supported on x86-32\n")
+
+	case IRLoadGlobal:
+		if instr.Src1.Kind == OpLabel {
+			globalSym := e.target.Sym(instr.Src1.Label)
+			dst := e.operand(instr.Dst)
+			w.WriteString(fmt.Sprintf("    movl %s, %%eax\n    movl %%eax, %s\n", globalSym, dst))
+		}
+
+	case IRStoreGlobal:
+		if instr.Dst.Kind == OpLabel {
+			globalSym := e.target.Sym(instr.Dst.Label)
+			src := e.operand(instr.Src1)
+			w.WriteString(fmt.Sprintf("    movl %s, %%eax\n    movl %%eax, %s\n", src, globalSym))
+		}
+
+	case IRGCCollect:
+		w.WriteString("    call _novus_gc_collect\n")
+	}
+	switch instr.Op {
+	case IRStrLen, IRStrIndex, IRStrConcat, IRStrCmpEq, IRGetFlag:
+		w.WriteString(fmt.Sprintf("    movl $0, %s\n", e.widePart(instr.Dst, true)))
+	}
+}
+
+func (e *x86Emitter) emitBinOp(instr IRInstr, mnemonic string) {
+	w := e.b
+	src1 := e.operand(instr.Src1)
+	src2 := e.operand(instr.Src2)
+	dst := e.operand(instr.Dst)
+	// x86 doesn't allow mem-to-mem: route through %eax.
+	w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src1))
+	if isMemOperand(instr.Src2) && isMemOperand(instr.Dst) {
+		w.WriteString(fmt.Sprintf("    %s %s, %%eax\n", mnemonic, src2))
+		w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+	} else {
+		w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+		w.WriteString(fmt.Sprintf("    %s %s, %s\n", mnemonic, src2, dst))
+	}
+}
+
+func (e *x86Emitter) emitCmp(instr IRInstr, setcc string) {
+	w := e.b
+	src1 := e.operand(instr.Src1)
+	src2 := e.operand(instr.Src2)
+	dst := e.operand(instr.Dst)
+	w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", src1))
+	w.WriteString(fmt.Sprintf("    cmpl %s, %%eax\n", src2))
+	w.WriteString(fmt.Sprintf("    %s %%al\n", setcc))
+	w.WriteString("    movzbl %al, %eax\n")
+	w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+}
+
+func (e *x86Emitter) emitCall(fn *IRFunc, instr IRInstr) {
+	w := e.b
+
+	// cdecl: push all args in reverse order.
+	for i := len(instr.Args) - 1; i >= 0; i-- {
+		src := e.operand(instr.Args[i])
+		w.WriteString(fmt.Sprintf("    pushl %s\n", src))
+	}
+
+	label := instr.Src1.Label
+	w.WriteString(fmt.Sprintf("    call %s\n", label))
+
+	// Clean up stack args.
+	if len(instr.Args) > 0 {
+		w.WriteString(fmt.Sprintf("    addl $%d, %%esp\n", len(instr.Args)*4))
+	}
+
+	if instr.Dst.Kind != OpNone {
+		dst := e.operand(instr.Dst)
+		w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+	}
+}
+
+func (e *x86Emitter) emitStrLen(instr IRInstr) {
+	w := e.b
+	src := e.operand(instr.Src1)
+	dst := e.operand(instr.Dst)
+	id := e.uniqueID()
+	startLabel := fmt.Sprintf(".Lstrlen32_s_%d", id)
+	doneLabel := fmt.Sprintf(".Lstrlen32_d_%d", id)
+
+	w.WriteString(fmt.Sprintf("    movl %s, %%edi\n", src))
+	w.WriteString("    xorl %ecx, %ecx\n")
+	w.WriteString(fmt.Sprintf("%s:\n", startLabel))
+	w.WriteString("    cmpb $0, (%edi,%ecx)\n")
+	w.WriteString(fmt.Sprintf("    je %s\n", doneLabel))
+	w.WriteString("    incl %ecx\n")
+	w.WriteString(fmt.Sprintf("    jmp %s\n", startLabel))
+	w.WriteString(fmt.Sprintf("%s:\n", doneLabel))
+	w.WriteString(fmt.Sprintf("    movl %%ecx, %s\n", dst))
+}
+
+func (e *x86Emitter) emitStrIndex(instr IRInstr) {
+	w := e.b
+	src := e.operand(instr.Src1)
+	idx := e.operand(instr.Src2)
+	dst := e.operand(instr.Dst)
+	w.WriteString(fmt.Sprintf("    movl %s, %%edi\n", src))
+	w.WriteString(fmt.Sprintf("    movl %s, %%esi\n", idx))
+	w.WriteString("    xorl %eax, %eax\n")
+	w.WriteString("    movb (%edi,%esi), %al\n")
+	w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+}
+
+func (e *x86Emitter) emitStrConcat(instr IRInstr) {
+	w := e.b
+	src1 := e.operand(instr.Src1)
+	src2 := e.operand(instr.Src2)
+	dst := e.operand(instr.Dst)
+
+	id := e.uniqueID()
+	len1Label := fmt.Sprintf(".Lscl1_%d", id)
+	len1Done := fmt.Sprintf(".Lscl1d_%d", id)
+	len2Label := fmt.Sprintf(".Lscl2_%d", id)
+	len2Done := fmt.Sprintf(".Lscl2d_%d", id)
+	copy1Label := fmt.Sprintf(".Lsc1_%d", id)
+	copy2Label := fmt.Sprintf(".Lsc2_%d", id)
+	doneLabel := fmt.Sprintf(".Lscd_%d", id)
+
+	// Save callee-saved registers.
+	w.WriteString("    pushl %ebx\n")
+	w.WriteString("    pushl %edi\n")
+
+	// Load source pointers.
+	w.WriteString(fmt.Sprintf("    movl %s, %%esi\n", src1))
+	w.WriteString(fmt.Sprintf("    movl %s, %%edx\n", src2))
+
+	// Compute strlen(s1) → ecx.
+	w.WriteString("    xorl %ecx, %ecx\n")
+	w.WriteString(fmt.Sprintf("%s:\n", len1Label))
+	w.WriteString("    cmpb $0, (%esi,%ecx)\n")
+	w.WriteString(fmt.Sprintf("    je %s\n", len1Done))
+	w.WriteString("    incl %ecx\n")
+	w.WriteString(fmt.Sprintf("    jmp %s\n", len1Label))
+	w.WriteString(fmt.Sprintf("%s:\n", len1Done))
+	w.WriteString("    pushl %ecx\n") // save len1
+
+	// Compute strlen(s2) → eax.
+	w.WriteString("    xorl %eax, %eax\n")
+	w.WriteString(fmt.Sprintf("%s:\n", len2Label))
+	w.WriteString("    cmpb $0, (%edx,%eax)\n")
+	w.WriteString(fmt.Sprintf("    je %s\n", len2Done))
+	w.WriteString("    incl %eax\n")
+	w.WriteString(fmt.Sprintf("    jmp %s\n", len2Label))
+	w.WriteString(fmt.Sprintf("%s:\n", len2Done))
+
+	// size = len1+len2+1
+	w.WriteString("    popl %ecx\n") // len1
+	w.WriteString("    addl %ecx, %eax\n")
+	w.WriteString("    incl %eax\n")
+	// Save s1, s2 on stack.
+	w.WriteString("    pushl %esi\n")
+	w.WriteString("    pushl %edx\n")
+	// Call gc_alloc(size) — cdecl.
+	w.WriteString("    pushl $0\n    pushl %eax\n")
+	w.WriteString("    call _novus_gc_alloc\n")
+	w.WriteString("    addl $8, %esp\n")
+	w.WriteString("    popl %edx\n")
+	w.WriteString("    popl %esi\n")
+	// eax = allocated buffer. Save in ebx (callee-saved).
+	w.WriteString("    movl %eax, %ebx\n")
+	w.WriteString("    movl %eax, %edi\n") // edi = write cursor
+
+	// Copy s1.
+	w.WriteString(fmt.Sprintf("%s:\n", copy1Label))
+	w.WriteString("    movb (%esi), %al\n")
+	w.WriteString("    testb %al, %al\n")
+	w.WriteString(fmt.Sprintf("    jz %s\n", copy2Label))
+	w.WriteString("    movb %al, (%edi)\n")
+	w.WriteString("    incl %esi\n")
+	w.WriteString("    incl %edi\n")
+	w.WriteString(fmt.Sprintf("    jmp %s\n", copy1Label))
+
+	// Copy s2 (including null).
+	w.WriteString(fmt.Sprintf("%s:\n", copy2Label))
+	w.WriteString("    movb (%edx), %al\n")
+	w.WriteString("    movb %al, (%edi)\n")
+	w.WriteString("    testb %al, %al\n")
+	w.WriteString(fmt.Sprintf("    jz %s\n", doneLabel))
+	w.WriteString("    incl %edx\n")
+	w.WriteString("    incl %edi\n")
+	w.WriteString(fmt.Sprintf("    jmp %s\n", copy2Label))
+
+	w.WriteString(fmt.Sprintf("%s:\n", doneLabel))
+	w.WriteString("    movl %ebx, %eax\n") // result = saved buffer start
+	w.WriteString("    popl %edi\n")
+	w.WriteString("    popl %ebx\n")
+	w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+}
+
+func (e *x86Emitter) usesHeap() bool {
+	for _, fn := range e.mod.Functions {
+		for _, instr := range fn.Instrs {
+			switch instr.Op {
+			case IRHeapAlloc, IRStrConcat, IRArrayNew, IRArrayAppend, IRGCCollect:
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ---------------------------------------------------------------------------
+// x86 operand formatting (32-bit GAS/AT&T)
+// ---------------------------------------------------------------------------
+
+func (e *x86Emitter) operand(op Operand) string {
+	switch op.Kind {
+	case OpImmediate:
+		return fmt.Sprintf("$%d", op.Imm)
+	case OpPhysReg:
+		return fmt.Sprintf("%%%s", op.PhysReg)
+	case OpVirtReg:
+		if e.fn == nil {
+			return "0(%ebp)"
+		}
+		return fmt.Sprintf("%d(%%ebp)", e.vregOffset(e.fn, op.Reg))
+	case OpStringRef:
+		label := e.mod.Strings[op.Imm].Label
+		return fmt.Sprintf("$%s", label)
+	case OpLabel:
+		return op.Label
+	case OpMemory:
+		if op.MemBase != "" {
+			return fmt.Sprintf("%d(%%%s)", op.MemOffset, op.MemBase)
+		}
+		return fmt.Sprintf("%d", op.MemOffset)
+	case OpNone:
+		return "$0"
+	}
+	return "$0"
+}
+
+func (e *x86Emitter) memOperand(op Operand) string {
+	if op.Kind == OpMemory {
+		return fmt.Sprintf("%d(%%%s)", op.MemOffset, op.MemBase)
+	}
+	return e.operand(op)
+}
+
+func (e *x86Emitter) leaOperand(op Operand) string {
+	switch op.Kind {
+	case OpMemory:
+		return fmt.Sprintf("%d(%%%s)", op.MemOffset, op.MemBase)
+	case OpStringRef:
+		label := e.mod.Strings[op.Imm].Label
+		return label
+	default:
+		return e.operand(op)
+	}
+}
+
+// isMemOperand returns true if the operand references memory (stack slot or memory addressing).
+func isMemOperand(op Operand) bool {
+	return op.Kind == OpVirtReg || op.Kind == OpMemory
+}
+
+// ---------------------------------------------------------------------------
+// x86 (32-bit) flag operations
+// ---------------------------------------------------------------------------
+
+func (e *x86Emitter) emitFlagOp(instr IRInstr) {
+	w := e.b
+
+	flagName := ""
+	if instr.Op == IRGetFlag {
+		if instr.Src1.Kind == OpPhysReg {
+			flagName = instr.Src1.PhysReg
+		} else if instr.Src1.Kind == OpLabel {
+			flagName = instr.Src1.Label
+		}
+	} else {
+		if instr.Dst.Kind == OpPhysReg {
+			flagName = instr.Dst.PhysReg
+		} else if instr.Dst.Kind == OpLabel {
+			flagName = instr.Dst.Label
+		}
+	}
+
+	if instr.Op == IRGetFlag {
+		setcc := flagNameToX86Setcc(flagName)
+		dst := e.operand(instr.Dst)
+		if setcc != "" {
+			w.WriteString("    pushl %eax\n    movl $0, %eax\n")
+			w.WriteString(fmt.Sprintf("    %s %%al\n", setcc))
+			w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+			w.WriteString("    popl %eax\n")
+		} else {
+			w.WriteString(fmt.Sprintf("    ## getflag: unrecognised flag %q\n", flagName))
+			w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
+		}
+	} else {
+		w.WriteString(fmt.Sprintf("    ## setflag %q not directly supported on x86\n", flagName))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// x86 (32-bit) string comparison
+// ---------------------------------------------------------------------------
+
+func (e *x86Emitter) emitStrCmpEq(instr IRInstr) {
+	w := e.b
+	src1 := e.operand(instr.Src1)
+	src2 := e.operand(instr.Src2)
+	dst := e.operand(instr.Dst)
+
+	id := e.uniqueID()
+	loopLabel := fmt.Sprintf(".Lsce32_l_%d", id)
+	neqLabel := fmt.Sprintf(".Lsce32_n_%d", id)
+	doneLabel := fmt.Sprintf(".Lsce32_d_%d", id)
+
+	w.WriteString(fmt.Sprintf("    movl %s, %%esi\n", src1))
+	w.WriteString(fmt.Sprintf("    movl %s, %%edi\n", src2))
+	w.WriteString(fmt.Sprintf("%s:\n", loopLabel))
+	w.WriteString("    movb (%esi), %al\n")
+	w.WriteString("    movb (%edi), %cl\n")
+	w.WriteString("    cmpb %cl, %al\n")
+	w.WriteString(fmt.Sprintf("    jne %s\n", neqLabel))
+	w.WriteString("    testb %al, %al\n")
+	w.WriteString(fmt.Sprintf("    je %s\n", doneLabel)) // both null → equal
+	w.WriteString("    incl %esi\n")
+	w.WriteString("    incl %edi\n")
+	w.WriteString(fmt.Sprintf("    jmp %s\n", loopLabel))
+	w.WriteString(fmt.Sprintf("%s:\n", neqLabel))
+	w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))
+	doneLabel2 := fmt.Sprintf(".Lsce32_e_%d", id)
+	w.WriteString(fmt.Sprintf("    jmp %s\n", doneLabel2))
+	w.WriteString(fmt.Sprintf("%s:\n", doneLabel))
+	w.WriteString(fmt.Sprintf("    movl $1, %s\n", dst))
+	w.WriteString(fmt.Sprintf("%s:\n", doneLabel2))
+}
+
+// ---------------------------------------------------------------------------
+// x86 (32-bit) array operations (4-byte elements, 12-byte header)
+// Header layout: [data_ptr(4)][len(4)][cap(4)]
+// ---------------------------------------------------------------------------
+
+func (e *x86Emitter) emitArrayNew(instr IRInstr) {
+	w := e.b
+	cap := instr.Src2.Imm
+	if cap < 4 {
+		cap = 4
+	}
+
+	// Allocate header (12 bytes) + data (cap*4 bytes) via GC allocator.
+	totalSize := 12 + cap*4
+	w.WriteString(fmt.Sprintf("    pushl $%d\n", totalSize)) // cdecl: arg on stack
+	w.WriteString("    call _novus_gc_alloc\n")
+	w.WriteString("    addl $4, %esp\n")
+	// eax = header pointer.
+	w.WriteString("    leal 12(%eax), %ecx\n")                  // ecx = data start
+	w.WriteString("    movl %ecx, (%eax)\n")                    // header.data_ptr
+	w.WriteString("    movl $0, 4(%eax)\n")                     // header.len = 0
+	w.WriteString(fmt.Sprintf("    movl $%d, 8(%%eax)\n", cap)) // header.cap
+	dst := e.operand(instr.Dst)
+	w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+}
+
+func (e *x86Emitter) emitArrayGet(instr IRInstr) {
+	w := e.b
+	arrPtr := e.operand(instr.Src1)
+	idx := e.operand(instr.Src2)
+	dst := e.operand(instr.Dst)
+	w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", arrPtr))
+	w.WriteString("    movl (%eax), %eax\n") // data_ptr
+	w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", idx))
+	w.WriteString("    movl (%eax,%ecx,4), %eax\n")
+	w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+}
+
+func (e *x86Emitter) emitArraySet(instr IRInstr) {
+	w := e.b
+	arrPtr := e.operand(instr.Dst)
+	idx := e.operand(instr.Src1)
+	val := e.operand(instr.Src2)
+	w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", arrPtr))
+	w.WriteString("    movl (%eax), %eax\n") // data_ptr
+	w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", idx))
+	w.WriteString(fmt.Sprintf("    movl %s, %%edx\n", val))
+	w.WriteString("    movl %edx, (%eax,%ecx,4)\n")
+}
+
+func (e *x86Emitter) emitArrayAppend(instr IRInstr) {
+	w := e.b
+	arrPtr := e.operand(instr.Dst)
+	val := e.operand(instr.Src1)
+
+	id := e.uniqueID()
+	noGrowLabel := fmt.Sprintf(".Laang32_%d", id)
+	capOkLabel := fmt.Sprintf(".Laaco32_%d", id)
+	copyLabel := fmt.Sprintf(".Laacp32_%d", id)
+	copyDoneLabel := fmt.Sprintf(".Laacd32_%d", id)
+
+	w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", arrPtr)) // eax = arrPtr
+	w.WriteString(fmt.Sprintf("    movl %s, %%edx\n", val))    // edx = val
+	w.WriteString("    pushl %edi\n")
+	w.WriteString("    pushl %esi\n")
+	// Load len and cap.
+	w.WriteString("    movl 4(%eax), %ecx\n") // ecx = len
+	w.WriteString("    movl 8(%eax), %edi\n") // edi = cap
+	w.WriteString("    cmpl %edi, %ecx\n")
+	w.WriteString(fmt.Sprintf("    jl %s\n", noGrowLabel))
+
+	// --- GROW ---
+	w.WriteString("    shll $1, %edi\n")
+	w.WriteString("    cmpl $4, %edi\n")
+	w.WriteString(fmt.Sprintf("    jge %s\n", capOkLabel))
+	w.WriteString("    movl $4, %edi\n")
+	w.WriteString(fmt.Sprintf("%s:\n", capOkLabel))
+
+	// Save context.
+	w.WriteString("    pushl %eax\n") // arrPtr
+	w.WriteString("    pushl %edx\n") // val
+	w.WriteString("    pushl %ecx\n") // len
+	w.WriteString("    pushl %edi\n") // new_cap
+
+	// Allocate new data via gc_alloc: new_cap * 4 bytes. cdecl.
+	w.WriteString("    movl %edi, %eax\n")
+	w.WriteString("    shll $2, %eax\n") // eax = new_cap * 4
+	w.WriteString("    pushl $0\n    pushl %eax\n")
+	w.WriteString("    call _novus_gc_alloc\n")
+	w.WriteString("    addl $8, %esp\n")
+	// eax = new data block.
+
+	// Restore saved values.
+	w.WriteString("    popl %edi\n")       // new_cap
+	w.WriteString("    popl %ecx\n")       // len
+	w.WriteString("    popl %edx\n")       // val
+	w.WriteString("    movl %eax, %esi\n") // esi = new data
+	w.WriteString("    popl %eax\n")       // arrPtr
+
+	// Copy old data. esi=new_data, ecx=len, eax=arrPtr.
+	w.WriteString("    pushl %ebx\n")
+	w.WriteString("    movl (%eax), %ebx\n") // ebx = old data_ptr
+	w.WriteString("    pushl %ecx\n")        // save len
+	w.WriteString("    xorl %ecx, %ecx\n")   // i = 0
+	w.WriteString("    movl (%esp), %ecx\n") // reload len from stack
+	w.WriteString("    pushl %ecx\n")        // save len as counter limit
+	w.WriteString("    xorl %ecx, %ecx\n")
+	w.WriteString(fmt.Sprintf("%s:\n", copyLabel))
+	w.WriteString("    cmpl (%esp), %ecx\n")
+	w.WriteString(fmt.Sprintf("    jge %s\n", copyDoneLabel))
+	w.WriteString("    movl (%ebx,%ecx,4), %eax\n")
+	w.WriteString("    movl %eax, (%esi,%ecx,4)\n")
+	w.WriteString("    incl %ecx\n")
+	w.WriteString(fmt.Sprintf("    jmp %s\n", copyLabel))
+	w.WriteString(fmt.Sprintf("%s:\n", copyDoneLabel))
+	w.WriteString("    addl $4, %esp\n") // pop counter limit
+	w.WriteString("    popl %ecx\n")     // restore len
+	w.WriteString("    popl %ebx\n")     // restore ebx
+	// Reload arrPtr.
+	w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", arrPtr))
+
+	// Update header.
+	w.WriteString("    movl %esi, (%eax)\n")  // data_ptr = new_data
+	w.WriteString("    movl %edi, 8(%eax)\n") // cap = new_cap
+
+	// --- NO GROW ---
+	w.WriteString(fmt.Sprintf("%s:\n", noGrowLabel))
+	w.WriteString("    movl (%eax), %esi\n")        // data_ptr
+	w.WriteString("    movl 4(%eax), %ecx\n")       // len (reload)
+	w.WriteString("    movl %edx, (%esi,%ecx,4)\n") // data[len] = val
+	w.WriteString("    incl %ecx\n")
+	w.WriteString("    movl %ecx, 4(%eax)\n") // len++
+	w.WriteString("    popl %esi\n")
+	w.WriteString("    popl %edi\n")
+}
+
+func (e *x86Emitter) emitArrayPop(instr IRInstr) {
+	w := e.b
+	arrPtr := e.operand(instr.Src1)
+	dst := e.operand(instr.Dst)
+	w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", arrPtr))
+	w.WriteString("    movl 4(%eax), %ecx\n") // len
+	w.WriteString("    decl %ecx\n")
+	w.WriteString("    movl %ecx, 4(%eax)\n") // save len
+	w.WriteString("    movl (%eax), %eax\n")  // data_ptr
+	w.WriteString("    movl (%eax,%ecx,4), %eax\n")
+	w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+}
+
+func (e *x86Emitter) emitArrayLen(instr IRInstr) {
+	w := e.b
+	arrPtr := e.operand(instr.Src1)
+	dst := e.operand(instr.Dst)
+	w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", arrPtr))
+	w.WriteString("    movl 4(%eax), %eax\n")
+	w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+}
+
+// emitX86GCRuntime emits the GC runtime functions for x86 32-bit (AT&T syntax, cdecl).
+// GC table entries are 12 bytes: {ptr(4), size(4), mark(4)}.
+func (e *x86Emitter) emitX86GCRuntime() {
+	w := e.b
+
+	// ---- _novus_gc_register(ptr, size) ----
+	// cdecl: args at 8(%ebp), 12(%ebp).
+	w.WriteString("\n_novus_gc_register:\n")
+	w.WriteString("    pushl %ebp\n")
+	w.WriteString("    movl %esp, %ebp\n")
+	w.WriteString("    pushl %ebx\n")
+	w.WriteString("    movl _novus_gc_count, %eax\n")
+	w.WriteString(fmt.Sprintf("    cmpl $%d, %%eax\n", e.target.GCEntries))
+	w.WriteString("    jl .gcr32_space\n    ud2\n.gcr32_space:\n")
+	// table[count] = {ptr, size, 0}. Entry size = 12 bytes.
+	w.WriteString("    imull $12, %eax, %ebx\n")
+	w.WriteString("    addl $_novus_gc_table, %ebx\n")
+	w.WriteString("    movl 8(%ebp), %ecx\n") // ptr arg
+	w.WriteString("    movl %ecx, (%ebx)\n")
+	w.WriteString("    movl 16(%ebp), %ecx\n") // size arg
+	w.WriteString("    movl %ecx, 4(%ebx)\n")
+	w.WriteString("    movl $0, 8(%ebx)\n") // mark = 0
+	w.WriteString("    incl %eax\n")
+	w.WriteString("    movl %eax, _novus_gc_count\n")
+	w.WriteString(".gcr32_full:\n")
+	w.WriteString("    popl %ebx\n")
+	w.WriteString("    popl %ebp\n")
+	w.WriteString("    ret\n")
+
+	e.emitFastCollector()
+
+	// ---- _novus_gc_alloc(size) → eax ----
+	w.WriteString(strings.ReplaceAll(strings.ReplaceAll("\n_novus_gc_alloc:\n    pushl %ebp\n    movl %esp, %ebp\n    pushl %ebx\n    pushl %esi\n    pushl %edi\n    pushl $0\n    pushl 8(%ebp)\n    call _novus_gc_round\n    addl $8, %esp\n    movl %eax, %esi\n    movl _novus_gc_count, %eax\n    cmpl _novus_gc_threshold, %eax\n    jge .gca32_collect\n    cmpl $CAPACITY, %eax\n    jl .gca32_take\n.gca32_collect:\n    call _novus_gc_collect\n.gca32_take:\n    pushl $0\n    pushl %esi\n    pushl $0\n    pushl $_novus_gc_freelist\n    call _novus_gc_take\n    addl $16, %esp\n    testl %eax, %eax\n    jnz .gca32_register\n    movl _novus_heap_ptr, %eax\n    testl %eax, %eax\n    jnz .gca32_heap_ready\n    movl $_novus_heap, %eax\n.gca32_heap_ready:\n    leal (%eax,%esi), %ebx\n    cmpl $_novus_heap+HEAPSIZE, %ebx\n    jbe .gca32_heap_space\n    ud2\n.gca32_heap_space:\n    movl %ebx, _novus_heap_ptr\n.gca32_register:\n    movl %eax, %edi\n    pushl $0\n    pushl %esi\n    pushl $0\n    pushl %eax\n    call _novus_gc_register\n    addl $16, %esp\n    movl %edi, %eax\n    movl $0, %edx\n    popl %edi\n    popl %esi\n    popl %ebx\n    popl %ebp\n    ret\n", "CAPACITY", fmt.Sprint(e.target.GCEntries)), "HEAPSIZE", fmt.Sprint(e.target.HeapSize)))
+
+}

@@ -1,0 +1,1572 @@
+module semantic_semantic;
+
+import model;
+import runtime;
+
+fn semantic_Severity_String(s: i32) -> str {
+    {
+        let choice_735: i32 = s;
+        if ((choice_735 == 0)) {
+            return "error";
+        } else if ((choice_735 == 1)) {
+            return "warning";
+        } else {
+            return "unknown";
+        }
+    }
+}
+
+fn semantic_Diagnostic_Error(d: SemanticDiagnostic) -> str {
+    let prefix: str = "";
+    if ((d.File != "")) {
+        prefix = (d.File + ": ");
+    }
+    return (prefix + ("line " + runtime_string_i32(d.Pos.Line) + ", col " + runtime_string_i32(d.Pos.Column) + ": " + semantic_Severity_String(d.Severity) + ": " + d.Message));
+}
+
+// HasErrors returns true if any diagnostic in the slice is an error.
+fn semantic_HasErrors(diags: []SemanticDiagnostic) -> bool {
+    {
+        let items_736: []SemanticDiagnostic = diags;
+        let count_738: i32 = len(items_736);
+        for (let index_737: i32 = 0; index_737 < count_738; index_737++) {
+            let d: SemanticDiagnostic = copy_SemanticDiagnostic(items_736[index_737]);
+            if ((d.Severity == 0)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// LookupType resolves a type name string to a *Type, or nil if unknown.
+// Supports array types like "[]i32" by dynamically creating array type wrappers.
+fn semantic_LookupType(name: str) -> SemanticType {
+    {
+        let t: SemanticType = MapStrSemantictype_get(CompilerState.semantic_builtinTypes, name);
+        let ok: bool = MapStrSemantictype_has(CompilerState.semantic_builtinTypes, name);
+        if (ok) {
+            return t;
+        }
+    }
+    if (((len(name) > 2) && (runtime_substring(name, 0, 2) == "[]"))) {
+        let elemName: str = runtime_substring(name, 2, len(name));
+        let elemType: SemanticType = semantic_LookupType(elemName);
+        if ((elemType == null)) {
+            return null;
+        }
+        let arrType: SemanticType = make_SemanticType_97(name, true, elemType);
+        MapStrSemantictype_put(CompilerState.semantic_builtinTypes, name, arrType);
+        return arrType;
+    }
+    return null;
+}
+
+// RegisterType adds a new type to the registry (for future extensibility).
+fn semantic_RegisterType(name: str, t: SemanticType) -> void {
+    MapStrSemantictype_put(CompilerState.semantic_builtinTypes, name, t);
+}
+
+// isInteger reports whether t is one of the concrete integer types.
+fn semantic_isInteger(t: SemanticType) -> bool {
+    {
+        let choice_740: SemanticType = t;
+        if ((choice_740 == CompilerState.semantic_TypeU8) || (choice_740 == CompilerState.semantic_TypeU16) || (choice_740 == CompilerState.semantic_TypeU32) || (choice_740 == CompilerState.semantic_TypeU64) || (choice_740 == CompilerState.semantic_TypeI8) || (choice_740 == CompilerState.semantic_TypeI16) || (choice_740 == CompilerState.semantic_TypeI32) || (choice_740 == CompilerState.semantic_TypeI64)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// isFloat reports whether t is one of the concrete floating-point types.
+fn semantic_isFloat(t: SemanticType) -> bool {
+    return ((t == CompilerState.semantic_TypeF32) || (t == CompilerState.semantic_TypeF64));
+}
+
+// isNumeric reports whether t is a numeric type (concrete integer, concrete
+// float, or an untyped numeric literal).
+fn semantic_isNumeric(t: SemanticType) -> bool {
+    return (((semantic_isInteger(t) || semantic_isFloat(t)) || (t == CompilerState.semantic_TypeUntypedInt)) || (t == CompilerState.semantic_TypeUntypedFloat));
+}
+
+// isAssignableTo reports whether a value of type src can be used where dst
+// is expected.  This enables untyped integer literals to flow into any
+// integer or float slot, and untyped float literals to flow into any float
+// slot — making the language easy to use without explicit casts.
+fn semantic_isAssignableTo(dst: SemanticType, src: SemanticType) -> bool {
+    if ((src == CompilerState.semantic_TypeNull)) {
+        return ((dst.class_value != null) || (dst == CompilerState.semantic_TypeNull));
+    }
+    if ((dst == src)) {
+        return true;
+    }
+    if ((src == CompilerState.semantic_TypeUntypedInt)) {
+        return ((semantic_isInteger(dst) || semantic_isFloat(dst)) || (dst == CompilerState.semantic_TypeUntypedFloat));
+    }
+    if ((src == CompilerState.semantic_TypeUntypedFloat)) {
+        return semantic_isFloat(dst);
+    }
+    if ((dst.IsArray && src.IsArray)) {
+        if ((src.Name == "[]<unknown>")) {
+            return true;
+        }
+        return semantic_isAssignableTo(dst.ElemType, src.ElemType);
+    }
+    return false;
+}
+
+// isComparable reports whether values of type a and b can be compared with
+// == or !=.
+fn semantic_isComparable(a: SemanticType, b: SemanticType) -> bool {
+    if (((a == CompilerState.semantic_TypeNull) || (b == CompilerState.semantic_TypeNull))) {
+        return (semantic_isAssignableTo(a, b) || semantic_isAssignableTo(b, a));
+    }
+    if ((a == b)) {
+        return true;
+    }
+    return (semantic_isAssignableTo(a, b) || semantic_isAssignableTo(b, a));
+}
+
+// resolveNumericPair determines the concrete result type when two numeric
+// values are combined in a binary operation.  Returns nil on mismatch.
+fn semantic_resolveNumericPair(a: SemanticType, b: SemanticType) -> SemanticType {
+    if ((a == b)) {
+        return a;
+    }
+    if ((a == CompilerState.semantic_TypeUntypedInt)) {
+        if ((semantic_isInteger(b) || semantic_isFloat(b))) {
+            return b;
+        }
+        if ((b == CompilerState.semantic_TypeUntypedFloat)) {
+            return b;
+        }
+        return null;
+    }
+    if ((b == CompilerState.semantic_TypeUntypedInt)) {
+        if ((semantic_isInteger(a) || semantic_isFloat(a))) {
+            return a;
+        }
+        if ((a == CompilerState.semantic_TypeUntypedFloat)) {
+            return a;
+        }
+        return null;
+    }
+    if ((a == CompilerState.semantic_TypeUntypedFloat)) {
+        if (semantic_isFloat(b)) {
+            return b;
+        }
+        return null;
+    }
+    if ((b == CompilerState.semantic_TypeUntypedFloat)) {
+        if (semantic_isFloat(a)) {
+            return a;
+        }
+        return null;
+    }
+    return null;
+}
+
+fn semantic_newScope(parent: SemanticScope) -> SemanticScope {
+    return make_SemanticScope_98(parent, new MapStrSemanticsymbol(), new MapStrArraysemanticsymbol());
+}
+
+// define adds a symbol to this scope (overwrites if already present).
+fn semantic_Scope_define(s: SemanticScope, sym: SemanticSymbol) -> void {
+    MapStrSemanticsymbol_put(s.symbols, sym.Name, sym);
+}
+
+// defineFunc adds a function symbol to this scope, supporting overloading.
+// The symbol is stored under its MangledName in the symbols map, and also
+// added to the funcOverloads list for the original function name.
+fn semantic_Scope_defineFunc(s: SemanticScope, sym: SemanticSymbol) -> void {
+    let key: str = sym.MangledName;
+    if ((key == "")) {
+        key = sym.Name;
+    }
+    MapStrSemanticsymbol_put(s.symbols, key, sym);
+    MapStrArraysemanticsymbol_put(s.funcOverloads, sym.Name, append_Semanticsymbol(MapStrArraysemanticsymbol_get(s.funcOverloads, sym.Name), sym));
+}
+
+// lookupLocal returns the symbol with the given name in this scope only.
+fn semantic_Scope_lookupLocal(s: SemanticScope, name: str) -> SemanticSymbol {
+    return MapStrSemanticsymbol_get(s.symbols, name);
+}
+
+// lookupFuncOverloads returns all overloads of a function by its original
+// name, searching up the scope chain.
+fn semantic_Scope_lookupFuncOverloads(s: SemanticScope, name: str) -> []SemanticSymbol {
+    {
+        let overloads: []SemanticSymbol = MapStrArraysemanticsymbol_get(s.funcOverloads, name);
+        let ok: bool = MapStrArraysemanticsymbol_has(s.funcOverloads, name);
+        if ((ok && (len(overloads) > 0))) {
+            return overloads;
+        }
+    }
+    if ((s.parent != null)) {
+        return semantic_Scope_lookupFuncOverloads(s.parent, name);
+    }
+    return [];
+}
+
+// lookupFunc finds the best matching function overload for the given name
+// and argument types. Returns nil if no match is found.
+fn semantic_Scope_lookupFunc(s: SemanticScope, name: str, argTypes: []SemanticType) -> SemanticSymbol {
+    let overloads: []SemanticSymbol = semantic_Scope_lookupFuncOverloads(s, name);
+    if ((len(overloads) == 0)) {
+        return null;
+    }
+    if ((len(overloads) == 1)) {
+        return overloads[0];
+    }
+    {
+        let items_741: []SemanticSymbol = overloads;
+        let count_743: i32 = len(items_741);
+        for (let index_742: i32 = 0; index_742 < count_743; index_742++) {
+            let sym: SemanticSymbol = items_741[index_742];
+            let minArgs: i32 = (len(sym.Params) - sym.DefaultCount);
+            if (((len(argTypes) < minArgs) || (len(argTypes) > len(sym.Params)))) {
+                continue;
+            }
+            let match: bool = true;
+            {
+                let i: i32 = 0;
+                for (; (i < len(argTypes)); i++) {
+                    let paramType: SemanticType = sym.Params[i];
+                    if (((paramType == null) || (argTypes[i] == null))) {
+                        continue;
+                    }
+                    if (!(semantic_isAssignableTo(paramType, argTypes[i]))) {
+                        match = false;
+                        break;
+                    }
+                }
+            }
+            if (match) {
+                return sym;
+            }
+        }
+    }
+    return null;
+}
+
+// builtinAcceptsArgs reports whether the named builtin can natively handle
+// the given argument types. Most low-level intrinsics (mov, push, syscall, …)
+// are register-level and accept any argument shape, so they return true here.
+// `len` is special: its inlined IRStrLen handler only works for `str`, so any
+// other arg type must be routed to a user overload instead.
+fn semantic_builtinAcceptsArgs(name: str, argTypes: []SemanticType) -> bool {
+    {
+        let choice_744: str = name;
+        if ((choice_744 == "len")) {
+            if (((len(argTypes) != 1) || (argTypes[0] == null))) {
+                return false;
+            }
+            return (argTypes[0] == CompilerState.semantic_TypeStr);
+        } else {
+            return true;
+        }
+    }
+}
+
+// overloadParamsMatch reports whether every parameter type of sym is a real
+// type match for the corresponding argument type (no nil-skipping). This is
+// used to decide whether a user-defined overload should win over a built-in
+// intrinsic when both names collide.
+fn semantic_overloadParamsMatch(sym: SemanticSymbol, argTypes: []SemanticType) -> bool {
+    if (((sym == null) || (len(sym.Params) != len(argTypes)))) {
+        return false;
+    }
+    {
+        let items_745: []SemanticType = sym.Params;
+        let count_747: i32 = len(items_745);
+        for (let index_746: i32 = 0; index_746 < count_747; index_746++) {
+            let i: i32 = index_746;
+            let paramType: SemanticType = items_745[index_746];
+            if (((paramType == null) || (argTypes[i] == null))) {
+                return false;
+            }
+            if (!(semantic_isAssignableTo(paramType, argTypes[i]))) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// lookup traverses the scope chain (current → parent → …) to find a symbol.
+fn semantic_Scope_lookup(s: SemanticScope, name: str) -> SemanticSymbol {
+    {
+        let sym: SemanticSymbol = MapStrSemanticsymbol_get(s.symbols, name);
+        if ((sym != null)) {
+            return sym;
+        }
+    }
+    if ((s.parent != null)) {
+        return semantic_Scope_lookup(s.parent, name);
+    }
+    return null;
+}
+
+// funcMangle returns a mangled name for a function with the given name and
+// parameter type names. Non-overloaded functions keep their original name.
+// Overloaded functions get a suffix: "itoa.i32", "itoa.i64", etc.
+// Array types like []i32 are sanitized to _arr_i32 to produce valid assembly labels.
+fn semantic_funcMangle(name: str, paramTypeNames: []str) -> str {
+    if ((len(paramTypeNames) == 0)) {
+        return name;
+    }
+    let sanitized: []str = array_Str(len(paramTypeNames));
+    {
+        let items_748: []str = paramTypeNames;
+        let count_750: i32 = len(items_748);
+        for (let index_749: i32 = 0; index_749 < count_750; index_749++) {
+            let i: i32 = index_749;
+            let t: str = items_748[index_749];
+            sanitized[i] = semantic_sanitizeTypeName(t);
+        }
+    }
+    return ((name + ".") + runtime_strings_Join(sanitized, "."));
+}
+
+// sanitizeTypeName converts a type name into a form safe for use in assembly labels.
+// e.g. "[]i32" → "_arr_i32", "[]u64" → "_arr_u64"
+fn semantic_sanitizeTypeName(name: str) -> str {
+    if (runtime_strings_HasPrefix(name, "[]")) {
+        return ("_arr_" + runtime_substring(name, 2, len(name)));
+    }
+    return name;
+}
+
+// Analyze runs semantic analysis on the given AST program and returns all
+// diagnostics (errors and warnings).  The returned slice is empty when the
+// program is semantically valid.
+fn semantic_Analyze(program: AstNode) -> []SemanticDiagnostic {
+    return semantic_AnalyzeWithImports(program, []);
+}
+
+// AnalyzeWithImports runs semantic analysis with imported function metadata.
+fn semantic_AnalyzeWithImports(program: AstNode, importedFuncs: []SemanticImportedFunc) -> []SemanticDiagnostic {
+    let a: SemanticAnalyzer = make_SemanticAnalyzer_100(semantic_newScope(null), importedFuncs, new MapStrMapstrsemanticclassinfo(), new MapAstnodeSemanticclassinfo(), new MapStrBool(), new MapAstnodeBool(), new MapAstnodeStr());
+    semantic_Analyzer_injectBuiltins(a);
+    semantic_Analyzer_analyzeProgram(a, program);
+    return a.diagnostics;
+}
+
+fn semantic_Analyzer_error(a: SemanticAnalyzer, pos: AstPosition, msg: str) -> void {
+    a.diagnostics = append_Semanticdiagnostic(a.diagnostics, make_SemanticDiagnostic_101(msg, a.sourceFile, pos, 0));
+}
+
+fn semantic_Analyzer_warn(a: SemanticAnalyzer, pos: AstPosition, msg: str) -> void {
+    a.diagnostics = append_Semanticdiagnostic(a.diagnostics, make_SemanticDiagnostic_101(msg, a.sourceFile, pos, 1));
+}
+
+fn semantic_Analyzer_pushScope(a: SemanticAnalyzer) -> void {
+    a.scope = semantic_newScope(a.scope);
+}
+
+fn semantic_Analyzer_popScope(a: SemanticAnalyzer) -> void {
+    a.scope = a.scope.parent;
+}
+
+fn semantic_Analyzer_injectBuiltins(a: SemanticAnalyzer) -> void {
+    {
+        let items_752: MapStrSemanticbuiltininfo = CompilerState.semantic_builtinFuncTable;
+        let count_754: i32 = MapStrSemanticbuiltininfo_length(items_752);
+        for (let index_753: i32 = 0; index_753 < count_754; index_753++) {
+            let name: str = items_752.keys[index_753];
+            let info: SemanticBuiltinInfo = items_752.values[index_753];
+            let params: []SemanticType = [];
+            if ((info.Arity >= 0)) {
+                params = array_Semantictype(info.Arity);
+            }
+            semantic_Scope_define(a.scope, make_SemanticSymbol_102(name, 2, info.ReturnType, params, (info.Arity < 0), info.ReturnType));
+        }
+    }
+    {
+        let items_755: []str = CompilerState.semantic_reservedRegisters;
+        let count_757: i32 = len(items_755);
+        for (let index_756: i32 = 0; index_756 < count_757; index_756++) {
+            let name: str = items_755[index_756];
+            semantic_Scope_define(a.scope, make_SemanticSymbol_103(name, 3, CompilerState.semantic_TypeReg));
+        }
+    }
+}
+
+fn semantic_Analyzer_analyzeProgram(a: SemanticAnalyzer, prog: AstNode) -> void {
+    let assigned_758: []AstNode = [];
+    let assigned_759: []AstNode = [];
+    let assigned_760: []AstNode = [];
+    prog.ClassGlobals = assigned_758;
+    prog.ClassFunctions = assigned_759;
+    prog.Startup = assigned_760;
+    semantic_Analyzer_collectClasses(a, prog);
+    a.fileFunctions = new MapStrSemanticscope();
+    a.classSourceIDs = new MapStrI32();
+    {
+        let items_761: []AstNode = prog.Classes;
+        let count_763: i32 = len(items_761);
+        for (let index_762: i32 = 0; index_762 < count_763; index_762++) {
+            let class_value: AstNode = items_761[index_762];
+            if (((class_value.SourceFile == prog.SourceFile) || (MapStrI32_get(a.classSourceIDs, class_value.SourceFile) != 0))) {
+                continue;
+            }
+            MapStrI32_put(a.classSourceIDs, class_value.SourceFile, (MapStrI32_length(a.classSourceIDs) + 1));
+        }
+    }
+    semantic_Analyzer_collectClassMembers(a, prog);
+    let map_764: MapStrMapstrbool = new MapStrMapstrbool();
+    let importSignatures: MapStrMapstrbool = map_764;
+    {
+        let items_765: []SemanticImportedFunc = a.importedFuncs;
+        let count_767: i32 = len(items_765);
+        for (let index_766: i32 = 0; index_766 < count_767; index_766++) {
+            let imp: SemanticImportedFunc = copy_SemanticImportedFunc(items_765[index_766]);
+            let fn_value: AstNode = imp.Fn;
+            a.sourceFile = fn_value.SourceFile;
+            let sigParts: []str = [];
+            {
+                let items_768: []AstParam = fn_value.Params;
+                let count_770: i32 = len(items_768);
+                for (let index_769: i32 = 0; index_769 < count_770; index_769++) {
+                    let p: AstParam = items_768[index_769];
+                    if ((p.Type != null)) {
+                        sigParts = append_Str(sigParts, semantic_typeKey(semantic_Analyzer_resolveType(a, p.Type), p.Type.Name));
+                    } else {
+                        sigParts = append_Str(sigParts, "void");
+                    }
+                }
+            }
+            let sig: str = runtime_strings_Join(sigParts, ",");
+            if ((MapStrMapstrbool_get(importSignatures, fn_value.Name) == null)) {
+                let map_771: MapStrBool = new MapStrBool();
+                MapStrMapstrbool_put(importSignatures, fn_value.Name, map_771);
+            }
+            MapStrBool_put(MapStrMapstrbool_get(importSignatures, fn_value.Name), sig, true);
+        }
+    }
+    {
+        let items_772: []SemanticImportedFunc = a.importedFuncs;
+        let count_774: i32 = len(items_772);
+        for (let index_773: i32 = 0; index_773 < count_774; index_773++) {
+            let imp: SemanticImportedFunc = copy_SemanticImportedFunc(items_772[index_773]);
+            let fn_value: AstNode = imp.Fn;
+            a.sourceFile = fn_value.SourceFile;
+            semantic_Analyzer_checkClassConflict(a, "", fn_value.Name, fn_value.Pos);
+            let originalSource: str = a.sourceFile;
+            a.sourceFile = prog.SourceFile;
+            semantic_Analyzer_checkClassConflict(a, imp.Alias, fn_value.Name, fn_value.Pos);
+            a.sourceFile = originalSource;
+            let retType: SemanticType = semantic_Analyzer_resolveType(a, fn_value.ReturnType);
+            let paramTypes: []SemanticType = array_Semantictype(len(fn_value.Params));
+            let paramTypeNames: []str = array_Str(len(fn_value.Params));
+            let defaults: []AstNode = array_Astnode(len(fn_value.Params));
+            let defaultCount: i32 = 0;
+            {
+                let items_775: []AstParam = fn_value.Params;
+                let count_777: i32 = len(items_775);
+                for (let index_776: i32 = 0; index_776 < count_777; index_776++) {
+                    let i: i32 = index_776;
+                    let p: AstParam = items_775[index_776];
+                    paramTypes[i] = semantic_Analyzer_resolveType(a, p.Type);
+                    if ((p.Type != null)) {
+                        paramTypeNames[i] = semantic_typeKey(paramTypes[i], p.Type.Name);
+                    } else {
+                        paramTypeNames[i] = "void";
+                    }
+                    if ((p.Default != null)) {
+                        defaults[i] = p.Default;
+                        defaultCount++;
+                    }
+                }
+            }
+            let mangledName: str = fn_value.MangledName;
+            if ((mangledName == "")) {
+                mangledName = fn_value.Name;
+            }
+            let isBuiltinName: bool = MapStrSemanticbuiltininfo_has(CompilerState.semantic_builtinFuncTable, fn_value.Name);
+            if (((MapStrBool_length(MapStrMapstrbool_get(importSignatures, fn_value.Name)) > 1) || ((isBuiltinName && (mangledName == fn_value.Name))))) {
+                mangledName = semantic_funcMangle(fn_value.Name, paramTypeNames);
+            }
+            {
+                let id: i32 = MapStrI32_get(a.classSourceIDs, fn_value.SourceFile);
+                if ((id != 0)) {
+                    mangledName = semantic_Analyzer_classHelperLabel(a, id, fn_value, paramTypeNames);
+                }
+            }
+            semantic_Analyzer_defineFileFunction(a, fn_value, mangledName, paramTypes, defaults, defaultCount, retType);
+            fn_value.MangledName = mangledName;
+            MapAstnodeBool_put(a.importedFnSet, fn_value, true);
+            MapAstnodeStr_put(a.importedFnAlias, fn_value, imp.Alias);
+            if ((imp.Alias != "")) {
+                MapStrBool_put(a.importAliases, imp.Alias, true);
+                let qualifiedName: str = ((imp.Alias + ".") + fn_value.Name);
+                let qualifiedMangled: str = ((imp.Alias + ".") + mangledName);
+                {
+                    let existing: SemanticSymbol = semantic_Scope_lookupLocal(a.scope, qualifiedMangled);
+                    if (((existing != null) && (existing.Kind == 1))) {
+                        continue;
+                    }
+                }
+                let sym: SemanticSymbol = make_SemanticSymbol_95(fn_value.Name, mangledName, 1, retType, fn_value.Pos, paramTypes, defaults, defaultCount, retType);
+                MapStrSemanticsymbol_put(a.scope.symbols, qualifiedMangled, sym);
+                if ((qualifiedMangled == qualifiedName)) {
+                } else {
+                    MapStrSemanticsymbol_put(a.scope.symbols, qualifiedName, sym);
+                }
+                MapStrArraysemanticsymbol_put(a.scope.funcOverloads, qualifiedName, append_Semanticsymbol(MapStrArraysemanticsymbol_get(a.scope.funcOverloads, qualifiedName), sym));
+            } else {
+                {
+                    let existing: SemanticSymbol = semantic_Scope_lookupLocal(a.scope, mangledName);
+                    if (((existing != null) && (existing.Kind == 1))) {
+                        continue;
+                    }
+                }
+                let sym: SemanticSymbol = make_SemanticSymbol_95(fn_value.Name, mangledName, 1, retType, fn_value.Pos, paramTypes, defaults, defaultCount, retType);
+                semantic_Scope_defineFunc(a.scope, sym);
+            }
+        }
+    }
+    let map_778: MapStrI32 = new MapStrI32();
+    let nameCount: MapStrI32 = map_778;
+    {
+        let items_779: []AstNode = prog.Functions;
+        let count_781: i32 = len(items_779);
+        for (let index_780: i32 = 0; index_780 < count_781; index_780++) {
+            let fn_value: AstNode = items_779[index_780];
+            MapStrI32_put(nameCount, fn_value.Name, (MapStrI32_get(nameCount, fn_value.Name) + 1));
+        }
+    }
+    {
+        let items_782: []AstNode = prog.Functions;
+        let count_784: i32 = len(items_782);
+        for (let index_783: i32 = 0; index_783 < count_784; index_783++) {
+            let fn_value: AstNode = items_782[index_783];
+            if (MapAstnodeBool_get(a.importedFnSet, fn_value)) {
+                continue;
+            }
+            a.sourceFile = fn_value.SourceFile;
+            semantic_Analyzer_checkClassConflict(a, "", fn_value.Name, fn_value.Pos);
+            {
+                let existing: SemanticSymbol = semantic_Scope_lookupLocal(a.scope, fn_value.Name);
+                if ((existing != null)) {
+                    if ((existing.Kind == 2)) {
+                        semantic_Analyzer_warn(a, fn_value.Pos, ("function " + runtime_quote(fn_value.Name) + " shadows built-in intrinsic"));
+                    }
+                    if ((existing.Kind == 3)) {
+                        semantic_Analyzer_error(a, fn_value.Pos, ("cannot use reserved register name " + runtime_quote(fn_value.Name) + " as function name"));
+                        continue;
+                    }
+                }
+            }
+            let retType: SemanticType = semantic_Analyzer_resolveType(a, fn_value.ReturnType);
+            let paramTypes: []SemanticType = array_Semantictype(len(fn_value.Params));
+            let paramTypeNames: []str = array_Str(len(fn_value.Params));
+            let defaults: []AstNode = array_Astnode(len(fn_value.Params));
+            let defaultCount: i32 = 0;
+            let seenDefault: bool = false;
+            {
+                let items_785: []AstParam = fn_value.Params;
+                let count_787: i32 = len(items_785);
+                for (let index_786: i32 = 0; index_786 < count_787; index_786++) {
+                    let i: i32 = index_786;
+                    let p: AstParam = items_785[index_786];
+                    paramTypes[i] = semantic_Analyzer_resolveType(a, p.Type);
+                    if ((p.Type != null)) {
+                        paramTypeNames[i] = semantic_typeKey(paramTypes[i], p.Type.Name);
+                    } else {
+                        paramTypeNames[i] = "void";
+                    }
+                    if ((p.Default != null)) {
+                        seenDefault = true;
+                        defaults[i] = p.Default;
+                        defaultCount++;
+                    } else {
+                        if (seenDefault) {
+                            semantic_Analyzer_error(a, p.Pos, ("parameter " + runtime_quote(p.Name) + " without default follows parameter with default"));
+                        }
+                    }
+                }
+            }
+            let mangledName: str = fn_value.Name;
+            {
+                let isBuiltinName: bool = MapStrSemanticbuiltininfo_has(CompilerState.semantic_builtinFuncTable, fn_value.Name);
+                if (((MapStrI32_get(nameCount, fn_value.Name) > 1) || isBuiltinName)) {
+                    mangledName = semantic_funcMangle(fn_value.Name, paramTypeNames);
+                }
+            }
+            {
+                let existing: SemanticSymbol = semantic_Scope_lookupLocal(a.scope, mangledName);
+                if ((existing != null)) {
+                    if ((existing.Kind == 2)) {
+                        MapStrSemanticsymbol_delete(a.scope.symbols, mangledName);
+                    } else {
+                        semantic_Analyzer_error(a, fn_value.Pos, ("function " + runtime_quote(fn_value.Name) + " with signature (" + runtime_strings_Join(paramTypeNames, ", ") + ") already declared at " + ast_Position_String(existing.Pos)));
+                        continue;
+                    }
+                }
+            }
+            fn_value.MangledName = mangledName;
+            let sym: SemanticSymbol = make_SemanticSymbol_95(fn_value.Name, mangledName, 1, retType, fn_value.Pos, paramTypes, defaults, defaultCount, retType);
+            semantic_Scope_defineFunc(a.scope, sym);
+        }
+    }
+    {
+        let items_788: []AstNode = prog.Globals;
+        let count_790: i32 = len(items_788);
+        for (let index_789: i32 = 0; index_789 < count_790; index_789++) {
+            let g: AstNode = items_788[index_789];
+            a.sourceFile = g.SourceFile;
+            semantic_Analyzer_checkClassConflict(a, "", g.Name, g.Pos);
+            let gType: SemanticType = semantic_Analyzer_resolveType(a, g.Type);
+            g.RuntimeInit = ((gType != null) && (gType.class_value != null));
+            if ((gType == null)) {
+                gType = CompilerState.semantic_TypeVoid;
+            }
+            {
+                let existing: SemanticSymbol = semantic_Scope_lookupLocal(a.scope, g.Name);
+                if ((existing != null)) {
+                    semantic_Analyzer_error(a, g.Pos, ("global variable " + runtime_quote(g.Name) + " already declared at " + ast_Position_String(existing.Pos)));
+                    continue;
+                }
+            }
+            if ((g.Value != null)) {
+                let valType: SemanticType = semantic_Analyzer_analyzeExpr(a, g.Value);
+                if ((((valType != null) && (gType != null)) && !(semantic_isAssignableTo(gType, valType)))) {
+                    semantic_Analyzer_error(a, g.Pos, ("cannot use " + valType.Name + " value as " + gType.Name + " in global variable " + runtime_quote(g.Name)));
+                }
+            }
+            semantic_Scope_define(a.scope, make_SemanticSymbol_93(g.Name, 0, gType, g.Pos));
+        }
+    }
+    semantic_Analyzer_analyzeClassHelpers(a, prog);
+    semantic_Analyzer_analyzeClassBodies(a, prog);
+    {
+        let items_791: []AstNode = prog.Functions;
+        let count_793: i32 = len(items_791);
+        for (let index_792: i32 = 0; index_792 < count_793; index_792++) {
+            let fn_value: AstNode = items_791[index_792];
+            a.sourceFile = fn_value.SourceFile;
+            let mangledName: str = fn_value.MangledName;
+            if ((mangledName == "")) {
+                mangledName = fn_value.Name;
+            }
+            if (MapAstnodeBool_get(a.importedFnSet, fn_value)) {
+                let lookupName: str = mangledName;
+                {
+                    let alias: str = MapAstnodeStr_get(a.importedFnAlias, fn_value);
+                    if ((alias != "")) {
+                        lookupName = ((alias + ".") + mangledName);
+                    }
+                }
+                {
+                    let sym: SemanticSymbol = semantic_Scope_lookupLocal(a.scope, lookupName);
+                    if (((sym == null) || (sym.Kind != 1))) {
+                        continue;
+                    }
+                }
+                {
+                    let fileScope: SemanticScope = MapStrSemanticscope_get(a.fileFunctions, fn_value.SourceFile);
+                    if ((fileScope != null)) {
+                        let savedScope: SemanticScope = a.scope;
+                        a.scope = fileScope;
+                        semantic_Analyzer_analyzeFunction(a, fn_value);
+                        a.scope = savedScope;
+                    } else {
+                        semantic_Analyzer_analyzeImportedFunctionBody(a, fn_value);
+                    }
+                }
+            } else {
+                {
+                    let sym: SemanticSymbol = semantic_Scope_lookupLocal(a.scope, mangledName);
+                    if (((sym == null) || ((sym.Kind != 1)))) {
+                        continue;
+                    }
+                }
+                semantic_Analyzer_analyzeFunction(a, fn_value);
+            }
+        }
+    }
+}
+
+fn semantic_Analyzer_analyzeFunction(a: SemanticAnalyzer, fn_value: AstNode) -> void {
+    a.currentFunc = fn_value;
+    semantic_Analyzer_pushScope(a);
+    if (((a.currentClass != null) && a.classInstance)) {
+        semantic_Scope_define(a.scope, make_SemanticSymbol_93("self", 0, a.currentClass.typ, fn_value.Pos));
+    }
+    {
+        let items_794: []AstParam = fn_value.Params;
+        let count_796: i32 = len(items_794);
+        for (let index_795: i32 = 0; index_795 < count_796; index_795++) {
+            let param: AstParam = items_794[index_795];
+            let pType: SemanticType = semantic_Analyzer_resolveType(a, param.Type);
+            if ((pType == CompilerState.semantic_TypeVoid)) {
+                semantic_Analyzer_error(a, param.Pos, ("parameter " + runtime_quote(param.Name) + " cannot have type void"));
+            }
+            if (((a.currentClass != null) && (param.Name == "self"))) {
+                semantic_Analyzer_classError(a, param.Pos, "self is reserved inside a class");
+                continue;
+            }
+            {
+                let existing: SemanticSymbol = semantic_Scope_lookup(a.scope, param.Name);
+                if (((existing != null) && (((existing.Kind == 2) || (existing.Kind == 3))))) {
+                    semantic_Analyzer_error(a, param.Pos, ("cannot use reserved name " + runtime_quote(param.Name) + " as parameter"));
+                    continue;
+                }
+            }
+            {
+                let existing: SemanticSymbol = semantic_Scope_lookupLocal(a.scope, param.Name);
+                if ((existing != null)) {
+                    semantic_Analyzer_error(a, param.Pos, ("duplicate parameter " + runtime_quote(param.Name)));
+                    continue;
+                }
+            }
+            semantic_Scope_define(a.scope, make_SemanticSymbol_93(param.Name, 0, pType, param.Pos));
+            if ((param.Default != null)) {
+                let defType: SemanticType = semantic_Analyzer_analyzeExpr(a, param.Default);
+                if ((((defType != null) && (pType != null)) && !(semantic_isAssignableTo(pType, defType)))) {
+                    semantic_Analyzer_error(a, param.Pos, ("default value for " + runtime_quote(param.Name) + ": expected " + pType.Name + ", got " + defType.Name));
+                }
+            }
+        }
+    }
+    semantic_Analyzer_pushScope(a);
+    semantic_Analyzer_analyzeBlock(a, fn_value.Body);
+    semantic_Analyzer_popScope(a);
+    let retType: SemanticType = semantic_Analyzer_resolveType(a, fn_value.ReturnType);
+    if ((((retType != null) && (retType != CompilerState.semantic_TypeVoid)) && !(semantic_Analyzer_blockReturns(a, fn_value.Body)))) {
+        semantic_Analyzer_error(a, fn_value.Pos, ("function " + runtime_quote(fn_value.Name) + " must return a value of type " + retType.Name + " on all paths"));
+    }
+    semantic_Analyzer_popScope(a);
+    a.currentFunc = null;
+}
+
+// analyzeImportedFunctionBody resolves calls inside an imported function body
+// so that ResolvedCallee is set for overloaded function calls.  Diagnostics
+// are suppressed because the function was already type-checked in its own
+// module context; we only care about setting ResolvedCallee here.
+fn semantic_Analyzer_analyzeImportedFunctionBody(a: SemanticAnalyzer, fn_value: AstNode) -> void {
+    let saved: []SemanticDiagnostic = a.diagnostics;
+    a.currentFunc = fn_value;
+    semantic_Analyzer_pushScope(a);
+    {
+        let items_797: []AstParam = fn_value.Params;
+        let count_799: i32 = len(items_797);
+        for (let index_798: i32 = 0; index_798 < count_799; index_798++) {
+            let param: AstParam = items_797[index_798];
+            let pType: SemanticType = semantic_Analyzer_resolveType(a, param.Type);
+            semantic_Scope_define(a.scope, make_SemanticSymbol_93(param.Name, 0, pType, param.Pos));
+        }
+    }
+    semantic_Analyzer_pushScope(a);
+    semantic_Analyzer_analyzeBlock(a, fn_value.Body);
+    semantic_Analyzer_popScope(a);
+    semantic_Analyzer_popScope(a);
+    a.currentFunc = null;
+}
+
+fn semantic_Analyzer_analyzeBlock(a: SemanticAnalyzer, block: AstNode) -> void {
+    {
+        let items_800: []AstNode = block.Stmts;
+        let count_802: i32 = len(items_800);
+        for (let index_801: i32 = 0; index_801 < count_802; index_801++) {
+            let stmt: AstNode = items_800[index_801];
+            semantic_Analyzer_analyzeStmt(a, stmt);
+        }
+    }
+}
+
+fn semantic_Analyzer_analyzeStmt(a: SemanticAnalyzer, stmt: AstNode) -> void {
+    {
+        let choice_803: AstNode = stmt;
+        if ((choice_803 != null && choice_803.Kind == "LetStmt")) {
+            let s: AstNode = choice_803;
+            semantic_Analyzer_analyzeLetStmt(a, s);
+        } else if ((choice_803 != null && choice_803.Kind == "ReturnStmt")) {
+            let s: AstNode = choice_803;
+            semantic_Analyzer_analyzeReturnStmt(a, s);
+        } else if ((choice_803 != null && choice_803.Kind == "BreakStmt")) {
+            let s: AstNode = choice_803;
+            if ((a.loopDepth == 0)) {
+                semantic_Analyzer_error(a, s.Pos, "break statement outside of loop");
+            }
+        } else if ((choice_803 != null && choice_803.Kind == "ContinueStmt")) {
+            let s: AstNode = choice_803;
+            if ((a.loopDepth == 0)) {
+                semantic_Analyzer_error(a, s.Pos, "continue statement outside of loop");
+            }
+        } else if ((choice_803 != null && choice_803.Kind == "IfStmt")) {
+            let s: AstNode = choice_803;
+            semantic_Analyzer_analyzeIfStmt(a, s);
+        } else if ((choice_803 != null && choice_803.Kind == "WhileStmt")) {
+            let s: AstNode = choice_803;
+            semantic_Analyzer_analyzeWhileStmt(a, s);
+        } else if ((choice_803 != null && choice_803.Kind == "ForStmt")) {
+            let s: AstNode = choice_803;
+            semantic_Analyzer_analyzeForStmt(a, s);
+        } else if ((choice_803 != null && choice_803.Kind == "ExprStmt")) {
+            let s: AstNode = choice_803;
+            semantic_Analyzer_analyzeExpr(a, s.Expression);
+        } else if ((choice_803 != null && choice_803.Kind == "AssignStmt")) {
+            let s: AstNode = choice_803;
+            semantic_Analyzer_analyzeAssignStmt(a, s);
+        } else if ((choice_803 != null && choice_803.Kind == "BlockStmt")) {
+            let s: AstNode = choice_803;
+            semantic_Analyzer_pushScope(a);
+            semantic_Analyzer_analyzeBlock(a, s);
+            semantic_Analyzer_popScope(a);
+        }
+    }
+}
+
+fn semantic_Analyzer_analyzeLetStmt(a: SemanticAnalyzer, s: AstNode) -> void {
+    if (((a.currentClass != null) && (s.Name == "self"))) {
+        semantic_Analyzer_classError(a, s.Pos, "self is reserved inside a class");
+        return;
+    }
+    let declType: SemanticType = semantic_Analyzer_resolveType(a, s.Type);
+    if ((declType == CompilerState.semantic_TypeVoid)) {
+        semantic_Analyzer_error(a, s.Pos, ("variable " + runtime_quote(s.Name) + " cannot have type void"));
+    }
+    let valType: SemanticType = semantic_Analyzer_analyzeExpr(a, s.Value);
+    if ((((declType != null) && (declType != CompilerState.semantic_TypeVoid)) && (valType != null))) {
+        if (!(semantic_isAssignableTo(declType, valType))) {
+            semantic_Analyzer_error(a, s.Pos, ("cannot assign " + valType.Name + " value to variable " + runtime_quote(s.Name) + " of type " + declType.Name));
+        }
+    }
+    {
+        let existing: SemanticSymbol = semantic_Scope_lookup(a.scope, s.Name);
+        if (((existing != null) && (((existing.Kind == 2) || (existing.Kind == 3))))) {
+            semantic_Analyzer_error(a, s.Pos, ("cannot declare variable with reserved name " + runtime_quote(s.Name)));
+            return;
+        }
+    }
+    {
+        let existing: SemanticSymbol = semantic_Scope_lookupLocal(a.scope, s.Name);
+        if ((existing != null)) {
+            semantic_Analyzer_error(a, s.Pos, ("variable " + runtime_quote(s.Name) + " already declared in this scope at " + ast_Position_String(existing.Pos)));
+        } else {
+            {
+                let existing: SemanticSymbol = semantic_Scope_lookup(a.scope, s.Name);
+                if ((existing != null)) {
+                    semantic_Analyzer_warn(a, s.Pos, ("variable " + runtime_quote(s.Name) + " shadows previous declaration at " + ast_Position_String(existing.Pos)));
+                }
+            }
+        }
+    }
+    semantic_Scope_define(a.scope, make_SemanticSymbol_93(s.Name, 0, declType, s.Pos));
+}
+
+fn semantic_Analyzer_analyzeReturnStmt(a: SemanticAnalyzer, s: AstNode) -> void {
+    if ((a.currentFunc == null)) {
+        semantic_Analyzer_error(a, s.Pos, "return statement outside of function");
+        return;
+    }
+    let retType: SemanticType = semantic_Analyzer_resolveType(a, a.currentFunc.ReturnType);
+    if ((s.Value == null)) {
+        if (((retType != null) && (retType != CompilerState.semantic_TypeVoid))) {
+            semantic_Analyzer_error(a, s.Pos, ("function " + runtime_quote(a.currentFunc.Name) + " expects return type " + retType.Name + ", got void"));
+        }
+        return;
+    }
+    let valType: SemanticType = semantic_Analyzer_analyzeExpr(a, s.Value);
+    if ((retType == CompilerState.semantic_TypeVoid)) {
+        semantic_Analyzer_error(a, s.Pos, ("void function " + runtime_quote(a.currentFunc.Name) + " should not return a value"));
+    } else {
+        if (((valType != null) && (retType != null))) {
+            if (!(semantic_isAssignableTo(retType, valType))) {
+                semantic_Analyzer_error(a, s.Pos, ("cannot return " + valType.Name + " from function " + runtime_quote(a.currentFunc.Name) + " with return type " + retType.Name));
+            }
+        }
+    }
+}
+
+fn semantic_Analyzer_analyzeIfStmt(a: SemanticAnalyzer, s: AstNode) -> void {
+    let condType: SemanticType = semantic_Analyzer_analyzeExpr(a, s.Condition);
+    if (((condType != null) && (condType != CompilerState.semantic_TypeBool))) {
+        semantic_Analyzer_error(a, s.Condition.Pos, ("if condition must be bool, got " + condType.Name));
+    }
+    semantic_Analyzer_pushScope(a);
+    semantic_Analyzer_analyzeBlock(a, s.Then);
+    semantic_Analyzer_popScope(a);
+    if ((s.Else != null)) {
+        {
+            let choice_804: AstNode = s.Else;
+            if ((choice_804 != null && choice_804.Kind == "BlockStmt")) {
+                let e: AstNode = choice_804;
+                semantic_Analyzer_pushScope(a);
+                semantic_Analyzer_analyzeBlock(a, e);
+                semantic_Analyzer_popScope(a);
+            } else if ((choice_804 != null && choice_804.Kind == "IfStmt")) {
+                let e: AstNode = choice_804;
+                semantic_Analyzer_analyzeIfStmt(a, e);
+            }
+        }
+    }
+}
+
+fn semantic_Analyzer_analyzeWhileStmt(a: SemanticAnalyzer, s: AstNode) -> void {
+    let condType: SemanticType = semantic_Analyzer_analyzeExpr(a, s.Condition);
+    if (((condType != null) && (condType != CompilerState.semantic_TypeBool))) {
+        semantic_Analyzer_error(a, s.Condition.Pos, ("while condition must be bool, got " + condType.Name));
+    }
+    a.loopDepth++;
+    semantic_Analyzer_pushScope(a);
+    semantic_Analyzer_analyzeBlock(a, s.Body);
+    semantic_Analyzer_popScope(a);
+    a.loopDepth--;
+}
+
+fn semantic_Analyzer_analyzeForStmt(a: SemanticAnalyzer, s: AstNode) -> void {
+    semantic_Analyzer_pushScope(a);
+    if ((s.Init != null)) {
+        semantic_Analyzer_analyzeStmt(a, s.Init);
+    }
+    let condType: SemanticType = semantic_Analyzer_analyzeExpr(a, s.Condition);
+    if (((condType != null) && (condType != CompilerState.semantic_TypeBool))) {
+        semantic_Analyzer_error(a, s.Condition.Pos, ("for condition must be bool, got " + condType.Name));
+    }
+    if ((s.Update != null)) {
+        semantic_Analyzer_analyzeStmt(a, s.Update);
+    }
+    a.loopDepth++;
+    semantic_Analyzer_pushScope(a);
+    semantic_Analyzer_analyzeBlock(a, s.Body);
+    semantic_Analyzer_popScope(a);
+    a.loopDepth--;
+    semantic_Analyzer_popScope(a);
+}
+
+fn semantic_Analyzer_analyzeAssignStmt(a: SemanticAnalyzer, s: AstNode) -> void {
+    {
+        let ident: AstNode = s.Target;
+        let ok: bool = (s.Target != null && s.Target.Kind == "IdentExpr");
+        if (((ok && (ident.Name == "self")) && (a.currentClass != null))) {
+            semantic_Analyzer_classError(a, s.Pos, "cannot assign to self");
+        }
+    }
+    let targetType: SemanticType = semantic_Analyzer_analyzeExpr(a, s.Target);
+    let valType: SemanticType = semantic_Analyzer_analyzeExpr(a, s.Value);
+    {
+        let choice_805: AstNode = s.Target;
+        if ((choice_805 != null && choice_805.Kind == "IdentExpr") || (choice_805 != null && choice_805.Kind == "MemberExpr") || (choice_805 != null && choice_805.Kind == "IndexExpr")) {
+        } else {
+            semantic_Analyzer_error(a, s.Pos, "invalid assignment target");
+        }
+    }
+    if (((targetType != null) && (valType != null))) {
+        if (!(semantic_isAssignableTo(targetType, valType))) {
+            semantic_Analyzer_error(a, s.Pos, ("cannot assign " + valType.Name + " to " + targetType.Name));
+        }
+    }
+}
+
+fn semantic_Analyzer_analyzeExpr(a: SemanticAnalyzer, expr: AstNode) -> SemanticType {
+    if ((expr == null)) {
+        return null;
+    }
+    {
+        let choice_806: AstNode = expr;
+        if ((choice_806 != null && choice_806.Kind == "IdentExpr")) {
+            let e: AstNode = choice_806;
+            return semantic_Analyzer_analyzeIdentExpr(a, e);
+        } else if ((choice_806 != null && choice_806.Kind == "IntLitExpr")) {
+            let e: AstNode = choice_806;
+            return CompilerState.semantic_TypeUntypedInt;
+        } else if ((choice_806 != null && choice_806.Kind == "FloatLitExpr")) {
+            let e: AstNode = choice_806;
+            return CompilerState.semantic_TypeUntypedFloat;
+        } else if ((choice_806 != null && choice_806.Kind == "StringLitExpr")) {
+            let e: AstNode = choice_806;
+            return CompilerState.semantic_TypeStr;
+        } else if ((choice_806 != null && choice_806.Kind == "NullLitExpr")) {
+            let e: AstNode = choice_806;
+            return CompilerState.semantic_TypeNull;
+        } else if ((choice_806 != null && choice_806.Kind == "BoolLitExpr")) {
+            let e: AstNode = choice_806;
+            return CompilerState.semantic_TypeBool;
+        } else if ((choice_806 != null && choice_806.Kind == "UnaryExpr")) {
+            let e: AstNode = choice_806;
+            return semantic_Analyzer_analyzeUnaryExpr(a, e);
+        } else if ((choice_806 != null && choice_806.Kind == "BinaryExpr")) {
+            let e: AstNode = choice_806;
+            return semantic_Analyzer_analyzeBinaryExpr(a, e);
+        } else if ((choice_806 != null && choice_806.Kind == "CallExpr")) {
+            let e: AstNode = choice_806;
+            return semantic_Analyzer_analyzeCallExpr(a, e);
+        } else if ((choice_806 != null && choice_806.Kind == "NewExpr")) {
+            let e: AstNode = choice_806;
+            return semantic_Analyzer_analyzeNewExpr(a, e);
+        } else if ((choice_806 != null && choice_806.Kind == "MemberExpr")) {
+            let e: AstNode = choice_806;
+            return semantic_Analyzer_analyzeMemberExpr(a, e);
+        } else if ((choice_806 != null && choice_806.Kind == "IndexExpr")) {
+            let e: AstNode = choice_806;
+            return semantic_Analyzer_analyzeIndexExpr(a, e);
+        } else if ((choice_806 != null && choice_806.Kind == "GroupExpr")) {
+            let e: AstNode = choice_806;
+            return semantic_Analyzer_analyzeExpr(a, e.Expression);
+        } else if ((choice_806 != null && choice_806.Kind == "AddressOfExpr")) {
+            let e: AstNode = choice_806;
+            semantic_Analyzer_analyzeExpr(a, e.Operand);
+            return null;
+        } else if ((choice_806 != null && choice_806.Kind == "ArrayLitExpr")) {
+            let e: AstNode = choice_806;
+            return semantic_Analyzer_analyzeArrayLitExpr(a, e);
+        }
+    }
+    return null;
+}
+
+fn semantic_Analyzer_analyzeIdentExpr(a: SemanticAnalyzer, e: AstNode) -> SemanticType {
+    if ((e.Name == "<error>")) {
+        return null;
+    }
+    if ((((e.Name == "self") && (a.currentClass != null)) && (semantic_Scope_lookupLocal(a.scope, "self") == null))) {
+        {
+            let sym: SemanticSymbol = semantic_Scope_lookup(a.scope, "self");
+            if (((sym == null) || (sym.Type != a.currentClass.typ))) {
+                semantic_Analyzer_classError(a, e.Pos, "self is available only on an instance");
+                return null;
+            }
+        }
+    }
+    if (((semantic_Analyzer_classType(a, e.Name) != null) && (semantic_Scope_lookup(a.scope, e.Name) == null))) {
+        semantic_Analyzer_classError(a, e.Pos, ("class " + runtime_quote(e.Name) + " is a type; use new to create an instance"));
+        return null;
+    }
+    if (MapStrBool_get(a.importAliases, e.Name)) {
+        return null;
+    }
+    let sym: SemanticSymbol = semantic_Scope_lookup(a.scope, e.Name);
+    if ((sym == null)) {
+        semantic_Analyzer_error(a, e.Pos, ("undefined identifier " + runtime_quote(e.Name)));
+        return null;
+    }
+    return sym.Type;
+}
+
+fn semantic_Analyzer_analyzeUnaryExpr(a: SemanticAnalyzer, e: AstNode) -> SemanticType {
+    let operandType: SemanticType = semantic_Analyzer_analyzeExpr(a, e.Operand);
+    if ((operandType == null)) {
+        return null;
+    }
+    {
+        let choice_807: str = e.Op;
+        if ((choice_807 == "!")) {
+            if ((operandType != CompilerState.semantic_TypeBool)) {
+                semantic_Analyzer_error(a, e.Pos, ("operator '!' requires bool operand, got " + operandType.Name));
+                return null;
+            }
+            return CompilerState.semantic_TypeBool;
+        } else if ((choice_807 == "-")) {
+            if (!(semantic_isNumeric(operandType))) {
+                semantic_Analyzer_error(a, e.Pos, ("operator '-' requires numeric operand, got " + operandType.Name));
+                return null;
+            }
+            return operandType;
+        } else if ((choice_807 == "~")) {
+            if (!(semantic_isNumeric(operandType))) {
+                semantic_Analyzer_error(a, e.Pos, ("operator '~' requires numeric operand, got " + operandType.Name));
+                return null;
+            }
+            return operandType;
+        }
+    }
+    return null;
+}
+
+fn semantic_Analyzer_analyzeBinaryExpr(a: SemanticAnalyzer, e: AstNode) -> SemanticType {
+    let leftType: SemanticType = semantic_Analyzer_analyzeExpr(a, e.Left);
+    let rightType: SemanticType = semantic_Analyzer_analyzeExpr(a, e.Right);
+    if (((leftType == null) || (rightType == null))) {
+        return null;
+    }
+    {
+        let choice_808: str = e.Op;
+        if ((choice_808 == "+")) {
+            if (((leftType == CompilerState.semantic_TypeStr) && (rightType == CompilerState.semantic_TypeStr))) {
+                return CompilerState.semantic_TypeStr;
+            }
+            if ((!(semantic_isNumeric(leftType)) || !(semantic_isNumeric(rightType)))) {
+                semantic_Analyzer_error(a, e.Pos, ("operator '+' requires numeric or string operands, got " + leftType.Name + " and " + rightType.Name));
+                return null;
+            }
+            let resolved: SemanticType = semantic_resolveNumericPair(leftType, rightType);
+            if ((resolved == null)) {
+                semantic_Analyzer_error(a, e.Pos, ("mismatched types for '+': " + leftType.Name + " and " + rightType.Name));
+                return null;
+            }
+            return resolved;
+        } else if ((choice_808 == "-") || (choice_808 == "*") || (choice_808 == "/") || (choice_808 == "%")) {
+            if ((!(semantic_isNumeric(leftType)) || !(semantic_isNumeric(rightType)))) {
+                semantic_Analyzer_error(a, e.Pos, ("operator " + runtime_quote(e.Op) + " requires numeric operands, got " + leftType.Name + " and " + rightType.Name));
+                return null;
+            }
+            let resolved: SemanticType = semantic_resolveNumericPair(leftType, rightType);
+            if ((resolved == null)) {
+                semantic_Analyzer_error(a, e.Pos, ("mismatched types for " + runtime_quote(e.Op) + ": " + leftType.Name + " and " + rightType.Name));
+                return null;
+            }
+            return resolved;
+        } else if ((choice_808 == "==") || (choice_808 == "!=")) {
+            if (!(semantic_isComparable(leftType, rightType))) {
+                semantic_Analyzer_error(a, e.Pos, ("mismatched types for " + runtime_quote(e.Op) + ": " + leftType.Name + " and " + rightType.Name));
+            }
+            return CompilerState.semantic_TypeBool;
+        } else if ((choice_808 == "<") || (choice_808 == ">") || (choice_808 == "<=") || (choice_808 == ">=")) {
+            if ((!(semantic_isNumeric(leftType)) || !(semantic_isNumeric(rightType)))) {
+                semantic_Analyzer_error(a, e.Pos, ("operator " + runtime_quote(e.Op) + " requires numeric operands, got " + leftType.Name + " and " + rightType.Name));
+                return CompilerState.semantic_TypeBool;
+            }
+            if ((semantic_resolveNumericPair(leftType, rightType) == null)) {
+                semantic_Analyzer_error(a, e.Pos, ("mismatched types for " + runtime_quote(e.Op) + ": " + leftType.Name + " and " + rightType.Name));
+            }
+            return CompilerState.semantic_TypeBool;
+        } else if ((choice_808 == "&&") || (choice_808 == "||")) {
+            if ((leftType != CompilerState.semantic_TypeBool)) {
+                semantic_Analyzer_error(a, e.Pos, ("operator " + runtime_quote(e.Op) + " requires bool operands, got " + leftType.Name));
+            }
+            if ((rightType != CompilerState.semantic_TypeBool)) {
+                semantic_Analyzer_error(a, e.Pos, ("operator " + runtime_quote(e.Op) + " requires bool operands, got " + rightType.Name));
+            }
+            return CompilerState.semantic_TypeBool;
+        } else if ((choice_808 == "&") || (choice_808 == "|") || (choice_808 == "^") || (choice_808 == "<<") || (choice_808 == ">>")) {
+            if ((!(semantic_isNumeric(leftType)) || !(semantic_isNumeric(rightType)))) {
+                semantic_Analyzer_error(a, e.Pos, ("operator " + runtime_quote(e.Op) + " requires numeric operands, got " + leftType.Name + " and " + rightType.Name));
+                return null;
+            }
+            let resolved: SemanticType = semantic_resolveNumericPair(leftType, rightType);
+            if ((resolved == null)) {
+                semantic_Analyzer_error(a, e.Pos, ("mismatched types for " + runtime_quote(e.Op) + ": " + leftType.Name + " and " + rightType.Name));
+                return null;
+            }
+            return resolved;
+        }
+    }
+    return null;
+}
+
+fn semantic_Analyzer_analyzeCallExpr(a: SemanticAnalyzer, e: AstNode) -> SemanticType {
+    {
+        let choice_809: AstNode = e.Callee;
+        if ((choice_809 != null && choice_809.Kind == "IdentExpr")) {
+            let callee: AstNode = choice_809;
+            if ((semantic_Analyzer_classType(a, callee.Name) != null)) {
+                semantic_Analyzer_classError(a, callee.Pos, ("use new " + callee.Name + "(...) to construct a class"));
+                return null;
+            }
+            if ((callee.Name == "<error>")) {
+                {
+                    let items_810: []AstNode = e.Args;
+                    let count_812: i32 = len(items_810);
+                    for (let index_811: i32 = 0; index_811 < count_812; index_811++) {
+                        let arg: AstNode = items_810[index_811];
+                        semantic_Analyzer_analyzeExpr(a, arg);
+                    }
+                }
+                return null;
+            }
+            let argTypes: []SemanticType = array_Semantictype(len(e.Args));
+            {
+                let items_813: []AstNode = e.Args;
+                let count_815: i32 = len(items_813);
+                for (let index_814: i32 = 0; index_814 < count_815; index_814++) {
+                    let i: i32 = index_814;
+                    let arg: AstNode = items_813[index_814];
+                    argTypes[i] = semantic_Analyzer_analyzeExpr(a, arg);
+                }
+            }
+            {
+                let choice_816: str = callee.Name;
+                if ((choice_816 == "array_append")) {
+                    if (((((len(e.Args) == 2) && (len(argTypes) == 2)) && (argTypes[0] != null)) && argTypes[0].IsArray)) {
+                        if (((argTypes[1] != null) && !(semantic_isAssignableTo(argTypes[0].ElemType, argTypes[1])))) {
+                            semantic_Analyzer_error(a, e.Args[1].Pos, ("cannot append " + argTypes[1].Name + " to " + argTypes[0].Name));
+                        }
+                        e.ResolvedCallee = "array_append";
+                        return CompilerState.semantic_TypeVoid;
+                    }
+                } else if ((choice_816 == "array_pop")) {
+                    if (((((len(e.Args) == 1) && (len(argTypes) == 1)) && (argTypes[0] != null)) && argTypes[0].IsArray)) {
+                        e.ResolvedCallee = "array_pop";
+                        return argTypes[0].ElemType;
+                    }
+                }
+            }
+            let sym: SemanticSymbol = semantic_Scope_lookup(a.scope, callee.Name);
+            if (((sym != null) && (sym.Kind == 2))) {
+                let builtinHandles: bool = semantic_builtinAcceptsArgs(callee.Name, argTypes);
+                if (!(builtinHandles)) {
+                    let overload: SemanticSymbol = semantic_Scope_lookupFunc(a.scope, callee.Name, argTypes);
+                    if (((overload != null) && semantic_overloadParamsMatch(overload, argTypes))) {
+                        sym = overload;
+                    } else {
+                        if (((((callee.Name == "len") && (len(argTypes) == 1)) && (argTypes[0] != null)) && argTypes[0].IsArray)) {
+                            e.ResolvedCallee = "len";
+                            return CompilerState.semantic_TypeI32;
+                        } else {
+                            semantic_Analyzer_error(a, e.Pos, ("builtin " + runtime_quote(callee.Name) + " does not accept the given argument types and no matching overload was found"));
+                            return null;
+                        }
+                    }
+                }
+            }
+            if (((sym == null) || (((sym.Kind != 1) && (sym.Kind != 2))))) {
+                let overloadSym: SemanticSymbol = semantic_Scope_lookupFunc(a.scope, callee.Name, argTypes);
+                if ((overloadSym != null)) {
+                    sym = overloadSym;
+                }
+            } else {
+                if ((sym.Kind == 1)) {
+                    let overloads: []SemanticSymbol = semantic_Scope_lookupFuncOverloads(a.scope, callee.Name);
+                    if ((len(overloads) > 1)) {
+                        let overloadSym: SemanticSymbol = semantic_Scope_lookupFunc(a.scope, callee.Name, argTypes);
+                        if ((overloadSym != null)) {
+                            sym = overloadSym;
+                        } else {
+                            semantic_Analyzer_error(a, e.Pos, ("no matching overload of " + runtime_quote(callee.Name) + " for the given argument types"));
+                            return null;
+                        }
+                    }
+                }
+            }
+            if ((sym == null)) {
+                semantic_Analyzer_error(a, callee.Pos, ("undefined function " + runtime_quote(callee.Name)));
+                return null;
+            }
+            if (((sym.Kind != 1) && (sym.Kind != 2))) {
+                semantic_Analyzer_error(a, callee.Pos, (runtime_quote(callee.Name) + " is not a function"));
+                return null;
+            }
+            if (!(sym.Variadic)) {
+                let minArgs: i32 = (len(sym.Params) - sym.DefaultCount);
+                if (((len(e.Args) < minArgs) || (len(e.Args) > len(sym.Params)))) {
+                    semantic_Analyzer_error(a, e.Pos, ("function " + runtime_quote(callee.Name) + " expects " + runtime_string_i32(minArgs) + " to " + runtime_string_i32(len(sym.Params)) + " arguments, got " + runtime_string_i32(len(e.Args))));
+                }
+                if (((len(e.Args) < len(sym.Params)) && (sym.DefaultCount > 0))) {
+                    {
+                        let i: i32 = len(e.Args);
+                        for (; (i < len(sym.Params)); i++) {
+                            if ((sym.Defaults[i] != null)) {
+                                e.Args = append_Astnode(e.Args, sym.Defaults[i]);
+                                let defType: SemanticType = semantic_Analyzer_analyzeExpr(a, sym.Defaults[i]);
+                                argTypes = append_Semantictype(argTypes, defType);
+                            }
+                        }
+                    }
+                }
+                {
+                    let items_817: []AstNode = e.Args;
+                    let count_819: i32 = len(items_817);
+                    for (let index_818: i32 = 0; index_818 < count_819; index_818++) {
+                        let i: i32 = index_818;
+                        if (((((i < len(sym.Params)) && (sym.Params[i] != null)) && (i < len(argTypes))) && (argTypes[i] != null))) {
+                            if (!(semantic_isAssignableTo(sym.Params[i], argTypes[i]))) {
+                                semantic_Analyzer_error(a, e.Args[i].Pos, ("argument " + runtime_string_i32((i + 1)) + " of " + runtime_quote(callee.Name) + ": expected " + sym.Params[i].Name + ", got " + argTypes[i].Name));
+                            }
+                        }
+                    }
+                }
+            } else {
+                if (((len(e.Args) < 1) && (callee.Name == "win_call"))) {
+                    semantic_Analyzer_error(a, e.Pos, ("function " + runtime_quote(callee.Name) + " requires at least 1 argument (API function name)"));
+                }
+            }
+            if (((sym.MangledName != "") && (sym.MangledName != sym.Name))) {
+                e.ResolvedCallee = sym.MangledName;
+            } else {
+                e.ResolvedCallee = sym.Name;
+            }
+            return sym.ReturnType;
+        } else if ((choice_809 != null && choice_809.Kind == "MemberExpr")) {
+            let callee: AstNode = choice_809;
+            {
+                let ident: AstNode = callee.Object;
+                let ok: bool = (callee.Object != null && callee.Object.Kind == "IdentExpr");
+                if ((((!(ok) || !(MapStrBool_get(a.importAliases, ident.Name))) || (semantic_Analyzer_classType(a, ident.Name) != null)) || (((semantic_Scope_lookup(a.scope, ident.Name) != null) && (semantic_Scope_lookup(a.scope, ident.Name).Kind == 0))))) {
+                    {
+                        let result_820: ResultSemanticclassinfoBool = semantic_Analyzer_classReceiver(a, callee.Object);
+                        let class_value: SemanticClassInfo = result_820.value0;
+                        let static_value: bool = result_820.value1;
+                        if ((class_value != null)) {
+                            return semantic_Analyzer_analyzeClassCall(a, e, callee, class_value, static_value);
+                        }
+                    }
+                }
+            }
+            if ((semantic_Analyzer_classType(a, semantic_qualifiedClassName(callee)) != null)) {
+                semantic_Analyzer_classError(a, e.Pos, ("use new " + semantic_qualifiedClassName(callee) + "(...) to construct a class"));
+                return null;
+            }
+            {
+                let ident: AstNode = callee.Object;
+                let ok: bool = (callee.Object != null && callee.Object.Kind == "IdentExpr");
+                if (((ok && MapStrBool_get(a.importAliases, ident.Name)) && (((semantic_Scope_lookup(a.scope, ident.Name) == null) || (semantic_Scope_lookup(a.scope, ident.Name).Kind != 0))))) {
+                    let alias: str = ident.Name;
+                    let funcName: str = callee.Field;
+                    let qualifiedName: str = ((alias + ".") + funcName);
+                    let argTypes: []SemanticType = array_Semantictype(len(e.Args));
+                    {
+                        let items_821: []AstNode = e.Args;
+                        let count_823: i32 = len(items_821);
+                        for (let index_822: i32 = 0; index_822 < count_823; index_822++) {
+                            let i: i32 = index_822;
+                            let arg: AstNode = items_821[index_822];
+                            argTypes[i] = semantic_Analyzer_analyzeExpr(a, arg);
+                        }
+                    }
+                    let overloads: []SemanticSymbol = semantic_Scope_lookupFuncOverloads(a.scope, qualifiedName);
+                    let sym: SemanticSymbol = null;
+                    if ((len(overloads) > 1)) {
+                        sym = semantic_Scope_lookupFunc(a.scope, qualifiedName, argTypes);
+                        if ((sym == null)) {
+                            semantic_Analyzer_error(a, callee.Pos, ("no matching overload for " + runtime_quote(funcName) + " in import alias " + runtime_quote(alias)));
+                            return null;
+                        }
+                    } else {
+                        sym = semantic_Scope_lookup(a.scope, qualifiedName);
+                    }
+                    if ((sym == null)) {
+                        semantic_Analyzer_error(a, callee.Pos, ("undefined function " + runtime_quote(funcName) + " in import alias " + runtime_quote(alias)));
+                        return null;
+                    }
+                    let minArgs: i32 = (len(sym.Params) - sym.DefaultCount);
+                    if (((len(e.Args) < minArgs) || (len(e.Args) > len(sym.Params)))) {
+                        semantic_Analyzer_error(a, e.Pos, ("function " + runtime_quote(funcName) + " expects " + runtime_string_i32(minArgs) + " to " + runtime_string_i32(len(sym.Params)) + " arguments, got " + runtime_string_i32(len(e.Args))));
+                    }
+                    if (((len(e.Args) < len(sym.Params)) && (sym.DefaultCount > 0))) {
+                        {
+                            let i: i32 = len(e.Args);
+                            for (; (i < len(sym.Params)); i++) {
+                                if ((sym.Defaults[i] != null)) {
+                                    e.Args = append_Astnode(e.Args, sym.Defaults[i]);
+                                    argTypes = append_Semantictype(argTypes, semantic_Analyzer_analyzeExpr(a, sym.Defaults[i]));
+                                }
+                            }
+                        }
+                    }
+                    {
+                        let items_824: []AstNode = e.Args;
+                        let count_826: i32 = len(items_824);
+                        for (let index_825: i32 = 0; index_825 < count_826; index_825++) {
+                            let i: i32 = index_825;
+                            if (((((i < len(sym.Params)) && (sym.Params[i] != null)) && (i < len(argTypes))) && (argTypes[i] != null))) {
+                                if (!(semantic_isAssignableTo(sym.Params[i], argTypes[i]))) {
+                                    semantic_Analyzer_error(a, e.Args[i].Pos, ("argument " + runtime_string_i32((i + 1)) + " of " + runtime_quote(funcName) + ": expected " + sym.Params[i].Name + ", got " + argTypes[i].Name));
+                                }
+                            }
+                        }
+                    }
+                    if ((sym.MangledName != "")) {
+                        e.ResolvedCallee = sym.MangledName;
+                    } else {
+                        e.ResolvedCallee = sym.Name;
+                    }
+                    return sym.ReturnType;
+                }
+            }
+            {
+                let items_827: []AstNode = e.Args;
+                let count_829: i32 = len(items_827);
+                for (let index_828: i32 = 0; index_828 < count_829; index_828++) {
+                    let arg: AstNode = items_827[index_828];
+                    semantic_Analyzer_analyzeExpr(a, arg);
+                }
+            }
+            return null;
+        } else {
+            semantic_Analyzer_analyzeExpr(a, e.Callee);
+            {
+                let items_830: []AstNode = e.Args;
+                let count_832: i32 = len(items_830);
+                for (let index_831: i32 = 0; index_831 < count_832; index_831++) {
+                    let arg: AstNode = items_830[index_831];
+                    semantic_Analyzer_analyzeExpr(a, arg);
+                }
+            }
+            return null;
+        }
+    }
+}
+
+fn semantic_Analyzer_analyzeMemberExpr(a: SemanticAnalyzer, e: AstNode) -> SemanticType {
+    {
+        let result_833: ResultSemanticclassinfoBool = semantic_Analyzer_classReceiver(a, e.Object);
+        let class_value: SemanticClassInfo = result_833.value0;
+        let static_value: bool = result_833.value1;
+        if ((class_value != null)) {
+            return semantic_Analyzer_analyzeClassField(a, e, class_value, static_value);
+        }
+    }
+    if ((semantic_Analyzer_classType(a, semantic_qualifiedClassName(e)) != null)) {
+        semantic_Analyzer_classError(a, e.Pos, ("class " + runtime_quote(semantic_qualifiedClassName(e)) + " is a type; use new to create an instance"));
+        return null;
+    }
+    {
+        let ident: AstNode = e.Object;
+        let ok: bool = (e.Object != null && e.Object.Kind == "IdentExpr");
+        if ((ok && MapStrBool_get(a.importAliases, ident.Name))) {
+            return null;
+        }
+    }
+    return null;
+}
+
+fn semantic_Analyzer_analyzeArrayLitExpr(a: SemanticAnalyzer, e: AstNode) -> SemanticType {
+    let elemType: SemanticType = null;
+    {
+        let items_834: []AstNode = e.Elems;
+        let count_836: i32 = len(items_834);
+        for (let index_835: i32 = 0; index_835 < count_836; index_835++) {
+            let el: AstNode = items_834[index_835];
+            let t: SemanticType = semantic_Analyzer_analyzeExpr(a, el);
+            if ((t == null)) {
+                continue;
+            }
+            if ((elemType == null)) {
+                elemType = t;
+            } else {
+                if ((((semantic_containsClass(t) || semantic_containsClass(elemType))) && !(semantic_isAssignableTo(elemType, t)))) {
+                    semantic_Analyzer_classError(a, el.Pos, ("array element has type " + t.Name + "; expected " + elemType.Name));
+                }
+            }
+        }
+    }
+    if ((elemType == null)) {
+        return make_SemanticType_97("[]<unknown>", true, CompilerState.semantic_TypeI64);
+    }
+    let arrTypeName: str = ("[]" + elemType.Name);
+    return make_SemanticType_97(arrTypeName, true, elemType);
+}
+
+fn semantic_Analyzer_analyzeIndexExpr(a: SemanticAnalyzer, e: AstNode) -> SemanticType {
+    let objType: SemanticType = semantic_Analyzer_analyzeExpr(a, e.Object);
+    let idxType: SemanticType = semantic_Analyzer_analyzeExpr(a, e.Index);
+    if (((objType == null) || (idxType == null))) {
+        return null;
+    }
+    if ((!(semantic_isInteger(idxType)) && (idxType != CompilerState.semantic_TypeUntypedInt))) {
+        semantic_Analyzer_error(a, e.Index.Pos, ("index must be an integer type, got " + idxType.Name));
+        return null;
+    }
+    if ((objType == CompilerState.semantic_TypeStr)) {
+        return CompilerState.semantic_TypeStr;
+    }
+    if (objType.IsArray) {
+        e.ArrayType = objType.ElemType.Name;
+        return objType.ElemType;
+    }
+    semantic_Analyzer_error(a, e.Pos, ("type " + objType.Name + " is not indexable"));
+    return null;
+}
+
+fn semantic_Analyzer_resolveType(a: SemanticAnalyzer, te: AstTypeExpr) -> SemanticType {
+    if ((te == null)) {
+        return CompilerState.semantic_TypeVoid;
+    }
+    if ((te.Name == "<error>")) {
+        return null;
+    }
+    {
+        let class_value: SemanticClassInfo = semantic_Analyzer_classType(a, te.Name);
+        if ((class_value != null)) {
+            return class_value.typ;
+        }
+    }
+    if (runtime_strings_HasPrefix(te.Name, "[]")) {
+        let elem: SemanticType = semantic_Analyzer_resolveType(a, make_AstTypeExpr_53(runtime_substring(te.Name, 2, len(te.Name)), te.Pos));
+        if ((elem == null)) {
+            return null;
+        }
+        if (semantic_containsClass(elem)) {
+            return make_SemanticType_97(te.Name, true, elem);
+        }
+    }
+    let t: SemanticType = semantic_LookupType(te.Name);
+    if ((t == null)) {
+        semantic_Analyzer_error(a, te.Pos, ("unknown type " + runtime_quote(te.Name)));
+        return null;
+    }
+    return t;
+}
+
+// blockReturns reports whether every execution path through the block ends
+// with a return statement.
+fn semantic_Analyzer_blockReturns(a: SemanticAnalyzer, block: AstNode) -> bool {
+    if ((len(block.Stmts) == 0)) {
+        return false;
+    }
+    let last: AstNode = block.Stmts[(len(block.Stmts) - 1)];
+    return semantic_Analyzer_stmtReturns(a, last);
+}
+
+// stmtReturns reports whether a statement unconditionally returns.
+// loopBreaks ignores breaks belonging to a nested loop.
+fn semantic_loopBreaks(stmt: AstNode) -> bool {
+    {
+        let choice_837: AstNode = stmt;
+        if ((choice_837 != null && choice_837.Kind == "BreakStmt")) {
+            let s: AstNode = choice_837;
+            return true;
+        } else if ((choice_837 != null && choice_837.Kind == "BlockStmt")) {
+            let s: AstNode = choice_837;
+            {
+                let items_838: []AstNode = s.Stmts;
+                let count_840: i32 = len(items_838);
+                for (let index_839: i32 = 0; index_839 < count_840; index_839++) {
+                    let child: AstNode = items_838[index_839];
+                    if (semantic_loopBreaks(child)) {
+                        return true;
+                    }
+                }
+            }
+        } else if ((choice_837 != null && choice_837.Kind == "IfStmt")) {
+            let s: AstNode = choice_837;
+            return (semantic_loopBreaks(s.Then) || semantic_loopBreaks(s.Else));
+        }
+    }
+    return false;
+}
+
+fn semantic_Analyzer_stmtReturns(a: SemanticAnalyzer, stmt: AstNode) -> bool {
+    {
+        let choice_841: AstNode = stmt;
+        if ((choice_841 != null && choice_841.Kind == "WhileStmt")) {
+            let s: AstNode = choice_841;
+            let condition: AstNode = s.Condition;
+            let ok: bool = (s.Condition != null && s.Condition.Kind == "BoolLitExpr");
+            return ((ok && condition.BoolValue) && !(semantic_loopBreaks(s.Body)));
+        } else if ((choice_841 != null && choice_841.Kind == "ForStmt")) {
+            let s: AstNode = choice_841;
+            let condition: AstNode = s.Condition;
+            let ok: bool = (s.Condition != null && s.Condition.Kind == "BoolLitExpr");
+            return ((ok && condition.BoolValue) && !(semantic_loopBreaks(s.Body)));
+        } else if ((choice_841 != null && choice_841.Kind == "ReturnStmt")) {
+            let s: AstNode = choice_841;
+            return true;
+        } else if ((choice_841 != null && choice_841.Kind == "IfStmt")) {
+            let s: AstNode = choice_841;
+            if ((s.Else == null)) {
+                return false;
+            }
+            let thenReturns: bool = semantic_Analyzer_blockReturns(a, s.Then);
+            let elseReturns: bool = false;
+            {
+                let choice_842: AstNode = s.Else;
+                if ((choice_842 != null && choice_842.Kind == "BlockStmt")) {
+                    let e: AstNode = choice_842;
+                    elseReturns = semantic_Analyzer_blockReturns(a, e);
+                } else if ((choice_842 != null && choice_842.Kind == "IfStmt")) {
+                    let e: AstNode = choice_842;
+                    elseReturns = semantic_Analyzer_stmtReturns(a, e);
+                }
+            }
+            return (thenReturns && elseReturns);
+        } else if ((choice_841 != null && choice_841.Kind == "BlockStmt")) {
+            let s: AstNode = choice_841;
+            return semantic_Analyzer_blockReturns(a, s);
+        }
+    }
+    return false;
+}

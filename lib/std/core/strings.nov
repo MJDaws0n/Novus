@@ -1,0 +1,632 @@
+// ---------------------------------------------------------------------------
+// std/strings - cross-platform string operations (no assembly, no syscalls)
+// ---------------------------------------------------------------------------
+
+module std_strings;
+
+import core;
+import builder;
+
+fn read_byte(addr: u64) -> i32 {
+    let w: i32 = load8(addr);
+    let b: i32 = w % 256;
+    if (b < 0) { b = b + 256; }
+    return b;
+}
+
+fn cstr_len(addr: u64) -> u64 {
+    let i: u64 = 0;
+    while (true) {
+        if (read_byte(addr + i) == 0) { return i; }
+        i = i + 1;
+    }
+    return i;
+}
+
+fn starts_with(s: str, p: str) -> bool {
+    if (len(s) < len(p)) { return false; }
+    let i: i32 = 0;
+    let sptr: u64 = ptr(s);
+    let pp: u64 = ptr(p);
+    while (i < len(p)) {
+        let off: u64 = i32_to_u64(i);
+        if (read_byte(sptr + off) != read_byte(pp + off)) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+fn ends_with(s: str, p: str) -> bool {
+    let sl: i32 = len(s);
+    let pl: i32 = len(p);
+    if (sl < pl) { return false; }
+    let off: i32 = sl - pl;
+    let sptr: u64 = ptr(s);
+    let pp: u64 = ptr(p);
+    let i: i32 = 0;
+    while (i < pl) {
+        let si: i32 = off + i;
+        if (read_byte(sptr + i32_to_u64(si)) != read_byte(pp + i32_to_u64(i))) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+fn str_contains(s: str, needle: str) -> bool {
+    let sl: i32 = len(s);
+    let nl: i32 = len(needle);
+    if (nl == 0) { return true; }
+    if (sl < nl) { return false; }
+    let limit: i32 = sl - nl + 1;
+    let sptr: u64 = ptr(s);
+    let np: u64 = ptr(needle);
+    let i: i32 = 0;
+    while (i < limit) {
+        let ok: bool = true;
+        let j: i32 = 0;
+        while (j < nl) {
+            let ci: i32 = i + j;
+            if (read_byte(sptr + i32_to_u64(ci)) != read_byte(np + i32_to_u64(j))) { ok = false; j = nl; }
+            else { j = j + 1; }
+        }
+        if (ok) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn str_find(s: str, needle: str) -> i32 {
+    let sl: i32 = len(s);
+    let nl: i32 = len(needle);
+    if (nl == 0) { return 0; }
+    if (sl < nl) { return -1; }
+    let limit: i32 = sl - nl + 1;
+    let sptr: u64 = ptr(s);
+    let np: u64 = ptr(needle);
+    let i: i32 = 0;
+    while (i < limit) {
+        let ok: bool = true;
+        let j: i32 = 0;
+        while (j < nl) {
+            let ci: i32 = i + j;
+            if (read_byte(sptr + i32_to_u64(ci)) != read_byte(np + i32_to_u64(j))) { ok = false; j = nl; }
+            else { j = j + 1; }
+        }
+        if (ok) { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// ---------------------------------------------------------------------------
+// Safe character lookup — returns string literal for each byte value.
+// Avoids store8/copy_bytes_raw which have register clobbering issues
+// on Linux ARM64 when compiled with Novus V0.1.3.
+// ---------------------------------------------------------------------------
+fn _byte_to_char(val: i32) -> str { return byte_char(val); }
+
+fn substr(s: str, start: i32) -> str {
+    let slen: i32 = len(s);
+    if (start < 0) { return ""; }
+    if (start >= slen) { return ""; }
+    let count: i32 = slen - start;
+    if (count <= 0) { return ""; }
+    return copy_bytes_raw(ptr(s) + i32_to_u64(start), count);
+}
+
+fn substr_len(s: str, start: i32, count: i32) -> str {
+    let slen: i32 = len(s);
+    if (start < 0) { return ""; }
+    if (count <= 0) { return ""; }
+    if (start >= slen) { return ""; }
+    if (start + count > slen) {
+        count = slen - start;
+    }
+    if (count <= 0) { return ""; }
+    return copy_bytes_raw(ptr(s) + i32_to_u64(start), count);
+}
+
+// ---------------------------------------------------------------------------
+// Find last occurrence of needle in s, returns -1 if not found
+// ---------------------------------------------------------------------------
+
+fn str_last_find(s: str, needle: str) -> i32 {
+    let sl: i32 = len(s);
+    let nl: i32 = len(needle);
+    if (nl == 0) { return sl; }
+    if (sl < nl) { return -1; }
+    let sptr: u64 = ptr(s);
+    let np: u64 = ptr(needle);
+    let i: i32 = sl - nl;
+    while (i >= 0) {
+        let ok: bool = true;
+        let j: i32 = 0;
+        while (j < nl) {
+            let ci: i32 = i + j;
+            if (read_byte(sptr + i32_to_u64(ci)) != read_byte(np + i32_to_u64(j))) { ok = false; j = nl; }
+            else { j = j + 1; }
+        }
+        if (ok) { return i; }
+        i = i - 1;
+    }
+    return -1;
+}
+
+// ---------------------------------------------------------------------------
+// Count non-overlapping occurrences of needle in s
+// ---------------------------------------------------------------------------
+
+fn str_count(s: str, needle: str) -> i32 {
+    let sl: i32 = len(s);
+    let nl: i32 = len(needle);
+    if (nl == 0) { return 0; }
+    if (sl < nl) { return 0; }
+    let count: i32 = 0;
+    let sptr: u64 = ptr(s);
+    let np: u64 = ptr(needle);
+    let i: i32 = 0;
+    let limit: i32 = sl - nl + 1;
+    while (i < limit) {
+        let ok: bool = true;
+        let j: i32 = 0;
+        while (j < nl) {
+            let ci: i32 = i + j;
+            if (read_byte(sptr + i32_to_u64(ci)) != read_byte(np + i32_to_u64(j))) { ok = false; j = nl; }
+            else { j = j + 1; }
+        }
+        if (ok) {
+            count = count + 1;
+            i = i + nl;
+        } else {
+            i = i + 1;
+        }
+    }
+    return count;
+}
+
+// ---------------------------------------------------------------------------
+// Replace all occurrences of old with new_val in s
+// ---------------------------------------------------------------------------
+
+fn str_replace(s: str, old: str, new_val: str) -> str {
+    let ol: i32 = len(old);
+    if (ol == 0) { return s; }
+    let sl: i32 = len(s);
+    let sptr: u64 = ptr(s);
+    let op: u64 = ptr(old);
+    // Append each segment once; repeated concatenation copies the growing
+    // prefix again for every match and becomes quadratic on large inputs.
+    let result: StringBuilder = new StringBuilder();
+    let seg_start: i32 = 0;
+    let i: i32 = 0;
+    let cursor: u64 = sptr;
+    while (i + ol <= sl) {
+        let found: bool = true;
+        let j: i32 = 0;
+        let left: u64 = cursor;
+        let right: u64 = op;
+        while (j < ol) {
+            if (load8(left) != load8(right)) {
+                found = false;
+                break;
+            }
+            j++; left++; right++;
+        }
+        if (found) {
+            if (i > seg_start) {
+                result.append_bytes(sptr + i32_to_u64(seg_start), i - seg_start);
+            }
+            result.append(new_val);
+            i = i + ol;
+            cursor += i32_to_u64(ol);
+            seg_start = i;
+        } else {
+            i = i + 1;
+            cursor++;
+        }
+    }
+    if (seg_start < sl) {
+        result.append_bytes(sptr + i32_to_u64(seg_start), sl - seg_start);
+    }
+    return result.text();
+}
+
+// Replace only the first occurrence
+fn str_replace_first(s: str, old: str, new_val: str) -> str {
+    let pos: i32 = str_find(s, old);
+    if (pos < 0) { return s; }
+    let ol: i32 = len(old);
+    return substr_len(s, 0, pos) + new_val + substr(s, pos + ol);
+}
+
+fn _trim_number_string(s: str) -> str {
+    let out: str = s;
+    let dot_pos: i32 = str_find(out, ".");
+    if (dot_pos < 0) { return out; }
+
+    let end: i32 = len(out) - 1;
+    while (end > dot_pos && out[end] == '0') {
+        end = end - 1;
+    }
+    if (end == dot_pos) {
+        return substr_len(out, 0, dot_pos);
+    }
+    return substr_len(out, 0, end + 1);
+}
+
+fn f64_to_str(n: f64) -> str {
+    let value: f64 = n;
+    let prefix: str = "";
+    if (value < 0.0) {
+        prefix = "-";
+        value = 0.0 - value;
+    }
+
+    value = value + 0.0000005;
+    let whole: i64 = f64_to_i64(value);
+    let frac: f64 = value - i64_to_f64(whole);
+    let out: str = prefix + i64_to_str(whole);
+    if (frac <= 0.0) { return out; }
+
+    let digits: str = "";
+    let i: i32 = 0;
+    while (i < 6) {
+        frac = frac * 10.0;
+        let digit: i64 = f64_to_i64(frac);
+        digits = digits + i64_to_str(digit);
+        frac = frac - i64_to_f64(digit);
+        i = i + 1;
+    }
+    return _trim_number_string(out + "." + digits);
+}
+
+fn f32_to_str(n: f32) -> str { return f64_to_str(f64_from_bits(f64_bits(n))); }
+
+fn str_to_f64(s: str) -> f64 {
+    let i: i32 = 0;
+    while (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r') {
+        i = i + 1;
+    }
+
+    let sign: f64 = 1.0;
+    if (s[i] == '-') {
+        sign = -1.0;
+        i = i + 1;
+    } else if (s[i] == '+') {
+        i = i + 1;
+    }
+
+    let result: f64 = 0.0;
+    while (s[i] != '\0') {
+        let digit: f64 = -1.0;
+        if (s[i] == '0') { digit = 0.0; }
+        else if (s[i] == '1') { digit = 1.0; }
+        else if (s[i] == '2') { digit = 2.0; }
+        else if (s[i] == '3') { digit = 3.0; }
+        else if (s[i] == '4') { digit = 4.0; }
+        else if (s[i] == '5') { digit = 5.0; }
+        else if (s[i] == '6') { digit = 6.0; }
+        else if (s[i] == '7') { digit = 7.0; }
+        else if (s[i] == '8') { digit = 8.0; }
+        else if (s[i] == '9') { digit = 9.0; }
+        else { break; }
+        result = result * 10.0 + digit;
+        i = i + 1;
+    }
+
+    if (s[i] == '.') {
+        i = i + 1;
+        let place: f64 = 0.1;
+        while (s[i] != '\0') {
+            let digit: f64 = -1.0;
+            if (s[i] == '0') { digit = 0.0; }
+            else if (s[i] == '1') { digit = 1.0; }
+            else if (s[i] == '2') { digit = 2.0; }
+            else if (s[i] == '3') { digit = 3.0; }
+            else if (s[i] == '4') { digit = 4.0; }
+            else if (s[i] == '5') { digit = 5.0; }
+            else if (s[i] == '6') { digit = 6.0; }
+            else if (s[i] == '7') { digit = 7.0; }
+            else if (s[i] == '8') { digit = 8.0; }
+            else if (s[i] == '9') { digit = 9.0; }
+            else { break; }
+            result = result + digit * place;
+            place = place * 0.1;
+            i = i + 1;
+        }
+    }
+
+    return result * sign;
+}
+
+fn str_to_f32(s: str) -> f32 {
+    let i: i32 = 0;
+    while (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r') {
+        i = i + 1;
+    }
+
+    let sign: f32 = 1.0;
+    if (s[i] == '-') {
+        sign = -1.0;
+        i = i + 1;
+    } else if (s[i] == '+') {
+        i = i + 1;
+    }
+
+    let result: f32 = 0.0;
+    while (s[i] != '\0') {
+        let digit: f32 = -1.0;
+        if (s[i] == '0') { digit = 0.0; }
+        else if (s[i] == '1') { digit = 1.0; }
+        else if (s[i] == '2') { digit = 2.0; }
+        else if (s[i] == '3') { digit = 3.0; }
+        else if (s[i] == '4') { digit = 4.0; }
+        else if (s[i] == '5') { digit = 5.0; }
+        else if (s[i] == '6') { digit = 6.0; }
+        else if (s[i] == '7') { digit = 7.0; }
+        else if (s[i] == '8') { digit = 8.0; }
+        else if (s[i] == '9') { digit = 9.0; }
+        else { break; }
+        result = result * 10.0 + digit;
+        i = i + 1;
+    }
+
+    if (s[i] == '.') {
+        i = i + 1;
+        let place: f32 = 0.1;
+        while (s[i] != '\0') {
+            let digit: f32 = -1.0;
+            if (s[i] == '0') { digit = 0.0; }
+            else if (s[i] == '1') { digit = 1.0; }
+            else if (s[i] == '2') { digit = 2.0; }
+            else if (s[i] == '3') { digit = 3.0; }
+            else if (s[i] == '4') { digit = 4.0; }
+            else if (s[i] == '5') { digit = 5.0; }
+            else if (s[i] == '6') { digit = 6.0; }
+            else if (s[i] == '7') { digit = 7.0; }
+            else if (s[i] == '8') { digit = 8.0; }
+            else if (s[i] == '9') { digit = 9.0; }
+            else { break; }
+            result = result + digit * place;
+            place = place * 0.1;
+            i = i + 1;
+        }
+    }
+
+    return result * sign;
+}
+
+// ---------------------------------------------------------------------------
+// Trim whitespace
+// ---------------------------------------------------------------------------
+
+fn str_trim_left(s: str) -> str {
+    let sl: i32 = len(s);
+    let sptr: u64 = ptr(s);
+    let i: i32 = 0;
+    while (i < sl) {
+        let ch: i32 = read_byte(sptr + i32_to_u64(i));
+        if (ch == 32 || ch == 9 || ch == 10 || ch == 13) {
+            i = i + 1;
+        } else {
+            break;
+        }
+    }
+    return substr(s, i);
+}
+
+fn str_trim_right(s: str) -> str {
+    let sl: i32 = len(s);
+    let sptr: u64 = ptr(s);
+    let i: i32 = sl - 1;
+    while (i >= 0) {
+        let ch: i32 = read_byte(sptr + i32_to_u64(i));
+        if (ch == 32 || ch == 9 || ch == 10 || ch == 13) {
+            i = i - 1;
+        } else {
+            break;
+        }
+    }
+    return substr_len(s, 0, i + 1);
+}
+
+fn str_trim(s: str) -> str {
+    return str_trim_right(str_trim_left(s));
+}
+
+// ---------------------------------------------------------------------------
+// Case conversion (ASCII only)
+// ---------------------------------------------------------------------------
+
+fn str_upper(s: str) -> str {
+    let sl: i32 = len(s);
+    if (sl == 0) { return ""; }
+    let result: str = copy_bytes_raw(ptr(s), sl);
+    let i: i32 = 0;
+    while (i < sl) {
+        let ch: i32 = byte_at(s, i);
+        if (ch >= 97 && ch <= 122) {
+            string_set_byte(result, i, ch - 32);
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+fn str_lower(s: str) -> str {
+    let sl: i32 = len(s);
+    if (sl == 0) { return ""; }
+    let result: str = copy_bytes_raw(ptr(s), sl);
+    let i: i32 = 0;
+    while (i < sl) {
+        let ch: i32 = byte_at(s, i);
+        if (ch >= 65 && ch <= 90) {
+            string_set_byte(result, i, ch + 32);
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Reverse a string
+// ---------------------------------------------------------------------------
+
+fn str_reverse(s: str) -> str {
+    let sl: i32 = len(s);
+    if (sl == 0) { return ""; }
+    let result: str = make_buffer(sl);
+    let i: i32 = 0;
+    while (i < sl) {
+        string_set_byte(result, i, byte_at(s, sl - 1 - i));
+        i = i + 1;
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Character classification (ASCII)
+// ---------------------------------------------------------------------------
+
+fn is_digit(ch: i32) -> bool {
+    let c: i32 = ch & 255;
+    return (c >= 48 && c <= 57);
+}
+
+fn is_alpha(ch: i32) -> bool {
+    let c: i32 = ch & 255;
+    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+}
+
+fn is_alnum(ch: i32) -> bool {
+    return is_digit(ch) || is_alpha(ch);
+}
+
+fn is_space(ch: i32) -> bool {
+    let c: i32 = ch & 255;
+    return (c == 32 || c == 9 || c == 10 || c == 13);
+}
+
+fn is_upper(ch: i32) -> bool {
+    let c: i32 = ch & 255;
+    return (c >= 65 && c <= 90);
+}
+
+fn is_lower(ch: i32) -> bool {
+    let c: i32 = ch & 255;
+    return (c >= 97 && c <= 122);
+}
+
+// ---------------------------------------------------------------------------
+// Padding
+// ---------------------------------------------------------------------------
+
+fn str_pad_left(s: str, total: i32, pad: str) -> str {
+    let sl: i32 = len(s);
+    if (sl >= total) { return s; }
+    let pl: i32 = len(pad);
+    if (pl == 0) { return s; }
+    let needed: i32 = total - sl;
+    let buf: str = make_buffer(needed);
+    let i: i32 = 0;
+    while (i < needed) {
+        string_set_byte(buf, i, byte_at(pad, i % pl));
+        i = i + 1;
+    }
+    return buf + s;
+}
+
+fn str_pad_right(s: str, total: i32, pad: str) -> str {
+    let sl: i32 = len(s);
+    if (sl >= total) { return s; }
+    let pl: i32 = len(pad);
+    if (pl == 0) { return s; }
+    let needed: i32 = total - sl;
+    let buf: str = make_buffer(needed);
+    let i: i32 = 0;
+    while (i < needed) {
+        string_set_byte(buf, i, byte_at(pad, i % pl));
+        i = i + 1;
+    }
+    return s + buf;
+}
+
+// ---------------------------------------------------------------------------
+// String repetition check
+// ---------------------------------------------------------------------------
+
+fn str_equals(a: str, b: str) -> bool {
+    let al: i32 = len(a);
+    let bl: i32 = len(b);
+    if (al != bl) { return false; }
+    let ap: u64 = ptr(a);
+    let bp: u64 = ptr(b);
+    let i: i32 = 0;
+    while (i < al) {
+        let off: u64 = i32_to_u64(i);
+        if (read_byte(ap + off) != read_byte(bp + off)) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Split string at first occurrence of delimiter
+// Returns the part before the delimiter. Use str_find + substr to get after.
+// ---------------------------------------------------------------------------
+
+fn str_split_first(s: str, delim: str) -> str {
+    let pos: i32 = str_find(s, delim);
+    if (pos < 0) { return s; }
+    return substr_len(s, 0, pos);
+}
+
+fn str_split_rest(s: str, delim: str) -> str {
+    let pos: i32 = str_find(s, delim);
+    if (pos < 0) { return ""; }
+    return substr(s, pos + len(delim));
+}
+
+// ---------------------------------------------------------------------------
+// Check if string is empty or whitespace-only
+// ---------------------------------------------------------------------------
+
+fn str_is_empty(s: str) -> bool {
+    return len(s) == 0;
+}
+
+fn str_is_blank(s: str) -> bool {
+    let sl: i32 = len(s);
+    let sptr: u64 = ptr(s);
+    let i: i32 = 0;
+    while (i < sl) {
+        let ch: i32 = read_byte(sptr + i32_to_u64(i));
+        if (ch != 32 && ch != 9 && ch != 10 && ch != 13) {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Convert integer to hex string
+// ---------------------------------------------------------------------------
+
+fn int_to_hex(n: i32) -> str {
+    if (n == 0) { return "0"; }
+    let val: i32 = n;
+    if (val < 0) { val = 0 - val; }
+    let hex_chars: str = "0123456789abcdef";
+    // Max 8 hex digits for 32-bit + sign
+    let tmp: str = make_buffer(9);
+    let pos: i32 = 8;
+    while (val > 0) {
+        pos = pos - 1;
+        string_set_byte(tmp, pos, byte_at(hex_chars, val % 16));
+        val = val / 16;
+    }
+    let result: str = "";
+    if (n < 0) { result = "-"; }
+    return result + copy_bytes_raw(ptr(tmp) + i32_to_u64(pos), 8 - pos);
+}

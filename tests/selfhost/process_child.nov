@@ -1,0 +1,14 @@
+module process_child;
+import ../../lib/std;
+
+fn main(argc: i32, argv: u64) -> i32 {
+    if (argc != 6) { return 11; }
+    if (argv_get(argv, 1) != "space in argument") { return 12; }
+    if (argv_get(argv, 2) != "quote\"and\\slash\\") { return 13; }
+    if (argv_get(argv, 3) != "") { return 14; }
+    if (argv_get(argv, 4) != "semicolon; dollar$ ampersand&") { return 15; }
+    if (argv_get(argv, 5) != "café 東京 😀") { return 17; }
+    if (environment_value("NOVUS_TEST_ENV") != "inherited café 東京 😀 environment") { return 16; }
+    for (let i: i32 = 0; i < 5000; i++) { print("0123456789abcdef"); }
+    return 23;
+}

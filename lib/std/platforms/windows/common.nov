@@ -1,0 +1,18 @@
+// std/platforms/windows/common - Windows platform dispatcher
+module std_windows;
+import unicode;
+
+#if(arch == "amd64") {
+    import amd64;
+    import memory_amd64;
+}
+#if(arch == "x86") {
+    import x86;
+    import memory_x86;
+}
+
+
+#if(arch == "arm64") {
+    import amd64;
+    import memory_amd64;
+}

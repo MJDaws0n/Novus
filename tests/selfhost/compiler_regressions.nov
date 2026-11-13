@@ -1,0 +1,45 @@
+module compiler_regressions;
+
+class Box {
+    pub let value: i32 = 9;
+    pub static let calls: i32 = 0;
+    pub static fn touch() -> bool { Box.calls++; return true; }
+}
+
+fn main() -> i32 {
+    let absent: Box = null;
+    if (absent != null && absent.value == 9) { return 1; }
+    if (!(absent == null || absent.value == 9)) { return 2; }
+    if (false && Box.touch()) { return 3; }
+    if (!(true || Box.touch())) { return 4; }
+    if (Box.calls != 0) { return 5; }
+    let value: i32 = 17;
+    { let value: i32 = 6; value++; }
+    if (value != 17) { return 6; }
+    for (let value: i32 = 0; value < 4; value++) {}
+    if (value != 17) { return 7; }
+    let items: []Box = [new Box(), new Box()];
+    if (len(items) != 2 || items[1].value != 9) { return 8; }
+    let high: u64 = 18446744073709551615;
+    let low: u64 = 1;
+    if (!(high > low) || high <= low || high < low || !(high >= low)) { return 9; }
+    if (high / 10 != 1844674407370955161) { return 10; }
+    let steps: i32 = 0;
+    for (;;) { steps++; if (steps == 3) { break; } }
+    for (; steps < 6;) { steps++; }
+    if (steps != 6) { return 11; }
+    let signed_source: i64 = -8;
+    if (load32(&signed_source) != -8) { return 12; }
+    let wrap: i32 = 2147483647;
+    if (wrap + 1 != -2147483648) { return 13; }
+    wrap++;
+    if (wrap != -2147483648) { return 14; }
+    let byte_value: u8 = 255;
+    byte_value++;
+    if (byte_value != 0) { return 15; }
+    let signed_byte: i8 = 127;
+    signed_byte++;
+    if (signed_byte != -128) { return 16; }
+    if ((high >> 63) != 1) { return 17; }
+    return 0;
+}

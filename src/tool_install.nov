@@ -1,0 +1,63 @@
+module tool_install;
+
+import model;
+import ../lib/download;
+import ../lib/archive;
+
+#if(os != "windows") {
+    fn codegen_EnsureWindowsToolchain(verbose: bool) -> ResultStrStrStr {
+        return make_ResultStrStrStr("nasm", "golink", "");
+    }
+}
+
+#if(os == "windows") {
+    fn codegen_find_tool_below(directory: str, name: str, depth: i32 = 0) -> str {
+        if (depth > 3) { return ""; }
+        let direct: str = path_join_all([directory, name]);
+        if (file_info(direct).exists) { return direct; }
+        let directories: []str = windows_subdirectories(directory);
+        for (let i: i32 = 0; i < len(directories); i++) {
+            let found: str = codegen_find_tool_below(path_join_all([directory, directories[i]]), name, depth + 1);
+            if (found != "") { return found; }
+        }
+        return "";
+    }
+
+    fn codegen_EnsureWindowsToolchain(verbose: bool) -> ResultStrStrStr {
+        let directory: str = codegen_novusToolsDir();
+        let nasm: str = find_executable("nasm");
+        let golink: str = find_executable("golink");
+        if (nasm == "") { nasm = codegen_find_tool_below(directory, "nasm.exe"); }
+        if (golink == "") { golink = codegen_find_tool_below(directory, "GoLink.exe"); }
+        let msvc: str = find_executable("link.exe");
+        if (nasm != "" && (golink != "" || msvc != "")) { return make_ResultStrStrStr(nasm, golink, ""); }
+        let error: str = create_directories(directory);
+        if (error != "") { return make_ResultStrStrStr("", "", error); }
+        if (nasm == "") {
+            print("[toolchain] Installing NASM...");
+            let installer: str = path_join_all([directory, "nasm-installer.exe"]);
+            error = download_file("https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/win64/nasm-2.16.03-installer-x64.exe", installer);
+            if (error != "") { return make_ResultStrStrStr("", "", error); }
+            let output: str = path_join_all([directory, "nasm"]);
+            error = create_directories(output);
+            if (error != "") { file_delete(installer); return make_ResultStrStrStr("", "", error); }
+            let command: str = quote_windows_argument(installer) + " /S /D=" + output;
+            let status: i32 = spawn_process_wait(command);
+            file_delete(installer);
+            if (status != 0) { return make_ResultStrStrStr("", "", "NASM installer failed: " + i32_to_str(status)); }
+            nasm = codegen_find_tool_below(directory, "nasm.exe");
+            if (nasm == "") { return make_ResultStrStrStr("", "", "NASM installer did not produce nasm.exe"); }
+        }
+        if (golink == "" && msvc == "") {
+            print("[toolchain] Installing GoLink...");
+            let archive: str = path_join_all([directory, "golink.zip"]);
+            error = download_file("https://www.godevtool.com/Golink.zip", archive);
+            if (error == "") { error = extract_zip(archive, path_join_all([directory, "golink"])); }
+            file_delete(archive);
+            if (error != "") { return make_ResultStrStrStr("", "", error); }
+            golink = codegen_find_tool_below(directory, "GoLink.exe");
+            if (golink == "") { return make_ResultStrStrStr("", "", "GoLink archive did not contain GoLink.exe"); }
+        }
+        return make_ResultStrStrStr(nasm, golink, "");
+    }
+}

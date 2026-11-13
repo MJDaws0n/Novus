@@ -1,0 +1,13 @@
+module file_io_linux;
+import metadata;
+
+#if(arch == "amd64") {
+    import amd64;
+}
+#if(arch == "arm64") {
+    import arm64;
+}
+
+#if(arch == "x86") {
+    import x86;
+}

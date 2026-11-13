@@ -1,0 +1,72 @@
+module process_command;
+
+import ../std;
+import ../file_io;
+
+class ProcessResult {
+    pub let output: str = "";
+    pub let status: i32 = -1;
+    pub let error: str = "";
+}
+
+class ProcessCommand {
+    pub let Args: []str = [];
+    pub let Stdout: StringBuilder = null;
+    pub let Stderr: StringBuilder = null;
+}
+
+fn find_executable(name: str) -> str {
+    if (str_contains(name, "/") || str_contains(name, "\\")) {
+        if (executable_file(name)) { return name; }
+        return "";
+    }
+    let search: str = environment_value("PATH");
+    let separator: str = ":";
+    if (path_separator() == "\\") { separator = ";"; }
+    let directories: []str = string_split(search, separator);
+    for (let i: i32 = 0; i < len(directories); i++) {
+        let candidate: str = path_join_all([directories[i], name]);
+        if (executable_file(candidate)) { return candidate; }
+        if (path_separator() == "\\") {
+            let extensions: []str = string_split(environment_value("PATHEXT"), ";");
+            if (len(extensions) == 0 || extensions[0] == "") { extensions = [".COM", ".EXE", ".BAT", ".CMD"]; }
+            for (let j: i32 = 0; j < len(extensions); j++) {
+                candidate = path_join_all([directories[i], name + extensions[j]]);
+                if (executable_file(candidate)) { return candidate; }
+            }
+        }
+    }
+    return "";
+}
+
+fn process_command(executable: str, arguments: []str) -> ProcessCommand {
+    let command: ProcessCommand = new ProcessCommand();
+    array_append(command.Args, executable);
+    for (let i: i32 = 0; i < len(arguments); i++) { array_append(command.Args, arguments[i]); }
+    return command;
+}
+
+fn command_run(command: ProcessCommand, capture: bool) -> ProcessResult {
+    let executable: str = find_executable(command.Args[0]);
+    if (executable == "") {
+        let result: ProcessResult = new ProcessResult();
+        result.error = "executable not found: " + command.Args[0];
+        return result;
+    }
+    let result: ProcessResult = process_run(executable, command.Args, capture || command.Stdout != null, command.Stderr != null);
+    if (command.Stdout != null) { command.Stdout.append(result.output); }
+    return result;
+}
+
+#if(os != "windows") {
+    fn executable_file(path: str) -> bool {
+        let info: FileInfo = file_info(path);
+        return info.exists && !info.directory && file_execute_access(path);
+    }
+}
+#if(os == "windows") {
+    fn executable_file(path: str) -> bool {
+        let info: FileInfo = file_info(path);
+        return info.exists && !info.directory;
+    }
+}

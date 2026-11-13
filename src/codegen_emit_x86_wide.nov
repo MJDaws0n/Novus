@@ -1,0 +1,579 @@
+module codegen_emit_x86_wide;
+
+import model;
+import runtime;
+
+// Novus values keep their full 64-bit representation on i386. Pointers and OS
+// structures remain 32-bit; function arguments occupy eight-byte stack slots.
+fn codegen_x86Emitter_widePart(e: CodegenX86Emitter, op: CodegenOperand, high: bool) -> str {
+    if (!(high)) {
+        if ((op.Kind == 3)) {
+            return ("$" + runtime_string_i32(runtime_to_i32(op.Imm)));
+        }
+        return codegen_x86Emitter_operand(e, op);
+    }
+    {
+        let choice_36: i32 = op.Kind;
+        if ((choice_36 == 3)) {
+            return ("$" + runtime_string_i32(runtime_to_i32((runtime_to_u64(op.Imm) >> 32))));
+        } else if ((choice_36 == 1)) {
+            return (runtime_string_i32((codegen_x86Emitter_vregOffset(e, e.fn_value, op.Reg) + 4)) + "(%ebp)");
+        } else if ((choice_36 == 6)) {
+            if ((op.MemBase != "")) {
+                return (runtime_string_i64((op.MemOffset + 4)) + "(%" + op.MemBase + ")");
+            }
+            return (runtime_string_i64((op.MemOffset + 4)));
+        } else if ((choice_36 == 5)) {
+            return (op.Label + "+4");
+        }
+    }
+    return "$0";
+}
+
+fn codegen_x86Emitter_wideLoad(e: CodegenX86Emitter, op: CodegenOperand, low: str, high: str) -> void {
+    e.b.append("    movl ");
+    e.b.append(codegen_x86Emitter_widePart(e, op, false));
+    e.b.append(", ");
+    e.b.append(low);
+    e.b.append("\n    movl ");
+    e.b.append(codegen_x86Emitter_widePart(e, op, true));
+    e.b.append(", ");
+    e.b.append(high);
+    e.b.append("\n");
+}
+
+fn codegen_x86Emitter_wideStore(e: CodegenX86Emitter, op: CodegenOperand, low: str, high: str) -> void {
+    if ((op.Kind == 0)) {
+        return;
+    }
+    e.b.append("    movl ");
+    e.b.append(low);
+    e.b.append(", ");
+    e.b.append(codegen_x86Emitter_widePart(e, op, false));
+    e.b.append("\n");
+    if ((op.Kind != 2)) {
+        e.b.append("    movl ");
+        e.b.append(high);
+        e.b.append(", ");
+        e.b.append(codegen_x86Emitter_widePart(e, op, true));
+        e.b.append("\n");
+    }
+}
+
+fn codegen_x86Emitter_wideResult(e: CodegenX86Emitter, op: CodegenOperand) -> void {
+    codegen_x86Emitter_wideStore(e, op, "%eax", "%edx");
+}
+
+fn codegen_x86Emitter_emitWide(e: CodegenX86Emitter, instr: CodegenIRInstr) -> bool {
+    let w: StringBuilder = e.b;
+    {
+        let choice_37: i32 = instr.Op;
+        if ((choice_37 == 0) || (choice_37 == 2) || (choice_37 == 3)) {
+            if (((instr.Op == 3) && (instr.Src2.Kind != 0))) {
+                w.append("    movl ");
+                w.append(codegen_x86Emitter_widePart(e, instr.Src2, false));
+                w.append(", %ecx\n");
+                codegen_x86Emitter_wideLoad(e, instr.Src1, "%eax", "%edx");
+                w.append("    movl %eax, (%ecx)\n");
+                if (((instr.Dst.Kind != 3) || (instr.Dst.Imm != 4))) {
+                    w.append("    movl %edx, 4(%ecx)\n");
+                }
+            } else {
+                if ((instr.Dst.Kind == 2)) {
+                    w.append("    movl ");
+                    w.append(codegen_x86Emitter_widePart(e, instr.Src1, false));
+                    w.append(", ");
+                    w.append(codegen_x86Emitter_operand(e, instr.Dst));
+                    w.append("\n");
+                } else {
+                    if ((instr.Src1.Kind == 2)) {
+                        codegen_x86Emitter_wideStore(e, instr.Dst, codegen_x86Emitter_operand(e, instr.Src1), "$0");
+                    } else {
+                        if ((codegen_isMemOperand(instr.Src1) && codegen_isMemOperand(instr.Dst))) {
+                            w.append("    pushl ");
+                            w.append(codegen_x86Emitter_widePart(e, instr.Src1, true));
+                            w.append("\n    pushl ");
+                            w.append(codegen_x86Emitter_widePart(e, instr.Src1, false));
+                            w.append("\n    popl ");
+                            w.append(codegen_x86Emitter_widePart(e, instr.Dst, false));
+                            w.append("\n    popl ");
+                            w.append(codegen_x86Emitter_widePart(e, instr.Dst, true));
+                            w.append("\n");
+                        } else {
+                            codegen_x86Emitter_wideLoad(e, instr.Src1, "%eax", "%edx");
+                            codegen_x86Emitter_wideResult(e, instr.Dst);
+                        }
+                    }
+                }
+            }
+        } else if ((choice_37 == 1)) {
+            if ((instr.Dst.Kind == 2)) {
+                w.append("    leal ");
+                w.append(codegen_x86Emitter_leaOperand(e, instr.Src1));
+                w.append(", ");
+                w.append(codegen_x86Emitter_operand(e, instr.Dst));
+                w.append("\n");
+            } else {
+                w.append("    leal ");
+                w.append(codegen_x86Emitter_leaOperand(e, instr.Src1));
+                w.append(", %eax\n    movl $0, %edx\n");
+                codegen_x86Emitter_wideResult(e, instr.Dst);
+            }
+        } else if ((choice_37 == 6) || (choice_37 == 7) || (choice_37 == 14) || (choice_37 == 15) || (choice_37 == 16) || (choice_37 == 8)) {
+            codegen_x86Emitter_wideLoad(e, instr.Src1, "%eax", "%edx");
+            codegen_x86Emitter_wideLoad(e, instr.Src2, "%ebx", "%ecx");
+            {
+                let choice_38: i32 = instr.Op;
+                if ((choice_38 == 6)) {
+                    w.append("    addl %ebx, %eax\n    adcl %ecx, %edx\n");
+                } else if ((choice_38 == 7)) {
+                    w.append("    subl %ebx, %eax\n    sbbl %ecx, %edx\n");
+                } else if ((choice_38 == 14)) {
+                    w.append("    andl %ebx, %eax\n    andl %ecx, %edx\n");
+                } else if ((choice_38 == 15)) {
+                    w.append("    orl %ebx, %eax\n    orl %ecx, %edx\n");
+                } else if ((choice_38 == 16)) {
+                    w.append("    xorl %ebx, %eax\n    xorl %ecx, %edx\n");
+                } else if ((choice_38 == 8)) {
+                    w.append("    imull %eax, %ecx\n    imull %ebx, %edx\n    addl %edx, %ecx\n    mull %ebx\n    addl %ecx, %edx\n");
+                }
+            }
+            codegen_x86Emitter_wideResult(e, instr.Dst);
+        } else if ((choice_37 == 13) || (choice_37 == 20) || (choice_37 == 17) || (choice_37 == 62)) {
+            codegen_x86Emitter_wideLoad(e, instr.Src1, "%eax", "%edx");
+            {
+                let choice_39: i32 = instr.Op;
+                if ((choice_39 == 13)) {
+                    w.append("    negl %eax\n    adcl $0, %edx\n    negl %edx\n");
+                } else if ((choice_39 == 20)) {
+                    w.append("    notl %eax\n    notl %edx\n");
+                } else if ((choice_39 == 17)) {
+                    w.append("    orl %edx, %eax\n    sete %al\n    movzbl %al, %eax\n    movl $0, %edx\n");
+                } else if ((choice_39 == 62)) {
+                    w.append("    xorl $-2147483648, %edx\n");
+                }
+            }
+            codegen_x86Emitter_wideResult(e, instr.Dst);
+        } else if ((choice_37 == 9) || (choice_37 == 10) || (choice_37 == 11) || (choice_37 == 12)) {
+            codegen_x86Emitter_emitWideDiv(e, instr);
+        } else if ((choice_37 == 18) || (choice_37 == 19) || (choice_37 == 80)) {
+            codegen_x86Emitter_emitWideShift(e, instr);
+        } else if ((choice_37 == 21) || (choice_37 == 22) || (choice_37 == 23) || (choice_37 == 24) || (choice_37 == 25) || (choice_37 == 26) || (choice_37 == 75) || (choice_37 == 76) || (choice_37 == 77) || (choice_37 == 78)) {
+            codegen_x86Emitter_emitWideCmp(e, instr);
+        } else if ((choice_37 == 79)) {
+            codegen_x86Emitter_wideLoad(e, instr.Src1, "%eax", "%edx");
+            {
+                let choice_40: i64 = instr.Src2.Imm;
+                if ((choice_40 == 8)) {
+                    w.append("    movsbl %al, %eax\n    cltd\n");
+                } else if ((choice_40 == 16)) {
+                    w.append("    movswl %ax, %eax\n    cltd\n");
+                } else if ((choice_40 == 32)) {
+                    w.append("    cltd\n");
+                } else if ((choice_40 == -8)) {
+                    w.append("    movzbl %al, %eax\n    movl $0, %edx\n");
+                } else if ((choice_40 == -16)) {
+                    w.append("    movzwl %ax, %eax\n    movl $0, %edx\n");
+                } else if ((choice_40 == -32)) {
+                    w.append("    movl $0, %edx\n");
+                }
+            }
+            codegen_x86Emitter_wideResult(e, instr.Dst);
+        } else if ((choice_37 == 45) || (choice_37 == 46) || (choice_37 == 47)) {
+            w.append("    movl ");
+            w.append(codegen_x86Emitter_widePart(e, instr.Src1, false));
+            w.append(", %ecx\n");
+            {
+                let choice_41: i32 = instr.Op;
+                if ((choice_41 == 45)) {
+                    w.append("    movzbl (%ecx), %eax\n    movl $0, %edx\n");
+                } else if ((choice_41 == 46)) {
+                    w.append("    movl (%ecx), %eax\n    cltd\n");
+                } else if ((choice_41 == 47)) {
+                    w.append("    movl (%ecx), %eax\n    movl 4(%ecx), %edx\n");
+                }
+            }
+            codegen_x86Emitter_wideResult(e, instr.Dst);
+        } else if ((choice_37 == 43)) {
+            w.append("    movl ");
+            w.append(codegen_x86Emitter_widePart(e, instr.Dst, false));
+            w.append(", %ecx\n    movl ");
+            w.append(codegen_x86Emitter_widePart(e, instr.Src1, false));
+            w.append(", %eax\n    movb %al, (%ecx)\n");
+        } else if ((choice_37 == 55)) {
+            let label: str = codegen_Target_Sym(e.target, instr.Src1.Label);
+            w.append("    movl ");
+            w.append(label);
+            w.append(", %eax\n    movl ");
+            w.append(label);
+            w.append("+4, %edx\n");
+            codegen_x86Emitter_wideResult(e, instr.Dst);
+        } else if ((choice_37 == 56)) {
+            let label: str = codegen_Target_Sym(e.target, instr.Dst.Label);
+            codegen_x86Emitter_wideLoad(e, instr.Src1, "%eax", "%edx");
+            w.append("    movl %eax, ");
+            w.append(label);
+            w.append("\n    movl %edx, ");
+            w.append(label);
+            w.append("+4\n");
+        } else if ((choice_37 == 37)) {
+            codegen_x86Emitter_wideStore(e, instr.Dst, codegen_x86Emitter_operand(e, instr.Src1), "$0");
+        } else if ((choice_37 == 36)) {
+            w.append("    movl ");
+            w.append(codegen_x86Emitter_widePart(e, instr.Src1, false));
+            w.append(", ");
+            w.append(codegen_x86Emitter_operand(e, instr.Dst));
+            w.append("\n");
+        } else if ((choice_37 == 5)) {
+            w.append("    popl ");
+            w.append(codegen_x86Emitter_operand(e, instr.Dst));
+            w.append("\n");
+            if ((instr.Dst.Kind != 2)) {
+                w.append("    movl $0, ");
+                w.append(codegen_x86Emitter_widePart(e, instr.Dst, true));
+                w.append("\n");
+            }
+        } else if ((choice_37 == 28) || (choice_37 == 29)) {
+            codegen_x86Emitter_wideLoad(e, instr.Src1, "%eax", "%edx");
+            w.append("    orl %edx, %eax\n");
+            let branch: str = "jne";
+            if ((instr.Op == 29)) {
+                branch = "je";
+            }
+            w.append("    ");
+            w.append(branch);
+            w.append(" ");
+            w.append(instr.Dst.Label);
+            w.append("\n");
+        } else if ((choice_37 == 31)) {
+            codegen_x86Emitter_emitWideCall(e, instr);
+        } else if ((choice_37 == 74)) {
+            w.append("    pushl ");
+            w.append(codegen_x86Emitter_widePart(e, instr.Src1, true));
+            w.append("\n    pushl ");
+            w.append(codegen_x86Emitter_widePart(e, instr.Src1, false));
+            w.append("\n    call _novus_gc_alloc\n    addl $8, %esp\n");
+            codegen_x86Emitter_wideResult(e, instr.Dst);
+        } else if ((choice_37 == 32)) {
+            if ((instr.Src1.Kind != 0)) {
+                codegen_x86Emitter_wideLoad(e, instr.Src1, "%eax", "%edx");
+            }
+            let frame: i32 = codegen_x86Emitter_computeFrameSize(e, e.fn_value);
+            w.append("    leal -");
+            w.append(runtime_string_i32((frame + 12)));
+            w.append("(%ebp), %esp\n    popl %edi\n    popl %esi\n    popl %ebx\n    movl %ebp, %esp\n    popl %ebp\n    ret\n");
+        } else if ((choice_37 == 48) || (choice_37 == 49) || (choice_37 == 50) || (choice_37 == 51) || (choice_37 == 52) || (choice_37 == 53)) {
+            codegen_x86Emitter_emitWideArray(e, instr);
+        } else if ((choice_37 == 57) || (choice_37 == 58) || (choice_37 == 59) || (choice_37 == 60) || (choice_37 == 61) || (choice_37 == 63) || (choice_37 == 64) || (choice_37 == 65) || (choice_37 == 66) || (choice_37 == 67) || (choice_37 == 68) || (choice_37 == 69) || (choice_37 == 70)) {
+            codegen_x86Emitter_emitWideFloat(e, instr);
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+fn codegen_x86Emitter_emitWideCall(e: CodegenX86Emitter, instr: CodegenIRInstr) -> void {
+    {
+        let i: i32 = (len(instr.Args) - 1);
+        for (; (i >= 0); i--) {
+            e.b.append("    pushl ");
+            e.b.append(codegen_x86Emitter_widePart(e, instr.Args[i], true));
+            e.b.append("\n    pushl ");
+            e.b.append(codegen_x86Emitter_widePart(e, instr.Args[i], false));
+            e.b.append("\n");
+        }
+    }
+    e.b.append("    call ");
+    e.b.append(instr.Src1.Label);
+    e.b.append("\n");
+    if ((len(instr.Args) > 0)) {
+        e.b.append("    addl $");
+        e.b.append(runtime_string_i32((len(instr.Args) * 8)));
+        e.b.append(", %esp\n");
+    }
+    codegen_x86Emitter_wideResult(e, instr.Dst);
+}
+
+fn codegen_x86Emitter_emitWideShift(e: CodegenX86Emitter, instr: CodegenIRInstr) -> void {
+    let w: StringBuilder = e.b;
+    let id: i32 = codegen_x86Emitter_uniqueID(e);
+    codegen_x86Emitter_wideLoad(e, instr.Src1, "%eax", "%edx");
+    w.append("    movl ");
+    w.append(codegen_x86Emitter_widePart(e, instr.Src2, false));
+    w.append(", %ecx\n    andl $63, %ecx\n    cmpl $32, %ecx\n    jae .Lwide_shift_large_");
+    w.append(runtime_string_i32(id));
+    w.append("\n");
+    {
+        let choice_42: i32 = instr.Op;
+        if ((choice_42 == 18)) {
+            w.append("    shldl %cl, %eax, %edx\n    shll %cl, %eax\n");
+        } else if ((choice_42 == 19)) {
+            w.append("    shrdl %cl, %edx, %eax\n    sarl %cl, %edx\n");
+        } else if ((choice_42 == 80)) {
+            w.append("    shrdl %cl, %edx, %eax\n    shrl %cl, %edx\n");
+        }
+    }
+    w.append("    jmp .Lwide_shift_done_");
+    w.append(runtime_string_i32(id));
+    w.append("\n.Lwide_shift_large_");
+    w.append(runtime_string_i32(id));
+    w.append(":\n");
+    {
+        let choice_43: i32 = instr.Op;
+        if ((choice_43 == 18)) {
+            w.append("    movl %eax, %edx\n    shll %cl, %edx\n    movl $0, %eax\n");
+        } else if ((choice_43 == 19)) {
+            w.append("    movl %edx, %eax\n    sarl %cl, %eax\n    sarl $31, %edx\n");
+        } else if ((choice_43 == 80)) {
+            w.append("    movl %edx, %eax\n    shrl %cl, %eax\n    movl $0, %edx\n");
+        }
+    }
+    w.append(".Lwide_shift_done_");
+    w.append(runtime_string_i32(id));
+    w.append(":\n");
+    codegen_x86Emitter_wideResult(e, instr.Dst);
+}
+
+fn codegen_x86Emitter_emitWideCmp(e: CodegenX86Emitter, instr: CodegenIRInstr) -> void {
+    let w: StringBuilder = e.b;
+    let id: i32 = codegen_x86Emitter_uniqueID(e);
+    codegen_x86Emitter_wideLoad(e, instr.Src1, "%eax", "%edx");
+    codegen_x86Emitter_wideLoad(e, instr.Src2, "%ebx", "%ecx");
+    let assigned_44: str = "e";
+    let assigned_45: str = "e";
+    let high: str = assigned_44;
+    let low: str = assigned_45;
+    {
+        let choice_46: i32 = instr.Op;
+        if ((choice_46 == 22)) {
+            let assigned_47: str = "ne";
+            let assigned_48: str = "ne";
+            high = assigned_47;
+            low = assigned_48;
+        } else if ((choice_46 == 23)) {
+            let assigned_49: str = "l";
+            let assigned_50: str = "b";
+            high = assigned_49;
+            low = assigned_50;
+        } else if ((choice_46 == 24)) {
+            let assigned_51: str = "le";
+            let assigned_52: str = "be";
+            high = assigned_51;
+            low = assigned_52;
+        } else if ((choice_46 == 25)) {
+            let assigned_53: str = "g";
+            let assigned_54: str = "a";
+            high = assigned_53;
+            low = assigned_54;
+        } else if ((choice_46 == 26)) {
+            let assigned_55: str = "ge";
+            let assigned_56: str = "ae";
+            high = assigned_55;
+            low = assigned_56;
+        } else if ((choice_46 == 75)) {
+            let assigned_57: str = "b";
+            let assigned_58: str = "b";
+            high = assigned_57;
+            low = assigned_58;
+        } else if ((choice_46 == 76)) {
+            let assigned_59: str = "be";
+            let assigned_60: str = "be";
+            high = assigned_59;
+            low = assigned_60;
+        } else if ((choice_46 == 77)) {
+            let assigned_61: str = "a";
+            let assigned_62: str = "a";
+            high = assigned_61;
+            low = assigned_62;
+        } else if ((choice_46 == 78)) {
+            let assigned_63: str = "ae";
+            let assigned_64: str = "ae";
+            high = assigned_63;
+            low = assigned_64;
+        }
+    }
+    w.append("    cmpl %ecx, %edx\n    jne .Lwide_cmp_high_");
+    w.append(runtime_string_i32(id));
+    w.append("\n    cmpl %ebx, %eax\n    set");
+    w.append(low);
+    w.append(" %al\n    jmp .Lwide_cmp_done_");
+    w.append(runtime_string_i32(id));
+    w.append("\n.Lwide_cmp_high_");
+    w.append(runtime_string_i32(id));
+    w.append(":\n    set");
+    w.append(high);
+    w.append(" %al\n.Lwide_cmp_done_");
+    w.append(runtime_string_i32(id));
+    w.append(":\n    movzbl %al, %eax\n    movl $0, %edx\n");
+    codegen_x86Emitter_wideResult(e, instr.Dst);
+}
+
+fn codegen_x86Emitter_emitWideDiv(e: CodegenX86Emitter, instr: CodegenIRInstr) -> void {
+    let w: StringBuilder = e.b;
+    let id: i32 = codegen_x86Emitter_uniqueID(e);
+    codegen_x86Emitter_wideLoad(e, instr.Src1, "%eax", "%edx");
+    codegen_x86Emitter_wideLoad(e, instr.Src2, "%ebx", "%ecx");
+    let signed: bool = ((instr.Op == 9) || (instr.Op == 10));
+    let remainder: bool = ((instr.Op == 10) || (instr.Op == 12));
+    if (signed) {
+        w.append("    movl %edx, %esi\n    sarl $31, %esi\n    movl %ecx, %edi\n    sarl $31, %edi\n    xorl %esi, %edi\n    pushl %esi\n    pushl %edi\n    testl %edx, %edx\n    jns .Lwide_div_a_");
+        w.append(runtime_string_i32(id));
+        w.append("\n    negl %eax\n    adcl $0, %edx\n    negl %edx\n.Lwide_div_a_");
+        w.append(runtime_string_i32(id));
+        w.append(":\n    testl %ecx, %ecx\n    jns .Lwide_div_b_");
+        w.append(runtime_string_i32(id));
+        w.append("\n    negl %ebx\n    adcl $0, %ecx\n    negl %ecx\n.Lwide_div_b_");
+        w.append(runtime_string_i32(id));
+        w.append(":\n");
+    }
+    w.append("    call _novus_udivmod64\n");
+    if (remainder) {
+        w.append("    movl %ebx, %eax\n    movl %ecx, %edx\n");
+    }
+    if (signed) {
+        w.append("    popl %edi\n    popl %esi\n");
+        let sign: str = "%edi";
+        if (remainder) {
+            sign = "%esi";
+        }
+        w.append("    testl ");
+        w.append(sign);
+        w.append(", ");
+        w.append(sign);
+        w.append("\n    jz .Lwide_div_done_");
+        w.append(runtime_string_i32(id));
+        w.append("\n    negl %eax\n    adcl $0, %edx\n    negl %edx\n.Lwide_div_done_");
+        w.append(runtime_string_i32(id));
+        w.append(":\n");
+    }
+    codegen_x86Emitter_wideResult(e, instr.Dst);
+}
+
+// Register-only integer arithmetic support. Fast-path division by a single
+// machine word also covers the collector's indexing and ordinary loop counts.
+fn codegen_x86Emitter_emitWideDivisionRuntime(e: CodegenX86Emitter) -> void {
+    e.b.append("\n_novus_udivmod64:\n    pushl %esi\n    pushl %edi\n    testl %ecx, %ecx\n    jnz .Ludiv64_long\n    movl %eax, %esi\n    movl %edx, %eax\n    xorl %edx, %edx\n    divl %ebx\n    movl %eax, %edi\n    movl %esi, %eax\n    divl %ebx\n    movl %edx, %ebx\n    movl %edi, %edx\n    movl $0, %ecx\n    jmp .Ludiv64_done\n.Ludiv64_long:\n    xorl %esi, %esi\n    xorl %edi, %edi\n    pushl $64\n.Ludiv64_loop:\n    shll $1, %eax\n    rcll $1, %edx\n    rcll $1, %esi\n    rcll $1, %edi\n    jc .Ludiv64_sub\n    cmpl %ecx, %edi\n    jb .Ludiv64_next\n    ja .Ludiv64_sub\n    cmpl %ebx, %esi\n    jb .Ludiv64_next\n.Ludiv64_sub:\n    subl %ebx, %esi\n    sbbl %ecx, %edi\n    orl $1, %eax\n.Ludiv64_next:\n    decl (%esp)\n    jnz .Ludiv64_loop\n    addl $4, %esp\n    movl %esi, %ebx\n    movl %edi, %ecx\n.Ludiv64_done:\n    popl %edi\n    popl %esi\n    ret\n");
+}
+
+fn codegen_x86Emitter_emitWideFloat(e: CodegenX86Emitter, instr: CodegenIRInstr) -> void {
+    let w: StringBuilder = e.b;
+    codegen_x86Emitter_wideLoad(e, instr.Src1, "%eax", "%edx");
+    w.append("    subl $24, %esp\n    movl %eax, (%esp)\n    movl %edx, 4(%esp)\n");
+    if ((instr.Op == 69)) {
+        w.append("    fildll (%esp)\n    fstpl (%esp)\n");
+    } else {
+        if ((instr.Op == 70)) {
+            w.append("    fnstcw 16(%esp)\n    movzwl 16(%esp), %eax\n    orl $3072, %eax\n    movw %ax, 18(%esp)\n    fldcw 18(%esp)\n    fldl (%esp)\n    fistpll (%esp)\n    fldcw 16(%esp)\n");
+        } else {
+            codegen_x86Emitter_wideLoad(e, instr.Src2, "%eax", "%edx");
+            w.append("    movl %eax, 8(%esp)\n    movl %edx, 12(%esp)\n");
+            if ((instr.Op == 61)) {
+                let id: i32 = codegen_x86Emitter_uniqueID(e);
+                w.append("    fldl 8(%esp)\n    fldl (%esp)\n.Lfmod32_");
+                w.append(runtime_string_i32(id));
+                w.append(":\n    fprem\n    fnstsw %ax\n    testw $1024, %ax\n    jnz .Lfmod32_");
+                w.append(runtime_string_i32(id));
+                w.append("\n    fstpl (%esp)\n    fstp %st(0)\n");
+            } else {
+                w.append("    movsd (%esp), %xmm0\n    movsd 8(%esp), %xmm1\n");
+                let mnemonic: str = "";
+                {
+                    let choice_65: i32 = instr.Op;
+                    if ((choice_65 == 57)) {
+                        mnemonic = "addsd";
+                    } else if ((choice_65 == 58)) {
+                        mnemonic = "subsd";
+                    } else if ((choice_65 == 59)) {
+                        mnemonic = "mulsd";
+                    } else if ((choice_65 == 60)) {
+                        mnemonic = "divsd";
+                    }
+                }
+                if ((mnemonic != "")) {
+                    w.append("    ");
+                    w.append(mnemonic);
+                    w.append(" %xmm1, %xmm0\n    movsd %xmm0, (%esp)\n");
+                } else {
+                    w.append("    ucomisd %xmm1, %xmm0\n");
+                    {
+                        let choice_66: i32 = instr.Op;
+                        if ((choice_66 == 63)) {
+                            w.append("    sete %al\n    setnp %cl\n    andb %cl, %al\n");
+                        } else if ((choice_66 == 64)) {
+                            w.append("    setne %al\n    setp %cl\n    orb %cl, %al\n");
+                        } else if ((choice_66 == 65)) {
+                            w.append("    setb %al\n    setnp %cl\n    andb %cl, %al\n");
+                        } else if ((choice_66 == 66)) {
+                            w.append("    setbe %al\n    setnp %cl\n    andb %cl, %al\n");
+                        } else if ((choice_66 == 67)) {
+                            w.append("    seta %al\n");
+                        } else if ((choice_66 == 68)) {
+                            w.append("    setae %al\n");
+                        }
+                    }
+                    w.append("    movzbl %al, %eax\n    movl %eax, (%esp)\n    movl $0, 4(%esp)\n");
+                }
+            }
+        }
+    }
+    w.append("    movl (%esp), %eax\n    movl 4(%esp), %edx\n    addl $24, %esp\n");
+    codegen_x86Emitter_wideResult(e, instr.Dst);
+}
+
+fn codegen_x86Emitter_emitWideArray(e: CodegenX86Emitter, instr: CodegenIRInstr) -> void {
+    let w: StringBuilder = e.b;
+    {
+        let choice_67: i32 = instr.Op;
+        if ((choice_67 == 48)) {
+            let capacity: i64 = instr.Src2.Imm;
+            if ((capacity < 4)) {
+                capacity = 4;
+            }
+            w.append("    pushl $0\n    pushl $");
+            w.append(runtime_string_i64((12 + (capacity * 8))));
+            w.append("\n    call _novus_gc_alloc\n    addl $8, %esp\n    leal 12(%eax), %ecx\n    movl %ecx, (%eax)\n    movl $0, 4(%eax)\n    movl $");
+            w.append(runtime_string_i64(capacity));
+            w.append(", 8(%eax)\n    movl $0, %edx\n");
+            codegen_x86Emitter_wideResult(e, instr.Dst);
+        } else if ((choice_67 == 49)) {
+            w.append("    movl ");
+            w.append(codegen_x86Emitter_widePart(e, instr.Src1, false));
+            w.append(", %ebx\n    movl ");
+            w.append(codegen_x86Emitter_widePart(e, instr.Src2, false));
+            w.append(", %ecx\n    movl (%ebx), %ebx\n    movl (%ebx,%ecx,8), %eax\n    movl 4(%ebx,%ecx,8), %edx\n");
+            codegen_x86Emitter_wideResult(e, instr.Dst);
+        } else if ((choice_67 == 50)) {
+            w.append("    movl ");
+            w.append(codegen_x86Emitter_widePart(e, instr.Dst, false));
+            w.append(", %ebx\n    movl ");
+            w.append(codegen_x86Emitter_widePart(e, instr.Src1, false));
+            w.append(", %ecx\n    movl (%ebx), %ebx\n");
+            codegen_x86Emitter_wideLoad(e, instr.Src2, "%eax", "%edx");
+            w.append("    movl %eax, (%ebx,%ecx,8)\n    movl %edx, 4(%ebx,%ecx,8)\n");
+        } else if ((choice_67 == 53)) {
+            w.append("    movl ");
+            w.append(codegen_x86Emitter_widePart(e, instr.Src1, false));
+            w.append(", %ecx\n    movl 4(%ecx), %eax\n    movl $0, %edx\n");
+            codegen_x86Emitter_wideResult(e, instr.Dst);
+        } else if ((choice_67 == 52)) {
+            w.append("    movl ");
+            w.append(codegen_x86Emitter_widePart(e, instr.Src1, false));
+            w.append(", %ebx\n    movl 4(%ebx), %ecx\n    decl %ecx\n    movl %ecx, 4(%ebx)\n    movl (%ebx), %ebx\n    movl (%ebx,%ecx,8), %eax\n    movl 4(%ebx,%ecx,8), %edx\n");
+            codegen_x86Emitter_wideResult(e, instr.Dst);
+        } else if ((choice_67 == 51)) {
+            let id: i32 = codegen_x86Emitter_uniqueID(e);
+            w.append("    movl ");
+            w.append(codegen_x86Emitter_widePart(e, instr.Dst, false));
+            w.append(", %ebx\n    movl 4(%ebx), %ecx\n    cmpl 8(%ebx), %ecx\n    jb .Larray32_room_");
+            w.append(runtime_string_i32(id));
+            w.append("\n    movl 8(%ebx), %esi\n    shll $1, %esi\n    leal (,%esi,8), %eax\n    pushl $0\n    pushl %eax\n    call _novus_gc_alloc\n    addl $8, %esp\n    movl %esi, 8(%ebx)\n    movl (%ebx), %esi\n    movl %eax, (%ebx)\n    movl %eax, %edi\n    movl 4(%ebx), %ecx\n    shll $1, %ecx\n    cld\n    rep movsl\n.Larray32_room_");
+            w.append(runtime_string_i32(id));
+            w.append(":\n    movl 4(%ebx), %ecx\n    movl (%ebx), %ebx\n");
+            codegen_x86Emitter_wideLoad(e, instr.Src1, "%eax", "%edx");
+            w.append("    movl %eax, (%ebx,%ecx,8)\n    movl %edx, 4(%ebx,%ecx,8)\n    movl ");
+            w.append(codegen_x86Emitter_widePart(e, instr.Dst, false));
+            w.append(", %ebx\n    incl 4(%ebx)\n");
+        }
+    }
+}

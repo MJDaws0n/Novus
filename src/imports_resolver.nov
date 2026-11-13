@@ -1,0 +1,580 @@
+module imports_resolver;
+
+import model;
+import runtime;
+
+fn imports_ResolveError_Error(e: ImportsResolveError) -> str {
+    if ((e.File != "")) {
+        return (e.File + ": line " + runtime_string_i32(e.Pos.Line) + ", col " + runtime_string_i32(e.Pos.Column) + ": " + e.Message);
+    }
+    return ("line " + runtime_string_i32(e.Pos.Line) + ", col " + runtime_string_i32(e.Pos.Column) + ": " + e.Message);
+}
+
+// NewResolver creates a new import resolver rooted at the given source file path.
+fn imports_NewResolver(sourceFilePath: str) -> ImportsResolver {
+    let result_510: ResultStrStr = runtime_path_filepath_Abs(sourceFilePath);
+    let absPath: str = result_510.value0;
+    {
+        let result_511: ResultStrStr = runtime_path_filepath_EvalSymlinks(absPath);
+        let evaled: str = result_511.value0;
+        let err: str = result_511.value1;
+        if ((err == "")) {
+            absPath = evaled;
+        }
+    }
+    return make_ImportsResolver_30(runtime_path_filepath_Dir(absPath), new MapStrImportsimportedmodule(), new MapStrArrayastclassbinding());
+}
+
+// Resolve processes all imports in the given program and returns:
+//   - A merged program with all imported functions prepended
+//   - Any resolution errors
+//
+// The returned program has the same Module declaration and main functions,
+// but imported functions are added before the original functions.
+fn imports_Resolver_Resolve(r: ImportsResolver, prog: AstNode, sourceFile: str) -> ResultAstnodeArrayimportsresolveerror {
+    let result_512: ResultStrStr = runtime_path_filepath_Abs(sourceFile);
+    let absSource: str = result_512.value0;
+    {
+        let result_513: ResultStrStr = runtime_path_filepath_EvalSymlinks(absSource);
+        let canonical: str = result_513.value0;
+        let err: str = result_513.value1;
+        if ((err == "")) {
+            absSource = canonical;
+        }
+    }
+    imports_markSource(prog, absSource);
+    r.importStack = append_Str(r.importStack, absSource);
+    {
+        let items_514: []AstNode = prog.Imports;
+        let count_516: i32 = len(items_514);
+        for (let index_515: i32 = 0; index_515 < count_516; index_515++) {
+            let imp: AstNode = items_514[index_515];
+            imports_Resolver_resolveImport(r, imp, r.BaseDir, absSource, "");
+        }
+    }
+    r.importStack = slice_Str(r.importStack, 0, (len(r.importStack) - 1));
+    if ((len(r.errors) > 0)) {
+        return make_ResultAstnodeArrayimportsresolveerror(prog, r.errors);
+    }
+    imports_Resolver_deduplicateModules(r);
+    let merged: AstNode = make_AstNode_31(prog.Module, prog.Imports, r.classScopes, absSource, prog.Pos);
+    let seenPrograms: MapStrBool = new MapStrBool();
+    let exported: MapAstnodeBool = new MapAstnodeBool();
+    {
+        let items_517: []ImportsImportedModule = r.allModules;
+        let count_519: i32 = len(items_517);
+        for (let index_518: i32 = 0; index_518 < count_519; index_518++) {
+            let mod: ImportsImportedModule = items_517[index_518];
+            {
+                let items_520: []AstNode = mod.Functions;
+                let count_522: i32 = len(items_520);
+                for (let index_521: i32 = 0; index_521 < count_522; index_521++) {
+                    let fn_value: AstNode = items_520[index_521];
+                    MapAstnodeBool_put(exported, fn_value, true);
+                }
+            }
+        }
+    }
+    {
+        let items_523: []ImportsImportedModule = r.allModules;
+        let count_525: i32 = len(items_523);
+        for (let index_524: i32 = 0; index_524 < count_525; index_524++) {
+            let mod: ImportsImportedModule = items_523[index_524];
+            if (!(MapStrBool_get(seenPrograms, mod.FilePath))) {
+                merged.Classes = extend_Astnode(merged.Classes, mod.Program.Classes);
+                if ((len(mod.Program.Classes) != 0)) {
+                    {
+                        let items_526: []AstNode = mod.Program.Functions;
+                        let count_528: i32 = len(items_526);
+                        for (let index_527: i32 = 0; index_527 < count_528; index_527++) {
+                            let fn_value: AstNode = items_526[index_527];
+                            if (((fn_value.Name != "main") && !(MapAstnodeBool_get(exported, fn_value)))) {
+                                merged.ClassHelpers = append_Astnode(merged.ClassHelpers, fn_value);
+                            }
+                        }
+                    }
+                }
+                MapStrBool_put(seenPrograms, mod.FilePath, true);
+            }
+            {
+                let items_529: []AstNode = mod.Functions;
+                let count_531: i32 = len(items_529);
+                for (let index_530: i32 = 0; index_530 < count_531; index_530++) {
+                    let fn_value: AstNode = items_529[index_530];
+                    fn_value.Imported = true;
+                    merged.Functions = append_Astnode(merged.Functions, fn_value);
+                }
+            }
+            if ((mod.Program != null)) {
+                {
+                    let items_532: []AstNode = mod.Program.Globals;
+                    let count_534: i32 = len(items_532);
+                    for (let index_533: i32 = 0; index_533 < count_534; index_533++) {
+                        let g: AstNode = items_532[index_533];
+                        merged.Globals = append_Astnode(merged.Globals, g);
+                    }
+                }
+            }
+        }
+    }
+    merged.Globals = extend_Astnode(merged.Globals, prog.Globals);
+    merged.Classes = extend_Astnode(merged.Classes, prog.Classes);
+    merged.Functions = extend_Astnode(merged.Functions, prog.Functions);
+    return make_ResultAstnodeArrayimportsresolveerror(merged, []);
+}
+
+// resolveImport resolves a single import declaration.
+// rootAlias is propagated from the top-level import so that transitive
+// sub-imports inherit the caller's alias (e.g. import A standard; where A
+// imports B — B's functions also land under the "standard" alias).
+fn imports_Resolver_resolveImport(r: ImportsResolver, imp: AstNode, baseDir: str, importerFile: str, rootAlias: str) -> void {
+    let relPath: str = runtime_strings_ReplaceAll(imp.Path, "/", "/");
+    let filePath: str = runtime_path_filepath_Join([baseDir, (relPath + ".nov")]);
+    let result_535: ResultStrStr = runtime_path_filepath_Abs(filePath);
+    let absPath: str = result_535.value0;
+    let err: str = result_535.value1;
+    if ((err != "")) {
+        imports_Resolver_addError(r, imp.Pos, importerFile, ("cannot resolve import path " + runtime_quote(imp.Path) + ": " + err));
+        return;
+    }
+    {
+        let result_536: ResultStrStr = runtime_path_filepath_EvalSymlinks(absPath);
+        let evaled: str = result_536.value0;
+        let err2: str = result_536.value1;
+        if ((err2 == "")) {
+            absPath = evaled;
+        }
+    }
+    {
+        let result_537: ResultFileinfoStr = runtime_os_Stat(absPath);
+        let info: FileInfo = result_537.value0;
+        let err: str = result_537.value1;
+        if (runtime_os_IsNotExist(err)) {
+            let dirPath: str = runtime_path_filepath_Join([baseDir, relPath]);
+            let result_538: ResultStrStr = runtime_path_filepath_Abs(dirPath);
+            let absDirPath: str = result_538.value0;
+            let mainPath: str = runtime_path_filepath_Join([absDirPath, "main.nov"]);
+            {
+                let result_539: ResultFileinfoStr = runtime_os_Stat(mainPath);
+                let err2: str = result_539.value1;
+                if ((err2 == "")) {
+                    absPath = mainPath;
+                    {
+                        let result_540: ResultStrStr = runtime_path_filepath_EvalSymlinks(absPath);
+                        let evaled: str = result_540.value0;
+                        let err3: str = result_540.value1;
+                        if ((err3 == "")) {
+                            absPath = evaled;
+                        }
+                    }
+                } else {
+                    imports_Resolver_addError(r, imp.Pos, importerFile, ("imported file not found: " + absPath + " (resolved from " + runtime_quote(imp.Path) + ")"));
+                    return;
+                }
+            }
+        } else {
+            if (((err == "") && runtime_io_fs_IsDir(info))) {
+                let mainPath: str = runtime_path_filepath_Join([absPath, "main.nov"]);
+                {
+                    let result_541: ResultFileinfoStr = runtime_os_Stat(mainPath);
+                    let err2: str = result_541.value1;
+                    if ((err2 == "")) {
+                        absPath = mainPath;
+                        {
+                            let result_542: ResultStrStr = runtime_path_filepath_EvalSymlinks(absPath);
+                            let evaled: str = result_542.value0;
+                            let err3: str = result_542.value1;
+                            if ((err3 == "")) {
+                                absPath = evaled;
+                            }
+                        }
+                    } else {
+                        imports_Resolver_addError(r, imp.Pos, importerFile, ("imported directory " + absPath + " has no main.nov (resolved from " + runtime_quote(imp.Path) + ")"));
+                        return;
+                    }
+                }
+            }
+        }
+    }
+    {
+        let items_543: []str = r.importStack;
+        let count_545: i32 = len(items_543);
+        for (let index_544: i32 = 0; index_544 < count_545; index_544++) {
+            let stackPath: str = items_543[index_544];
+            if ((stackPath == absPath)) {
+                let chain: []str = append_Str(r.importStack, absPath);
+                imports_Resolver_addError(r, imp.Pos, importerFile, ("circular import detected: " + runtime_strings_Join(chain, " → ")));
+                return;
+            }
+        }
+    }
+    if ((len(r.importStack) >= 64)) {
+        imports_Resolver_addError(r, imp.Pos, importerFile, ("import depth limit (" + runtime_string_i32(64) + ") exceeded — possible diamond or recursive import"));
+        return;
+    }
+    {
+        let existing: ImportsImportedModule = MapStrImportsimportedmodule_get(r.resolved, absPath);
+        let ok: bool = MapStrImportsimportedmodule_has(r.resolved, absPath);
+        if (ok) {
+            let effectiveAlias: str = imp.Alias;
+            if (((effectiveAlias == "") && (rootAlias != ""))) {
+                effectiveAlias = rootAlias;
+            }
+            let aliasAlreadyResolved: bool = false;
+            {
+                let items_546: []ImportsImportedModule = r.allModules;
+                let count_548: i32 = len(items_546);
+                for (let index_547: i32 = 0; index_547 < count_548; index_547++) {
+                    let resolvedMod: ImportsImportedModule = items_546[index_547];
+                    if (((resolvedMod.FilePath == absPath) && (resolvedMod.Alias == effectiveAlias))) {
+                        aliasAlreadyResolved = true;
+                        break;
+                    }
+                }
+            }
+            if (!(aliasAlreadyResolved)) {
+                let importDir: str = runtime_path_filepath_Dir(absPath);
+                r.importStack = append_Str(r.importStack, absPath);
+                {
+                    let items_549: []AstNode = existing.Program.Imports;
+                    let count_551: i32 = len(items_549);
+                    for (let index_550: i32 = 0; index_550 < count_551; index_550++) {
+                        let subImp: AstNode = items_549[index_550];
+                        imports_Resolver_resolveImport(r, subImp, importDir, absPath, effectiveAlias);
+                    }
+                }
+                r.importStack = slice_Str(r.importStack, 0, (len(r.importStack) - 1));
+            }
+            let mod: ImportsImportedModule = make_ImportsImportedModule_32(imp.Path, absPath, effectiveAlias, imp.SelectFns, existing.Program);
+            mod.Functions = imports_Resolver_importDeclarations(r, existing.Program, imp, importerFile, absPath);
+            r.allModules = append_Importsimportedmodule(r.allModules, mod);
+            return;
+        }
+    }
+    let result_552: ResultStrStr = runtime_os_ReadText(absPath);
+    let content: str = result_552.value0;
+    err = result_552.value1;
+    if ((err != "")) {
+        imports_Resolver_addError(r, imp.Pos, importerFile, ("cannot read imported file " + absPath + ": " + err));
+        return;
+    }
+    let result_553: ResultArraylexertokenArraylexerlexerror = lexer_Lex(content);
+    let tokens: []LexerToken = result_553.value0;
+    let lexErrors: []LexerLexError = result_553.value1;
+    if ((len(lexErrors) > 0)) {
+        {
+            let items_554: []LexerLexError = lexErrors;
+            let count_556: i32 = len(items_554);
+            for (let index_555: i32 = 0; index_555 < count_556; index_555++) {
+                let e: LexerLexError = copy_LexerLexError(items_554[index_555]);
+                imports_Resolver_addError(r, imp.Pos, absPath, ("lex error in imported file: " + lexer_LexError_Error(e)));
+            }
+        }
+        return;
+    }
+    let result_557: ResultAstnodeArrayparserparseerror = parser_Parse(tokens);
+    let prog: AstNode = result_557.value0;
+    let parseErrors: []ParserParseError = result_557.value1;
+    if ((len(parseErrors) > 0)) {
+        {
+            let items_558: []ParserParseError = parseErrors;
+            let count_560: i32 = len(items_558);
+            for (let index_559: i32 = 0; index_559 < count_560; index_559++) {
+                let e: ParserParseError = copy_ParserParseError(items_558[index_559]);
+                imports_Resolver_addError(r, imp.Pos, absPath, ("parse error in imported file: " + parser_ParseError_Error(e)));
+            }
+        }
+        return;
+    }
+    if (((r.TargetOS != "") || (r.TargetArch != ""))) {
+        let map_561: MapStrStr = new MapStrStr();
+        MapStrStr_put(map_561, "os", r.TargetOS);
+        MapStrStr_put(map_561, "arch", r.TargetArch);
+        let constants: MapStrStr = map_561;
+        ast_ResolveCompTimeBlocks(prog, constants);
+    }
+    imports_markSource(prog, absPath);
+    let effectiveAlias: str = imp.Alias;
+    if (((effectiveAlias == "") && (rootAlias != ""))) {
+        effectiveAlias = rootAlias;
+    }
+    let mod: ImportsImportedModule = make_ImportsImportedModule_32(imp.Path, absPath, effectiveAlias, imp.SelectFns, prog);
+    MapStrImportsimportedmodule_put(r.resolved, absPath, mod);
+    let importDir: str = runtime_path_filepath_Dir(absPath);
+    r.importStack = append_Str(r.importStack, absPath);
+    {
+        let items_562: []AstNode = prog.Imports;
+        let count_564: i32 = len(items_562);
+        for (let index_563: i32 = 0; index_563 < count_564; index_563++) {
+            let subImp: AstNode = items_562[index_563];
+            imports_Resolver_resolveImport(r, subImp, importDir, absPath, effectiveAlias);
+        }
+    }
+    r.importStack = slice_Str(r.importStack, 0, (len(r.importStack) - 1));
+    mod.Functions = imports_Resolver_importDeclarations(r, prog, imp, importerFile, absPath);
+    if ((effectiveAlias != "")) {
+        {
+            let items_565: []AstNode = mod.Functions;
+            let count_567: i32 = len(items_565);
+            for (let index_566: i32 = 0; index_566 < count_567; index_566++) {
+                let fn_value: AstNode = items_565[index_566];
+                if ((fn_value.MangledName == "")) {
+                    fn_value.MangledName = fn_value.Name;
+                }
+            }
+        }
+    }
+    r.allModules = append_Importsimportedmodule(r.allModules, mod);
+}
+
+// funcSignature returns a deduplication key for a function: "name(paramType1,paramType2):returnType".
+fn imports_funcSignature(fn_value: AstNode) -> str {
+    let params: []str = [];
+    {
+        let items_568: []AstParam = fn_value.Params;
+        let count_570: i32 = len(items_568);
+        for (let index_569: i32 = 0; index_569 < count_570; index_569++) {
+            let p: AstParam = items_568[index_569];
+            if ((p.Type != null)) {
+                params = append_Str(params, p.Type.Name);
+            } else {
+                params = append_Str(params, "void");
+            }
+        }
+    }
+    let ret_value: str = "void";
+    if ((fn_value.ReturnType != null)) {
+        ret_value = fn_value.ReturnType.Name;
+    }
+    return ((((fn_value.Name + "(") + runtime_strings_Join(params, ",")) + "):") + ret_value);
+}
+
+// deduplicateModules removes duplicate function entries across all resolved
+// modules.  Two functions are considered duplicates if they share the same
+// alias and signature (name + parameter types + return type).  Only the first
+// occurrence is kept; subsequent identical imports are silently dropped.
+// This also deduplicates global variables by name within each alias bucket.
+fn imports_Resolver_deduplicateModules(r: ImportsResolver) -> void {
+    let seenFns: MapImportsfnkeyBool = new MapImportsfnkeyBool();
+    {
+        let items_571: []ImportsImportedModule = r.allModules;
+        let count_573: i32 = len(items_571);
+        for (let index_572: i32 = 0; index_572 < count_573; index_572++) {
+            let mod: ImportsImportedModule = items_571[index_572];
+            let deduped: []AstNode = [];
+            {
+                let items_574: []AstNode = mod.Functions;
+                let count_576: i32 = len(items_574);
+                for (let index_575: i32 = 0; index_575 < count_576; index_575++) {
+                    let fn_value: AstNode = items_574[index_575];
+                    let key: ImportsFnKey = make_ImportsFnKey_33(mod.Alias, imports_funcSignature(fn_value));
+                    if (!(MapImportsfnkeyBool_get(seenFns, key))) {
+                        MapImportsfnkeyBool_put(seenFns, key, true);
+                        deduped = append_Astnode(deduped, fn_value);
+                    }
+                }
+            }
+            mod.Functions = deduped;
+        }
+    }
+    let seenGlobals: MapStrBool = new MapStrBool();
+    {
+        let items_577: []ImportsImportedModule = r.allModules;
+        let count_579: i32 = len(items_577);
+        for (let index_578: i32 = 0; index_578 < count_579; index_578++) {
+            let mod: ImportsImportedModule = items_577[index_578];
+            if ((mod.Program == null)) {
+                continue;
+            }
+            let dedupedGlobals: []AstNode = [];
+            {
+                let items_580: []AstNode = mod.Program.Globals;
+                let count_582: i32 = len(items_580);
+                for (let index_581: i32 = 0; index_581 < count_582; index_581++) {
+                    let g: AstNode = items_580[index_581];
+                    if (!(MapStrBool_get(seenGlobals, g.Name))) {
+                        MapStrBool_put(seenGlobals, g.Name, true);
+                        dedupedGlobals = append_Astnode(dedupedGlobals, g);
+                    }
+                }
+            }
+            let programCopy: AstNode = copy_AstNode(mod.Program);
+            programCopy.Globals = dedupedGlobals;
+            mod.Program = programCopy;
+        }
+    }
+}
+
+fn imports_markSource(prog: AstNode, path: str) -> void {
+    prog.SourceFile = path;
+    {
+        let items_583: []AstNode = prog.Classes;
+        let count_585: i32 = len(items_583);
+        for (let index_584: i32 = 0; index_584 < count_585; index_584++) {
+            let class_value: AstNode = items_583[index_584];
+            class_value.SourceFile = path;
+            {
+                let items_586: []AstClassMethod = class_value.Methods;
+                let count_588: i32 = len(items_586);
+                for (let index_587: i32 = 0; index_587 < count_588; index_587++) {
+                    let method: AstClassMethod = items_586[index_587];
+                    method.Fn.SourceFile = path;
+                }
+            }
+        }
+    }
+    {
+        let items_589: []AstNode = prog.Functions;
+        let count_591: i32 = len(items_589);
+        for (let index_590: i32 = 0; index_590 < count_591; index_590++) {
+            let fn_value: AstNode = items_589[index_590];
+            fn_value.SourceFile = path;
+        }
+    }
+    {
+        let items_592: []AstNode = prog.Globals;
+        let count_594: i32 = len(items_592);
+        for (let index_593: i32 = 0; index_593 < count_594; index_593++) {
+            let global: AstNode = items_592[index_593];
+            global.SourceFile = path;
+        }
+    }
+}
+
+// importDeclarations binds visible classes and returns the selected functions.
+fn imports_Resolver_importDeclarations(r: ImportsResolver, prog: AstNode, imp: AstNode, importer: str, absPath: str) -> []AstNode {
+    let fns: []AstNode = prog.Functions;
+    let found: MapStrBool = new MapStrBool();
+    let bindings: []AstClassBinding = extend_Astclassbinding([], MapStrArrayastclassbinding_get(r.classScopes, absPath));
+    {
+        let items_595: []AstNode = prog.Classes;
+        let count_597: i32 = len(items_595);
+        for (let index_596: i32 = 0; index_596 < count_597; index_596++) {
+            let class_value: AstNode = items_595[index_596];
+            bindings = append_Astclassbinding(bindings, make_AstClassBinding_34(class_value.Name, class_value));
+        }
+    }
+    {
+        let items_598: []AstClassBinding = bindings;
+        let count_600: i32 = len(items_598);
+        for (let index_599: i32 = 0; index_599 < count_600; index_599++) {
+            let binding: AstClassBinding = copy_AstClassBinding(items_598[index_599]);
+            if (((len(imp.SelectFns) != 0) && !(contains_Str(imp.SelectFns, binding.Name)))) {
+                continue;
+            }
+            MapStrBool_put(found, binding.Name, true);
+            let name: str = binding.Name;
+            if ((imp.Alias != "")) {
+                name = ((imp.Alias + ".") + name);
+            }
+            MapStrArrayastclassbinding_put(r.classScopes, importer, append_Astclassbinding(MapStrArrayastclassbinding_get(r.classScopes, importer), make_AstClassBinding_35(name, binding.Class, imp.Pos)));
+        }
+    }
+    let result: []AstNode = [];
+    if ((len(imp.SelectFns) == 0)) {
+        {
+            let items_601: []AstNode = fns;
+            let count_603: i32 = len(items_601);
+            for (let index_602: i32 = 0; index_602 < count_603; index_602++) {
+                let fn_value: AstNode = items_601[index_602];
+                if ((fn_value.Name != "main")) {
+                    result = append_Astnode(result, fn_value);
+                }
+            }
+        }
+        return result;
+    }
+    let wanted: MapStrBool = new MapStrBool();
+    {
+        let items_604: []str = imp.SelectFns;
+        let count_606: i32 = len(items_604);
+        for (let index_605: i32 = 0; index_605 < count_606; index_605++) {
+            let name: str = items_604[index_605];
+            MapStrBool_put(wanted, name, true);
+        }
+    }
+    {
+        let items_607: []AstNode = fns;
+        let count_609: i32 = len(items_607);
+        for (let index_608: i32 = 0; index_608 < count_609; index_608++) {
+            let fn_value: AstNode = items_607[index_608];
+            if (MapStrBool_get(wanted, fn_value.Name)) {
+                result = append_Astnode(result, fn_value);
+                MapStrBool_put(found, fn_value.Name, true);
+            }
+        }
+    }
+    {
+        let items_610: []str = imp.SelectFns;
+        let count_612: i32 = len(items_610);
+        for (let index_611: i32 = 0; index_611 < count_612; index_611++) {
+            let name: str = items_610[index_611];
+            if (!(MapStrBool_get(found, name))) {
+                imports_Resolver_addError(r, imp.Pos, absPath, ("function or class " + runtime_quote(name) + " not found in imported module " + runtime_quote(imp.Path)));
+            }
+        }
+    }
+    return result;
+}
+
+// addError records a resolution error.
+fn imports_Resolver_addError(r: ImportsResolver, pos: AstPosition, file: str, msg: str) -> void {
+    r.errors = append_Importsresolveerror(r.errors, make_ImportsResolveError_36(msg, pos, file));
+}
+
+// GetModules returns all resolved imported modules in order.
+fn imports_Resolver_GetModules(r: ImportsResolver) -> []ImportsImportedModule {
+    return r.allModules;
+}
+
+// CheckAliasConflicts validates that no two imports with the same alias
+// export the *same* function signature from *different* source files in a
+// way that would create a true ambiguity.
+//
+// Allowed:
+//   - Same name + same signature from different files — duplicate import
+//     (e.g. the same library transitively imported via two paths).
+//   - Same name + different signatures from any file(s) — function
+//     overloading. The semantic analyser dispatches by argument types.
+//
+// Disallowed (and surfaced as a real error elsewhere): same name + same
+// signature in the *same* file (a true redefinition).
+fn imports_Resolver_CheckAliasConflicts(r: ImportsResolver) -> []ImportsResolveError {
+    let aliasFuncs: MapStrMapstrarrayimportssigorigin = new MapStrMapstrarrayimportssigorigin();
+    {
+        let items_613: []ImportsImportedModule = r.allModules;
+        let count_615: i32 = len(items_613);
+        for (let index_614: i32 = 0; index_614 < count_615; index_614++) {
+            let mod: ImportsImportedModule = items_613[index_614];
+            let alias: str = mod.Alias;
+            if ((MapStrMapstrarrayimportssigorigin_get(aliasFuncs, alias) == null)) {
+                MapStrMapstrarrayimportssigorigin_put(aliasFuncs, alias, new MapStrArrayimportssigorigin());
+            }
+            {
+                let items_616: []AstNode = mod.Functions;
+                let count_618: i32 = len(items_616);
+                for (let index_617: i32 = 0; index_617 < count_618; index_617++) {
+                    let fn_value: AstNode = items_616[index_617];
+                    let sig: str = imports_funcSignature(fn_value);
+                    let origins: []ImportsSigOrigin = MapStrArrayimportssigorigin_get(MapStrMapstrarrayimportssigorigin_get(aliasFuncs, alias), fn_value.Name);
+                    let seen: bool = false;
+                    {
+                        let items_619: []ImportsSigOrigin = origins;
+                        let count_621: i32 = len(items_619);
+                        for (let index_620: i32 = 0; index_620 < count_621; index_620++) {
+                            let o: ImportsSigOrigin = copy_ImportsSigOrigin(items_619[index_620]);
+                            if ((o.sig == sig)) {
+                                seen = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!(seen)) {
+                        MapStrArrayimportssigorigin_put(MapStrMapstrarrayimportssigorigin_get(aliasFuncs, alias), fn_value.Name, append_Importssigorigin(origins, make_ImportsSigOrigin_37(mod.FilePath, sig, mod.Path)));
+                    }
+                }
+            }
+        }
+    }
+    return r.errors;
+}

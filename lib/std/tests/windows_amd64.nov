@@ -1,0 +1,197 @@
+// Auto-generated test file. Run on the target platform or in VM/Docker.
+
+module std_tests_windows_amd64;
+
+import ../main;
+
+fn test_pass(name: str) -> void {
+    print_raw("  [PASS] " + name + "\n");
+}
+
+fn test_fail(name: str, detail: str) -> void {
+    print_raw("  [FAIL] " + name + ": " + detail + "\n");
+}
+
+fn assert_eq_i32(name: str, got: i32, expected: i32) -> i32 {
+    if (got == expected) { test_pass(name); return 0; }
+    test_fail(name, "got " + i32_to_str(got) + ", expected " + i32_to_str(expected));
+    return 1;
+}
+
+fn assert_eq_i64(name: str, got: i64, expected: i64) -> i32 {
+    if (got == expected) { test_pass(name); return 0; }
+    test_fail(name, "got " + i64_to_str(got) + ", expected " + i64_to_str(expected));
+    return 1;
+}
+
+fn assert_eq_str(name: str, got: str, expected: str) -> i32 {
+    if (str_equals(got, expected)) { test_pass(name); return 0; }
+    test_fail(name, "got '" + got + "', expected '" + expected + "'");
+    return 1;
+}
+
+fn assert_true(name: str, val: bool) -> i32 {
+    if (val) { test_pass(name); return 0; }
+    test_fail(name, "expected true");
+    return 1;
+}
+
+fn assert_gt_i32(name: str, val: i32, threshold: i32) -> i32 {
+    if (val > threshold) { test_pass(name); return 0; }
+    test_fail(name, "expected > " + i32_to_str(threshold));
+    return 1;
+}
+
+fn assert_gt_i64(name: str, val: i64, threshold: i64) -> i32 {
+    if (val > threshold) { test_pass(name); return 0; }
+    test_fail(name, "expected > " + i64_to_str(threshold));
+    return 1;
+}
+
+fn assert_gte_i32(name: str, val: i32, threshold: i32) -> i32 {
+    if (val >= threshold) { test_pass(name); return 0; }
+    test_fail(name, "expected >= " + i32_to_str(threshold) + ", got " + i32_to_str(val));
+    return 1;
+}
+
+fn assert_neq_u64(name: str, val: u64, not_val: u64) -> i32 {
+    if (val != not_val) { test_pass(name); return 0; }
+    test_fail(name, "expected != given value");
+    return 1;
+}
+
+fn main(argc: i32, argv: u64) -> i32 {
+    let fails: i32 = 0;
+    print_raw("=== std tests (windows_amd64) ===\n");
+
+    // ── Type Conversions (assembly: mov + getreg) ──
+    print_raw("\n--- Type Conversions ---\n");
+    fails = fails + assert_eq_i32("i32_to_u64(0) roundtrip", u64_to_i32(i32_to_u64(0)), 0);
+    fails = fails + assert_eq_i32("i32_to_u64(42) roundtrip", u64_to_i32(i32_to_u64(42)), 42);
+
+    fails = fails + assert_eq_i32("i32_to_u64(max_i32)", u64_to_i32(i32_to_u64(2147483647)), 2147483647);
+    let u_val: u64 = i64_to_u64(1234567890);
+    let i_val: i64 = u64_to_i64(u_val);
+    fails = fails + assert_eq_i64("i64<->u64 roundtrip", i_val, 1234567890);
+
+    // ── Array Functions (assembly: mov + getreg + load32) ──
+    print_raw("\n--- Array Functions ---\n");
+    let arr5: []i32 = [10, 20, 30, 40, 50];
+    fails = fails + assert_eq_i32("array_len([5])", array_len(arr5), 5);
+    let arr0: []i32 = [];
+    fails = fails + assert_eq_i32("array_len([])", array_len(arr0), 0);
+    let arr1: []i32 = [99];
+    fails = fails + assert_eq_i32("array_len([1])", array_len(arr1), 1);
+    let arru: []u64 = [1, 2, 3];
+    fails = fails + assert_eq_i32("array_len_u64([3])", array_len_u64(arru), 3);
+    let arr_dp: []u64 = [100, 200, 300];
+    let dp: i64 = array_data_ptr_u64(arr_dp);
+    fails = fails + assert_true("array_data_ptr_u64 != 0", dp != 0);
+
+    // ── I/O (assembly: syscall write) ──
+    print_raw("\n--- I/O ---\n");
+    print_raw("  [PASS] print_raw works (you see this)\n");
+    print("  [PASS] print works (auto-newline)");
+
+    // ── Time (assembly: syscall gettimeofday/clock_gettime) ──
+    print_raw("\n--- Time ---\n");
+    let t: i64 = get_time_ns();
+    fails = fails + assert_gt_i64("get_time_ns > 0", t, 0);
+    let t2: i64 = get_time_ns();
+    fails = fails + assert_true("get_time_ns monotonic", t2 >= t);
+
+    // ── Pointer (assembly: mov + getreg) ──
+    print_raw("\n--- Pointer ---\n");
+    let p: u64 = ptr("hello");
+    fails = fails + assert_neq_u64("ptr != 0", p, 0);
+
+    // ── Memory (assembly: pipe trick / RtlMoveMemory + syscalls) ──
+    print_raw("\n--- Memory ---\n");
+    let buf: str = make_buffer(64);
+    fails = fails + assert_eq_i32("make_buffer(64)", len(buf), 64);
+    let buf1: str = make_buffer(1);
+    fails = fails + assert_eq_i32("make_buffer(1)", len(buf1), 1);
+
+    let src: str = "Hello, World!";
+    let copied: str = copy_bytes(ptr(src), len(src));
+    fails = fails + assert_eq_str("copy_bytes", copied, "Hello, World!");
+
+    let raw_src: str = "RawCopy";
+    let raw_copied: str = copy_bytes_raw(ptr(raw_src), len(raw_src));
+    fails = fails + assert_eq_str("copy_bytes_raw", raw_copied, "RawCopy");
+
+    let s8buf: str = make_buffer(4);
+    store8(ptr(s8buf), 65);
+    fails = fails + assert_eq_i32("store8+byte_at", byte_at(s8buf, 0), 65);
+    store8(ptr(s8buf) + i32_to_u64(1), 66);
+    fails = fails + assert_eq_i32("store8 offset", byte_at(s8buf, 1), 66);
+
+    let s32buf: str = make_buffer(4);
+    store32(ptr(s32buf), 305419896);
+    fails = fails + assert_eq_i32("store32 byte0", byte_at(s32buf, 0), 120);
+    fails = fails + assert_eq_i32("store32 byte1", byte_at(s32buf, 1), 86);
+    fails = fails + assert_eq_i32("store32 byte2", byte_at(s32buf, 2), 52);
+    fails = fails + assert_eq_i32("store32 byte3", byte_at(s32buf, 3), 18);
+
+    let mbuf: str = make_buffer(8);
+    memset(ptr(mbuf), 65, 8);
+    fails = fails + assert_eq_i32("memset byte0", byte_at(mbuf, 0), 65);
+    fails = fails + assert_eq_i32("memset byte7", byte_at(mbuf, 7), 65);
+    memset(ptr(mbuf), 66, 3);
+    fails = fails + assert_eq_i32("memset partial[0]", byte_at(mbuf, 0), 66);
+    fails = fails + assert_eq_i32("memset partial[3] unchanged", byte_at(mbuf, 3), 65);
+
+    let cstr_buf: str = make_buffer(10);
+    store8(ptr(cstr_buf), 72);
+    store8(ptr(cstr_buf) + i32_to_u64(1), 105);
+    store8(ptr(cstr_buf) + i32_to_u64(2), 0);
+    let cstr_result: str = cstr_to_str(ptr(cstr_buf));
+    fails = fails + assert_eq_str("cstr_to_str", cstr_result, "Hi");
+
+    // ── Core (cross-platform, suggested) ──
+    print_raw("\n--- Core ---\n");
+    fails = fails + assert_eq_i32("len hello", len("hello"), 5);
+    fails = fails + assert_eq_i32("len empty", len(""), 0);
+    fails = fails + assert_eq_str("i32_to_str(42)", i32_to_str(42), "42");
+    fails = fails + assert_eq_str("i32_to_str(0)", i32_to_str(0), "0");
+    fails = fails + assert_eq_str("i32_to_str(-7)", i32_to_str(-7), "-7");
+    fails = fails + assert_eq_i32("str_to_i32 123", str_to_i32("123"), 123);
+    fails = fails + assert_eq_i32("str_to_i32 -42", str_to_i32("-42"), -42);
+    fails = fails + assert_eq_str("bool_to_str true", bool_to_str(true), "true");
+    fails = fails + assert_eq_str("bool_to_str false", bool_to_str(false), "false");
+    fails = fails + assert_true("str_to_bool true", str_to_bool("true"));
+    fails = fails + assert_true("str_to_bool false neg", !str_to_bool("false"));
+    fails = fails + assert_eq_i32("to_u8(255)", to_u8(255), 255);
+    fails = fails + assert_eq_i32("to_u8(256)", to_u8(256), 0);
+
+    // ── Strings (cross-platform, suggested) ──
+    print_raw("\n--- Strings ---\n");
+    fails = fails + assert_true("starts_with", starts_with("hello world", "hello"));
+    fails = fails + assert_true("!starts_with", !starts_with("hello", "world"));
+    fails = fails + assert_true("ends_with", ends_with("hello world", "world"));
+    fails = fails + assert_true("str_contains", str_contains("hello world", "lo wo"));
+    fails = fails + assert_true("!str_contains", !str_contains("hello", "xyz"));
+    fails = fails + assert_eq_i32("str_find hit", str_find("hello world", "world"), 6);
+    fails = fails + assert_eq_i32("str_find miss", str_find("hello", "xyz"), -1);
+    fails = fails + assert_eq_str("substr", substr("hello world", 6), "world");
+    fails = fails + assert_eq_str("substr_len", substr_len("hello world", 0, 5), "hello");
+    fails = fails + assert_eq_str("str_trim", str_trim("  hi  "), "hi");
+    fails = fails + assert_eq_str("str_upper", str_upper("hello"), "HELLO");
+    fails = fails + assert_eq_str("str_lower", str_lower("HELLO"), "hello");
+    fails = fails + assert_eq_str("str_reverse", str_reverse("abc"), "cba");
+    fails = fails + assert_eq_str("str_replace", str_replace("aXbXc", "X", "Y"), "aYbYc");
+    fails = fails + assert_eq_i32("str_count", str_count("aXbXcX", "X"), 3);
+    fails = fails + assert_true("str_equals", str_equals("abc", "abc"));
+    fails = fails + assert_true("!str_equals", !str_equals("abc", "def"));
+    fails = fails + assert_eq_str("str_pad_left", str_pad_left("42", 5, "0"), "00042");
+    fails = fails + assert_eq_str("str_pad_right", str_pad_right("42", 5, "0"), "42000");
+
+    // ── Summary ──
+    print_raw("\n");
+    if (fails > 0) {
+        print_raw(i32_to_str(fails) + " test(s) FAILED\n");
+        return 1;
+    }
+    print_raw("All tests PASSED\n");
+    return 0;
+}

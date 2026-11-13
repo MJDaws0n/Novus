@@ -1,0 +1,459 @@
+module driver_main;
+
+import model;
+import runtime;
+
+fn driver_run() -> i32 {
+    {
+        let items_1: []str = slice_Str(CompilerState.arguments, 1, len(CompilerState.arguments));
+        let count_3: i32 = len(items_1);
+        for (let index_2: i32 = 0; index_2 < count_3; index_2++) {
+            let arg: str = items_1[index_2];
+            if ((arg == "--debug")) {
+                CompilerState.driver_debugMode = true;
+                break;
+            }
+        }
+    }
+    runtime_print(("Novus Compiler V0.3.1"));
+    runtime_print(("Made by MJDawson. https://mjdawson.net & https://github.com/MJDaws0n"));
+    driver_printDebug("Using debug mode.");
+    if ((len(CompilerState.arguments) < 2)) {
+        runtime_print(("Usage: novus [flags] <file>"));
+        runtime_print(("Flags:"));
+        runtime_print(("  --target=os/arch      Cross-compile (e.g. linux/amd64)"));
+        runtime_print(("  --heap-size=<size>     Set heap size (e.g. 64m, 128M, 1g) [default: 64m]"));
+        runtime_print(("  --gc-entries=<N>       Set max GC entries [default: 65536]"));
+        runtime_print(("  --asm-only             Only emit assembly, don't assemble/link"));
+        runtime_print(("  --skip-link            Assemble but don't link"));
+        runtime_print(("  --debug                Enable debug output"));
+        return 1;
+    }
+    let filePath: str = "";
+    {
+        let items_4: []str = slice_Str(CompilerState.arguments, 1, len(CompilerState.arguments));
+        let count_6: i32 = len(items_4);
+        for (let index_5: i32 = 0; index_5 < count_6; index_5++) {
+            let arg: str = items_4[index_5];
+            if (((len(arg) > 0) && (byte_at(arg, 0) != 45))) {
+                filePath = arg;
+                break;
+            }
+        }
+    }
+    if ((filePath == "")) {
+        runtime_print(("Usage: novus [flags] <file>"));
+        return 1;
+    }
+    driver_printDebug(("Building using: " + filePath));
+    if (!(driver_fileExists(filePath))) {
+        runtime_print(("Error: File does not exist."));
+        return 1;
+    }
+    driver_printDebug(("File found, building: " + filePath));
+    let fileContent: str = "";
+    let fileContentError: str = "";
+    let result_7: ResultStrStr = driver_getFileContent(filePath);
+    fileContent = result_7.value0;
+    fileContentError = result_7.value1;
+    if ((fileContentError != "")) {
+        runtime_print(("Error: Could not read file."));
+        runtime_print((("Error details: " + fileContentError)));
+        return 1;
+    }
+    driver_printDebug("Starting lexing process...");
+    let result_8: ResultArraylexertokenArraylexerlexerror = lexer_Lex(fileContent);
+    let tokens: []LexerToken = result_8.value0;
+    let lexErrors: []LexerLexError = result_8.value1;
+    if ((len(lexErrors) > 0)) {
+        runtime_print(("Lexing errors:"));
+        {
+            let items_9: []LexerLexError = lexErrors;
+            let count_11: i32 = len(items_9);
+            for (let index_10: i32 = 0; index_10 < count_11; index_10++) {
+                let e: LexerLexError = copy_LexerLexError(items_9[index_10]);
+                runtime_print_raw(("  " + lexer_LexError_Error(e) + "\n"));
+            }
+        }
+        return 1;
+    }
+    driver_printDebug(("Lexing complete. " + runtime_string_i32(len(tokens)) + " tokens produced."));
+    driver_printTokens(tokens);
+    driver_printDebug("Starting parsing process...");
+    let result_12: ResultAstnodeArrayparserparseerror = parser_Parse(tokens);
+    let program: AstNode = result_12.value0;
+    let parseErrors: []ParserParseError = result_12.value1;
+    if ((len(parseErrors) > 0)) {
+        runtime_print(("Parse errors:"));
+        {
+            let items_13: []ParserParseError = parseErrors;
+            let count_15: i32 = len(items_13);
+            for (let index_14: i32 = 0; index_14 < count_15; index_14++) {
+                let e: ParserParseError = copy_ParserParseError(items_13[index_14]);
+                runtime_print_raw(("  " + parser_ParseError_Error(e) + "\n"));
+            }
+        }
+        return 1;
+    }
+    driver_printDebug("Parsing complete. No errors.");
+    if ((len(program.CompTimeBlocks) > 0)) {
+        let compTimeTarget: CodegenTarget = driver_resolveTargetFromArgs();
+        if ((compTimeTarget == null)) {
+            let result_16: ResultCodegentargetStr = codegen_HostTarget();
+            compTimeTarget = result_16.value0;
+        }
+        if ((compTimeTarget != null)) {
+            let map_17: MapStrStr = new MapStrStr();
+            MapStrStr_put(map_17, "os", codegen_Target_OSName(compTimeTarget));
+            MapStrStr_put(map_17, "arch", codegen_Target_ArchName(compTimeTarget));
+            let constants: MapStrStr = map_17;
+            driver_printDebug(("Resolving " + runtime_string_i32(len(program.CompTimeBlocks)) + " #if block(s) with os=" + MapStrStr_get(constants, "os") + ", arch=" + MapStrStr_get(constants, "arch")));
+            ast_ResolveCompTimeBlocks(program, constants);
+        }
+    }
+    driver_printDebug("--- AST ---");
+    if (CompilerState.driver_debugMode) { driver_printDebug(ast_DebugString(program)); }
+    driver_printDebug("--- End AST ---");
+    let importedFuncs: []SemanticImportedFunc = [];
+    if ((len(program.Imports) > 0)) {
+        driver_printDebug("Resolving imports...");
+        let resolver: ImportsResolver = imports_NewResolver(filePath);
+        let compTimeTarget: CodegenTarget = driver_resolveTargetFromArgs();
+        if ((compTimeTarget == null)) {
+            let result_18: ResultCodegentargetStr = codegen_HostTarget();
+            compTimeTarget = result_18.value0;
+        }
+        if ((compTimeTarget != null)) {
+            resolver.TargetOS = codegen_Target_OSName(compTimeTarget);
+            resolver.TargetArch = codegen_Target_ArchName(compTimeTarget);
+        }
+        let result_19: ResultAstnodeArrayimportsresolveerror = imports_Resolver_Resolve(resolver, program, filePath);
+        let mergedProgram: AstNode = result_19.value0;
+        let resolveErrors: []ImportsResolveError = result_19.value1;
+        if ((len(resolveErrors) > 0)) {
+            runtime_print(("Import errors:"));
+            {
+                let items_20: []ImportsResolveError = resolveErrors;
+                let count_22: i32 = len(items_20);
+                for (let index_21: i32 = 0; index_21 < count_22; index_21++) {
+                    let e: ImportsResolveError = items_20[index_21];
+                    runtime_print_raw(("  " + imports_ResolveError_Error(e) + "\n"));
+                }
+            }
+            return 1;
+        }
+        {
+            let conflictErrors: []ImportsResolveError = imports_Resolver_CheckAliasConflicts(resolver);
+            if ((len(conflictErrors) > 0)) {
+                runtime_print(("Import errors:"));
+                {
+                    let items_23: []ImportsResolveError = conflictErrors;
+                    let count_25: i32 = len(items_23);
+                    for (let index_24: i32 = 0; index_24 < count_25; index_24++) {
+                        let e: ImportsResolveError = items_23[index_24];
+                        runtime_print_raw(("  " + imports_ResolveError_Error(e) + "\n"));
+                    }
+                }
+                return 1;
+            }
+        }
+        {
+            let items_26: []ImportsImportedModule = imports_Resolver_GetModules(resolver);
+            let count_28: i32 = len(items_26);
+            for (let index_27: i32 = 0; index_27 < count_28; index_27++) {
+                let mod: ImportsImportedModule = items_26[index_27];
+                {
+                    let items_29: []AstNode = mod.Functions;
+                    let count_31: i32 = len(items_29);
+                    for (let index_30: i32 = 0; index_30 < count_31; index_30++) {
+                        let fn_value: AstNode = items_29[index_30];
+                        importedFuncs = append_Semanticimportedfunc(importedFuncs, make_SemanticImportedFunc_1(fn_value, mod.Alias));
+                    }
+                }
+            }
+        }
+        program = mergedProgram;
+        driver_printDebug(("Import resolution complete. " + runtime_string_i32(len(importedFuncs)) + " imported functions."));
+    }
+    driver_printDebug("Starting semantic analysis...");
+    let diagnostics: []SemanticDiagnostic = semantic_AnalyzeWithImports(program, importedFuncs);
+    let semWarnings: []SemanticDiagnostic = [];
+    let semErrors: []SemanticDiagnostic = [];
+    {
+        let items_32: []SemanticDiagnostic = diagnostics;
+        let count_34: i32 = len(items_32);
+        for (let index_33: i32 = 0; index_33 < count_34; index_33++) {
+            let d: SemanticDiagnostic = copy_SemanticDiagnostic(items_32[index_33]);
+            if ((d.Severity == 1)) {
+                semWarnings = append_Semanticdiagnostic(semWarnings, copy_SemanticDiagnostic(d));
+            } else {
+                semErrors = append_Semanticdiagnostic(semErrors, copy_SemanticDiagnostic(d));
+            }
+        }
+    }
+    if ((len(semWarnings) > 0)) {
+        runtime_print(("Warnings:"));
+        {
+            let items_35: []SemanticDiagnostic = semWarnings;
+            let count_37: i32 = len(items_35);
+            for (let index_36: i32 = 0; index_36 < count_37; index_36++) {
+                let w: SemanticDiagnostic = copy_SemanticDiagnostic(items_35[index_36]);
+                runtime_print_raw(("  " + semantic_Diagnostic_Error(w) + "\n"));
+            }
+        }
+    }
+    if ((len(semErrors) > 0)) {
+        runtime_print(("Semantic errors:"));
+        {
+            let items_38: []SemanticDiagnostic = semErrors;
+            let count_40: i32 = len(items_38);
+            for (let index_39: i32 = 0; index_39 < count_40; index_39++) {
+                let e: SemanticDiagnostic = copy_SemanticDiagnostic(items_38[index_39]);
+                runtime_print_raw(("  " + semantic_Diagnostic_Error(e) + "\n"));
+            }
+        }
+        return 1;
+    }
+    driver_printDebug("Semantic analysis complete. No errors.");
+    driver_printDebug("Starting code generation...");
+    let codegenOpts: CodegenOptions = codegen_DefaultOptions();
+    codegenOpts.Verbose = CompilerState.driver_debugMode;
+    codegenOpts.SkipIRDump = !CompilerState.driver_debugMode;
+    {
+        let items_41: []str = slice_Str(CompilerState.arguments, 1, len(CompilerState.arguments));
+        let count_43: i32 = len(items_41);
+        for (let index_42: i32 = 0; index_42 < count_43; index_42++) {
+            let arg: str = items_41[index_42];
+            {
+                let choice_44: str = arg;
+                if ((choice_44 == "--asm-only")) {
+                    codegenOpts.AsmOnly = true;
+                } else if ((choice_44 == "--skip-link")) {
+                    codegenOpts.SkipLink = true;
+                }
+            }
+        }
+    }
+    {
+        let items_45: []str = slice_Str(CompilerState.arguments, 1, len(CompilerState.arguments));
+        let count_47: i32 = len(items_45);
+        for (let index_46: i32 = 0; index_46 < count_47; index_46++) {
+            let arg: str = items_45[index_46];
+            if (((len(arg) > 9) && (runtime_substring(arg, 0, 9) == "--target="))) {
+                let parts: []str = driver_splitTarget(runtime_substring(arg, 9, len(arg)));
+                if ((len(parts) == 2)) {
+                    let result_48: ResultCodegentargetStr = codegen_ResolveTarget(parts[0], parts[1]);
+                    let target: CodegenTarget = result_48.value0;
+                    let err: str = result_48.value1;
+                    if ((err != "")) {
+                        runtime_print_raw(("Error: " + err + "\n"));
+                        return 1;
+                    }
+                    codegenOpts.Target = target;
+                } else {
+                    runtime_print_raw(("Error: invalid target format " + runtime_quote(runtime_substring(arg, 9, len(arg))) + " (expected os/arch, e.g. linux/amd64)\n"));
+                    return 1;
+                }
+            }
+        }
+    }
+    {
+        let items_49: []str = slice_Str(CompilerState.arguments, 1, len(CompilerState.arguments));
+        let count_51: i32 = len(items_49);
+        for (let index_50: i32 = 0; index_50 < count_51; index_50++) {
+            let arg: str = items_49[index_50];
+            if (((len(arg) > 12) && (runtime_substring(arg, 0, 12) == "--heap-size="))) {
+                let val: str = runtime_substring(arg, 12, len(arg));
+                let result_52: ResultI64Str = driver_parseSize(val);
+                let size: i64 = result_52.value0;
+                let err: str = result_52.value1;
+                if ((err != "")) {
+                    runtime_print_raw(("Error: invalid heap size " + runtime_quote(val) + ": " + err + "\n"));
+                    return 1;
+                }
+                codegenOpts.HeapSize = size;
+                driver_printDebug(("Heap size set to " + runtime_string_i64(size) + " bytes"));
+            }
+        }
+    }
+    {
+        let items_53: []str = slice_Str(CompilerState.arguments, 1, len(CompilerState.arguments));
+        let count_55: i32 = len(items_53);
+        for (let index_54: i32 = 0; index_54 < count_55; index_54++) {
+            let arg: str = items_53[index_54];
+            if (((len(arg) > 13) && (runtime_substring(arg, 0, 13) == "--gc-entries="))) {
+                let val: str = runtime_substring(arg, 13, len(arg));
+                let result_56: ResultI32Str = runtime_strconv_Atoi(val);
+                let n: i32 = result_56.value0;
+                let err: str = result_56.value1;
+                if (((err != "") || (n < 1))) {
+                    runtime_print_raw(("Error: invalid gc-entries value " + runtime_quote(val) + "\n"));
+                    return 1;
+                }
+                codegenOpts.GCEntries = n;
+                driver_printDebug(("GC entries set to " + runtime_string_i32(n)));
+            }
+        }
+    }
+    let result_57: ResultCodegenresultStr = codegen_Generate(program, codegenOpts);
+    let result: CodegenResult = result_57.value0;
+    let err: str = result_57.value1;
+    if ((err != "")) {
+        runtime_print_raw(("Codegen error: " + err + "\n"));
+        return 1;
+    }
+    runtime_print(("Build artifacts:"));
+    if ((result.AsmFile != "")) {
+        runtime_print_raw(("  Assembly: " + result.AsmFile + "\n"));
+    }
+    if ((result.ObjFile != "")) {
+        runtime_print_raw(("  Object:   " + result.ObjFile + "\n"));
+    }
+    if ((result.ExeFile != "")) {
+        runtime_print_raw(("  Binary:   " + result.ExeFile + "\n"));
+    }
+    if ((len(result.Warnings) > 0)) {
+        runtime_print("");
+        {
+            let items_58: []str = result.Warnings;
+            let count_60: i32 = len(items_58);
+            for (let index_59: i32 = 0; index_59 < count_60; index_59++) {
+                let w: str = items_58[index_59];
+                runtime_print_raw(("  " + w + "\n"));
+            }
+        }
+    }
+    driver_printDebug("Compilation pipeline finished successfully.");
+    return 0;
+}
+
+fn driver_splitTarget(s: str) -> []str {
+    {
+        let items_61: str = s;
+        let count_63: i32 = len(items_61);
+        for (let index_62: i32 = 0; index_62 < count_63; index_62++) {
+            let i: i32 = index_62;
+            let c: i32 = byte_at(items_61, index_62);
+            if ((c == 47)) {
+                return [runtime_substring(s, 0, i), runtime_substring(s, (i + 1), len(s))];
+            }
+        }
+    }
+    return [s];
+}
+
+// resolveTargetFromArgs checks for --target=os/arch in CLI args and returns
+// the corresponding Target, or nil if no --target flag is present.
+fn driver_resolveTargetFromArgs() -> CodegenTarget {
+    {
+        let items_64: []str = slice_Str(CompilerState.arguments, 1, len(CompilerState.arguments));
+        let count_66: i32 = len(items_64);
+        for (let index_65: i32 = 0; index_65 < count_66; index_65++) {
+            let arg: str = items_64[index_65];
+            if (((len(arg) > 9) && (runtime_substring(arg, 0, 9) == "--target="))) {
+                let parts: []str = driver_splitTarget(runtime_substring(arg, 9, len(arg)));
+                if ((len(parts) == 2)) {
+                    let result_67: ResultCodegentargetStr = codegen_ResolveTarget(parts[0], parts[1]);
+                    let target: CodegenTarget = result_67.value0;
+                    let err: str = result_67.value1;
+                    if ((err == "")) {
+                        return target;
+                    }
+                }
+            }
+        }
+    }
+    return null;
+}
+
+/**
+* Prints a debug message to the console.
+* @param message The message to print.
+ */
+fn driver_printDebug(message: str) -> void {
+    if (!(CompilerState.driver_debugMode)) {
+        return;
+    }
+    runtime_print((("[DEBUG] " + message)));
+}
+
+fn driver_printTokens(tokens: []LexerToken) -> void {
+    if (!(CompilerState.driver_debugMode)) {
+        return;
+    }
+    {
+        let items_68: []LexerToken = tokens;
+        let count_70: i32 = len(items_68);
+        for (let index_69: i32 = 0; index_69 < count_70; index_69++) {
+            let token: LexerToken = items_68[index_69];
+            runtime_print_raw(("[DEBUG] Token: " + token.Type + ", Value: " + token.Value + ", Line: " + runtime_string_i32(token.Line) + ", Column: " + runtime_string_i32(token.Column) + "\n"));
+        }
+    }
+}
+
+/**
+* Checks if a file exists at the given path.
+* @param filePath The path to the file to check.
+* @return true if the file exists, false otherwise.
+ */
+fn driver_fileExists(filePath: str) -> bool {
+    {
+        let result_71: ResultFileinfoStr = runtime_os_Stat(filePath);
+        let err: str = result_71.value1;
+        if (runtime_os_IsNotExist(err)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+* Gets content of a file at the given path.
+* @param filePath The path to the file to read.
+* @return The content of the file as a string, or an error if the file cannot be read.
+ */
+fn driver_getFileContent(filePath: str) -> ResultStrStr {
+    let result_72: ResultStrStr = runtime_os_ReadText(filePath);
+    let content: str = result_72.value0;
+    let err: str = result_72.value1;
+    if ((err != "")) {
+        return make_ResultStrStr("", err);
+    }
+    return make_ResultStrStr(content, "");
+}
+
+// parseSize parses a size string like "64m", "128M", "1g", "67108864" into bytes.
+fn driver_parseSize(s: str) -> ResultI64Str {
+    if ((len(s) == 0)) {
+        return make_ResultI64Str(0, ("empty size"));
+    }
+    let last: i32 = byte_at(s, (len(s) - 1));
+    let multiplier: i64 = 1;
+    let numStr: str = s;
+    {
+        let choice_73: i32 = last;
+        if ((choice_73 == 107) || (choice_73 == 75)) {
+            multiplier = 1024;
+            numStr = runtime_substring(s, 0, (len(s) - 1));
+        } else if ((choice_73 == 109) || (choice_73 == 77)) {
+            multiplier = 1048576;
+            numStr = runtime_substring(s, 0, (len(s) - 1));
+        } else if ((choice_73 == 103) || (choice_73 == 71)) {
+            multiplier = 1073741824;
+            numStr = runtime_substring(s, 0, (len(s) - 1));
+        }
+    }
+    let result_74: ResultI64Str = runtime_strconv_ParseInt(numStr, 10, 64);
+    let n: i64 = result_74.value0;
+    let err: str = result_74.value1;
+    if ((err != "")) {
+        return make_ResultI64Str(0, err);
+    }
+    if ((n <= 0)) {
+        return make_ResultI64Str(0, ("size must be positive"));
+    }
+    if ((n > (9223372036854775807 / multiplier))) {
+        return make_ResultI64Str(0, ("size too large"));
+    }
+    return make_ResultI64Str((n * multiplier), "");
+}

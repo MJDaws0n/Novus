@@ -1,0 +1,27 @@
+module time_memory;
+import ../../lib/std;
+class Item { pub let value: i32 = 0; }
+fn main() -> i32 {
+    let item: Item = new Item();
+    let tick: i64 = get_time_ns();
+    print(format_signed(tick));
+    print(i32_to_str(item.value));
+    if (item.value != 0) { return 1; }
+    let buffer: str = make_buffer(24);
+    memset(ptr(buffer), 90, 24);
+    store_word(ptr(buffer) + 8, 81985529216486895);
+    if (!check_word_store(ptr(buffer))) { return 2; }
+    store64(ptr(buffer) + 8, 81985529216486895);
+    if (load64(ptr(buffer) + 8) != 81985529216486895) { return 5; }
+    if (byte_at(buffer, 7) != 90 || byte_at(buffer, 16) != 90) { return 3; }
+    return 0;
+}
+
+#if(arch == "x86") {
+    fn check_word_store(buffer: u64) -> bool {
+        return load32(buffer + 8) == -1985229329 && load8(buffer + 12) == 90;
+    }
+}
+#if(arch != "x86") {
+    fn check_word_store(buffer: u64) -> bool { return load64(buffer + 8) == 81985529216486895; }
+}

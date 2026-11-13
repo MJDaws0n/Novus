@@ -1,0 +1,410 @@
+// ---------------------------------------------------------------------------
+// file_io/darwin_amd64 - File I/O for macOS x86-64
+// ---------------------------------------------------------------------------
+
+module file_io_darwin_amd64;
+import ../../support;
+
+
+// ---------------------------------------------------------------------------
+// File descriptor operations
+// ---------------------------------------------------------------------------
+
+fn file_open(path: str, flags: i32, mode: i32) -> i32 {
+    mov(rdi, path);
+    mov(rsi, flags);
+    mov(rdx, mode);
+    mov(rax, 0x2000005);
+    syscall();
+    let failed: bool = getflag(carry);
+    let returned: u64 = getreg(rax);
+    if (failed) { return -1; }
+    return u64_to_i32(returned);
+}
+
+fn file_open_read(path: str) -> i32 {
+    return file_open(path, 0, 0);
+}
+
+fn file_open_write(path: str) -> i32 {
+    return file_open(path, 1537, 420);
+}
+
+fn file_close(fd: i32) -> void {
+    mov(rdi, fd);
+    mov(rax, 0x2000006);
+    syscall();
+}
+
+fn file_read(fd: i32, buf_addr: u64, count: i32) -> i32 {
+    mov(rdi, fd);
+    mov(rsi, buf_addr);
+    mov(rdx, count);
+    mov(rax, 0x2000003);
+    syscall();
+    let failed: bool = getflag(carry);
+    let returned: u64 = getreg(rax);
+    if (failed) { return -1; }
+    return u64_to_i32(returned);
+}
+
+fn file_write(fd: i32, buf_addr: u64, count: i32) -> i32 {
+    mov(rdi, fd);
+    mov(rsi, buf_addr);
+    mov(rdx, count);
+    mov(rax, 0x2000004);
+    syscall();
+    let failed: bool = getflag(carry);
+    let returned: u64 = getreg(rax);
+    if (failed) { return -1; }
+    return u64_to_i32(returned);
+}
+
+fn file_write_str(fd: i32, s: str) -> i32 {
+    return file_write(fd, ptr(s), len(s));
+}
+
+fn file_seek(fd: i32, offset: u64, whence: i32) -> i64 {
+    mov(rdi, fd);
+    mov(rsi, offset);
+    mov(rdx, whence);
+    mov(rax, 0x20000C7);
+    syscall();
+    let failed: bool = getflag(carry);
+    let returned: u64 = getreg(rax);
+    if (failed) { return -1; }
+    return u64_to_i64(returned);
+}
+
+fn file_size(fd: i32) -> u64 {
+    let cur: i64 = file_seek(fd, 0, 1);
+    let end: i64 = file_seek(fd, 0, 2);
+    file_seek(fd, i64_to_u64(cur), 0);
+    return i64_to_u64(end);
+}
+
+// ---------------------------------------------------------------------------
+// Pipe helpers
+// ---------------------------------------------------------------------------
+
+fn pipe_create(res: []i32) -> void {
+    mov(rax, 0x200002A);
+    syscall();
+    let rfd: i32 = u64_to_i32(getreg(rax));
+    let wfd: i32 = u64_to_i32(getreg(rdx));
+    res[0] = rfd;
+    res[1] = wfd;
+}
+
+fn dup2(oldfd: i32, newfd: i32) -> void {
+    mov(rdi, oldfd);
+    mov(rsi, newfd);
+    mov(rax, 0x200005A);
+    syscall();
+}
+
+// ---------------------------------------------------------------------------
+// Path manipulation
+// ---------------------------------------------------------------------------
+
+fn path_ext(path: str) -> str {
+    let plen: i32 = len(path);
+    let dot: i32 = -1;
+    let i: i32 = 0;
+    while (i < plen) {
+        if (path[i] == '.') { dot = i; }
+        i = i + 1;
+    }
+    if (dot < 0) { return ""; }
+    return substr(path, dot);
+}
+
+fn path_stem(path: str) -> str {
+    let plen: i32 = len(path);
+    let dot: i32 = -1;
+    let i: i32 = 0;
+    while (i < plen) {
+        if (path[i] == '.') { dot = i; }
+        i = i + 1;
+    }
+    if (dot < 0) { return path; }
+    return substr_len(path, 0, dot);
+}
+
+fn path_insert_suffix(path: str, suffix: str) -> str {
+    let stem: str = path_stem(path);
+    let ext: str = path_ext(path);
+    return stem + suffix + ext;
+}
+
+fn path_dir(path: str) -> str {
+    let last_slash: i32 = -1;
+    let i: i32 = 0;
+    let slen: i32 = len(path);
+    while (i < slen) {
+        if (path[i] == '/') {
+            last_slash = i;
+        }
+        i = i + 1;
+    }
+    if (last_slash < 0) {
+        return ".";
+    }
+    if (last_slash == 0) {
+        return "/";
+    }
+    return substr_len(path, 0, last_slash);
+}
+
+fn path_basename(path: str) -> str {
+    let plen: i32 = len(path);
+    let last_sep: i32 = -1;
+    let i: i32 = 0;
+    while (i < plen) {
+        if (path[i] == '/') { last_sep = i; }
+        i = i + 1;
+    }
+    if (last_sep < 0) { return path; }
+    return substr(path, last_sep + 1);
+}
+
+// ---------------------------------------------------------------------------
+// Directory & permission helpers
+// ---------------------------------------------------------------------------
+
+fn sys_mkdir(path: str, mode: i32) -> i32 {
+    mov(rdi, path);
+    mov(rsi, mode);
+    mov(rax, 0x2000088);
+    syscall();
+    return u64_to_i32(getreg(rax));
+}
+
+fn sys_chmod(path: str, mode: i32) -> i32 {
+    mov(rdi, path);
+    mov(rsi, mode);
+    mov(rax, 0x200000F);
+    syscall();
+    return u64_to_i32(getreg(rax));
+}
+
+fn file_exists(path: str) -> bool {
+    mov(rdi, path);
+    mov(rsi, 0);
+    mov(rax, 0x2000021);
+    syscall();
+    let result: i32 = u64_to_i32(getreg(rax));
+    if (result == 0) { return true; }
+    return false;
+}
+
+fn file_delete(path: str) -> i32 {
+    mov(rdi, path);
+    mov(rax, 0x200000A);
+    syscall();
+    return u64_to_i32(getreg(rax));
+}
+
+// ---------------------------------------------------------------------------
+// Read an entire file into a string
+// ---------------------------------------------------------------------------
+
+fn read_file(path: str) -> str {
+    let fd: i32 = file_open_read(path);
+    if (fd < 0) { return ""; }
+    let sz: u64 = file_size(fd);
+    let isz: i32 = u64_to_i32(sz);
+    if (isz <= 0) {
+        file_close(fd);
+        return "";
+    }
+    let buf: str = make_buffer(isz + 1);
+    let nr: i32 = file_read(fd, ptr(buf), isz);
+    file_close(fd);
+    if (nr <= 0) { return ""; }
+    return copy_bytes(ptr(buf), nr);
+}
+
+// ---------------------------------------------------------------------------
+// Write a string to a file (creates or truncates)
+// ---------------------------------------------------------------------------
+
+fn write_file(path: str, content: str) -> i32 {
+    let fd: i32 = file_open_write(path);
+    if (fd < 0) { return -1; }
+    file_write_str(fd, content);
+    file_close(fd);
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Append a string to a file (creates if doesn't exist)
+// O_WRONLY=1 | O_CREAT=0x200 | O_APPEND=0x0008 = 0x209 = 521
+// ---------------------------------------------------------------------------
+
+fn file_append(path: str, content: str) -> i32 {
+    let fd: i32 = file_open(path, 521, 420);
+    if (fd < 0) { return -1; }
+    file_write_str(fd, content);
+    file_close(fd);
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Memory-mapped file I/O
+// ---------------------------------------------------------------------------
+
+fn file_mmap_read(fd: i32, size: u64) -> u64 {
+    mov(rdi, 0);        // addr = NULL (let kernel choose)
+    mov(rsi, size);     // length
+    mov(rdx, 1);        // PROT_READ
+    mov(r10, 2);        // MAP_PRIVATE
+    mov(r8, fd);
+    mov(r9, 0);        // offset
+    mov(rax, 0x20000C5);  // SYS_mmap
+    syscall();
+    return getreg(rax);
+}
+
+fn file_munmap(addr: u64, size: u64) -> void {
+    mov(rdi, addr);
+    mov(rsi, size);
+    mov(rax, 0x2000049);  // SYS_munmap
+    syscall();
+}
+
+// ---------------------------------------------------------------------------
+// Change working directory
+// ---------------------------------------------------------------------------
+
+fn file_chdir(path: str) -> i32 {
+    mov(rdi, path);
+    mov(rax, 0x200000C);  // SYS_chdir = 12
+    syscall();
+    return u64_to_i32(getreg(rax));
+}
+
+// ---------------------------------------------------------------------------
+// Rename / move a file
+// ---------------------------------------------------------------------------
+
+fn file_rename(old_path: str, new_path: str) -> i32 {
+    mov(rdi, old_path);
+    mov(rsi, new_path);
+    mov(rax, 0x2000080);  // SYS_rename = 128
+    syscall();
+    return u64_to_i32(getreg(rax));
+}
+
+// ---------------------------------------------------------------------------
+// Stat helpers — check if path is a directory
+// Uses access() with F_OK, then tries to open as directory
+// ---------------------------------------------------------------------------
+
+fn dir_exists(path: str) -> bool { return file_info(path).directory; }
+
+// ---------------------------------------------------------------------------
+// Create directory tree (mkdir -p equivalent)
+// ---------------------------------------------------------------------------
+
+fn mkdirp(path: str) -> i32 {
+    let plen: i32 = len(path);
+    let i: i32 = 1;
+    while (i < plen) {
+        if (path[i] == '/') {
+            let sub: str = substr_len(path, 0, i);
+            sys_mkdir(sub, 493);  // 0755
+        }
+        i = i + 1;
+    }
+    return sys_mkdir(path, 493);
+}
+
+// ---------------------------------------------------------------------------
+// Copy a file from src to dst
+// ---------------------------------------------------------------------------
+
+fn file_copy(src_path: str, dst_path: str) -> i32 {
+    let content: str = read_file(src_path);
+    if (len(content) == 0) { return -1; }
+    return write_file(dst_path, content);
+}
+
+// ---------------------------------------------------------------------------
+// Get file extension without dot
+// ---------------------------------------------------------------------------
+
+fn path_ext_no_dot(path: str) -> str {
+    let ext: str = path_ext(path);
+    if (len(ext) > 0) {
+        if (ext[0] == '.') {
+            return substr(ext, 1);
+        }
+    }
+    return ext;
+}
+
+// ---------------------------------------------------------------------------
+// Join two path components
+// ---------------------------------------------------------------------------
+
+fn path_join(a: str, b: str) -> str {
+    let al: i32 = len(a);
+    if (al == 0) { return b; }
+    if (len(b) == 0) { return a; }
+    if (a[al - 1] == '/') {
+        return a + b;
+    }
+    return a + "/" + b;
+}
+
+
+fn file_info(path: str) -> FileInfo {
+    let info: FileInfo = new FileInfo();
+    info.path = path;
+    let buffer: str = make_buffer(256);
+    mov(rdi, path);
+    mov(rsi, buffer);
+    mov(rax, 0x2000152);
+    syscall();
+    let status: u64 = getreg(rax);
+    if (status != 0) {
+        if (status == 2 || status == 20) { info.error = "file not found: " + path; }
+        else { info.error = "cannot stat file: " + path; }
+        return info;
+    }
+    info.exists = true;
+    info.directory = (load32(ptr(buffer) + 4) & 61440) == 16384;
+    info.size = load64(ptr(buffer) + 96);
+    return info;
+}
+
+fn canonical_path(path: str) -> PathResult {
+    let result: PathResult = new PathResult();
+    let descriptor: i32 = file_open_read(path);
+    if (descriptor < 0) { result.error = "cannot resolve path: " + path; return result; }
+    let buffer: str = make_buffer(1024);
+    mov(rdi, descriptor);
+    mov(rsi, 50);
+    mov(rdx, buffer);
+    mov(rax, 0x200005c);
+    syscall();
+    let status: u64 = getreg(rax);
+    file_close(descriptor);
+    if (status != 0) { result.error = "cannot resolve path: " + path; return result; }
+    result.path = cstr_to_str(ptr(buffer));
+    return result;
+}
+
+fn working_directory() -> PathResult { return canonical_path("."); }
+
+
+fn file_execute_access(path: str) -> bool {
+    mov(rdi, path);
+    mov(rsi, 1);
+    mov(rax, 0x2000021);
+    syscall();
+    let result: i32 = u64_to_i32(getreg(rax));
+    if (result == 0) { return true; }
+    return false;
+}

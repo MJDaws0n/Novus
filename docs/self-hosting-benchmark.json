@@ -1,0 +1,104 @@
+{
+  "recorded_at": "2026-11-13T20:33:54.695429+00:00",
+  "host": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "target": "darwin/arm64",
+  "warmups": 1,
+  "measured_runs": 6,
+  "maximum_large_ratio": 1.25,
+  "includes": "fresh process, parsing, imports, semantic analysis, assembly generation, assembly and linking",
+  "compiler_sha256": {
+    "go": "91d14532d7231947f8dba81cf385024d987a19da15e41aeb07a0dc0fdcb1a016",
+    "novus": "f8508675878954f34c6f9dd2911cae06a0c388eff2d4bf6b7752977ee150eb01"
+  },
+  "applications": {
+    "small": {
+      "source": "/Users/max/Documents/ChatGPT/Novus/compiler/tests/classes/main.nov",
+      "source_sha256": "5c70811db7a4f2905d271f44119014cbcfd6bfe5790623ec91df8ba757406e5f",
+      "seconds": {
+        "go": [
+          0.17969545900268713,
+          0.17995087500094087,
+          0.17177929199897335,
+          0.177319541999168,
+          0.17172750000099768,
+          0.17725716600034502
+        ],
+        "novus": [
+          0.1901814579978236,
+          0.18534324999927776,
+          0.1841180000010354,
+          0.18435720799971023,
+          0.18156495899893343,
+          0.18123374999777297
+        ]
+      },
+      "median_seconds": {
+        "go": 0.1772883539997565,
+        "novus": 0.1842376040003728
+      },
+      "novus_go_ratio": 1.03919744215475,
+      "passed": true
+    },
+    "large": {
+      "source": "/Users/max/Documents/ChatGPT/Novus/compiler/build/benchmarks/nox/main.nov",
+      "source_sha256": "72be3d71c46b714bc1f0f9d3dade1b6d3139b2ba6c73b701c66f8f1bb882b219",
+      "seconds": {
+        "go": [
+          2.1603891250015295,
+          1.964245833001769,
+          1.959361249999347,
+          1.9347331669996493,
+          1.9425350839992461,
+          1.9362242500028515
+        ],
+        "novus": [
+          2.1678767910016177,
+          1.9648676670003624,
+          1.9776033330017526,
+          1.9788129169974127,
+          1.9837707910010067,
+          2.1169012909995217
+        ]
+      },
+      "median_seconds": {
+        "go": 1.9509481669992965,
+        "novus": 1.9812918539992097
+      },
+      "novus_go_ratio": 1.0155533024983354,
+      "passed": true
+    },
+    "compiler": {
+      "source": "/Users/max/Documents/ChatGPT/Novus/compiler/main.nov",
+      "source_sha256": "c698bd37323c9dfee0f523f721d78e5646760dd7e30f88c0da159685c4a12179",
+      "seconds": {
+        "go": [
+          16.866245332999824,
+          17.04898545800097,
+          16.74150516699956,
+          16.578125916999852,
+          17.662145708000025,
+          16.709332165999513
+        ],
+        "novus": [
+          11.94575283299855,
+          11.293854209001438,
+          11.759170917001029,
+          11.119560833998548,
+          11.723059832998842,
+          11.271365625001636
+        ]
+      },
+      "median_seconds": {
+        "go": 16.80387524999969,
+        "novus": 11.50845702100014
+      },
+      "novus_go_ratio": 0.6848692250914176,
+      "passed": true
+    }
+  },
+  "compiler_source_sha256": "413951380227fc607fafbbb3a5e43368bf94567fb3c8f49459d40ecf1449daa4",
+  "bundled_libraries_sha256": "0bd2ce58ff141aee27b24890b31cbce749d3995acb4e48b0fb641766230d608c",
+  "passed": true,
+  "compiler_source_commit": "977a6ae4777ad5e6816cd5f00264a16f56400d67",
+  "nox_source_commit": "af635107c6e8d81d1059062fecdbb96e408fc43f"
+}
