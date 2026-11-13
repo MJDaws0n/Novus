@@ -7,8 +7,10 @@ fn file_info(path: str) -> FileInfo {
     let info: FileInfo = new FileInfo();
     info.path = path;
     let buffer: str = make_buffer(256);
-    if (file_statx(path, ptr(buffer)) != 0) {
-        info.error = "cannot stat file: " + path;
+    let status: i32 = file_statx(path, ptr(buffer));
+    if (status != 0) {
+        if (status == -2 || status == -20) { info.error = "file not found: " + path; }
+        else { info.error = "cannot stat file: " + path; }
         return info;
     }
     info.exists = true;

@@ -11,7 +11,13 @@ fn file_info(path: str) -> FileInfo {
     let info: FileInfo = new FileInfo();
     info.path = path;
     let handle: u64 = metadata_handle(path);
-    if (handle == 18446744073709551615) { info.error = "cannot stat file: " + path; return info; }
+    if (handle == 18446744073709551615) {
+        win_call("GetLastError");
+        let status: u64 = getreg(rax);
+        if (status == 2 || status == 3) { info.error = "file not found: " + path; }
+        else { info.error = "cannot stat file: " + path; }
+        return info;
+    }
     let buffer: str = make_buffer(64);
     win_call("GetFileInformationByHandle", handle, buffer);
     let ok: u64 = getreg(rax);
@@ -46,6 +52,18 @@ fn working_directory() -> PathResult {
     win_call("GetCurrentDirectoryA", 32768, buffer);
     let size: i32 = u64_to_i32(getreg(rax));
     if (size <= 0 || size >= 32768) { result.error = "cannot read working directory"; return result; }
+    result.path = copy_bytes(ptr(buffer), size);
+    return result;
+}
+
+fn path_absolute(path: str) -> PathResult {
+    let result: PathResult = new PathResult();
+    let buffer: str = make_buffer(32768);
+    let input: str = path;
+    if (input == "") { input = "."; }
+    win_call("GetFullPathNameA", input, 32768, buffer, 0);
+    let size: i32 = u64_to_i32(getreg(rax));
+    if (size <= 0 || size >= 32768) { result.error = "cannot resolve absolute path: " + path; return result; }
     result.path = copy_bytes(ptr(buffer), size);
     return result;
 }

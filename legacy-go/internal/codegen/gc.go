@@ -46,23 +46,26 @@ fn _novus_gc_sift(table: WORD, root_index: WORD, size: WORD) -> void {
 }
 fn _novus_gc_index(table: WORD, size: WORD, pages: WORD) -> void {
     store_word(pages, 0);
-    for (let i: WORD = 0; i < 65536; i++) { store_word(pages + WORDSIZE + i * ENTRYSIZE, 0); }
+    for (let i: WORD = 0; i < 262144; i++) { store_word(pages + WORDSIZE + i * ENTRYSIZE, 0); }
+    let used: WORD = 0;
     for (let i: WORD = 0; i < size; i++) {
         let entry: WORD = table + i * ENTRYSIZE;
         let first: WORD = LOAD(entry) / 4096;
         let last: WORD = (LOAD(entry) + LOAD(entry + WORDSIZE) - 1) / 4096;
         for (let page: WORD = first; page <= last; page++) {
             let key: WORD = page + 1;
-            let bucket: WORD = page & 65535;
+            let bucket: WORD = ((page ^ (page >> 18)) * 2654435761) & 262143;
             let probes: WORD = 0;
             let slot: WORD = pages + WORDSIZE + bucket * ENTRYSIZE;
             while (LOAD(slot) != 0 && LOAD(slot) != key) {
-                bucket = (bucket + 1) & 65535;
+                bucket = (bucket + 1) & 262143;
                 slot = pages + WORDSIZE + bucket * ENTRYSIZE;
                 probes++;
-                if (probes == 65536) { store_word(pages, 1); return; }
+                if (probes == 262144) { store_word(pages, 1); return; }
             }
             if (LOAD(slot) == 0) {
+                used++;
+                if (used >= 196608) { store_word(pages, 1); return; }
                 store_word(slot, key);
                 store_word(slot + WORDSIZE, i);
             }
@@ -79,11 +82,11 @@ fn _novus_gc_mark(table: WORD, size: WORD, queue: WORD, candidate: WORD) -> void
     let pages: WORD = queue + PAGEOFFSET;
     if (LOAD(pages) == 0) {
         let page: WORD = candidate / 4096;
-        let bucket: WORD = page & 65535;
+        let bucket: WORD = ((page ^ (page >> 18)) * 2654435761) & 262143;
         let slot: WORD = pages + WORDSIZE + bucket * ENTRYSIZE;
         while (LOAD(slot) != page + 1) {
             if (LOAD(slot) == 0) { return; }
-            bucket = (bucket + 1) & 65535;
+            bucket = (bucket + 1) & 262143;
             slot = pages + WORDSIZE + bucket * ENTRYSIZE;
         }
         low = LOAD(slot + WORDSIZE);
@@ -204,7 +207,7 @@ func collectorData(mod *IRModule, target *Target) string {
 		for _, global := range mod.Globals {
 			out.WriteString("    dq " + target.Sym(global.Name) + "\n")
 		}
-		out.WriteString(fmt.Sprintf("section .bss\n%s: resb %d\nsection .text\n", queue, (target.GCEntries+1+65536*3+1)*target.PtrSize))
+		out.WriteString(fmt.Sprintf("section .bss\n%s: resb %d\nsection .text\n", queue, (target.GCEntries+1+262144*3+1)*target.PtrSize))
 	} else {
 		section := ".data\n"
 		text := ".text\n"
@@ -220,7 +223,7 @@ func collectorData(mod *IRModule, target *Target) string {
 		for _, global := range mod.Globals {
 			out.WriteString("    " + directive + " " + target.Sym(global.Name) + "\n")
 		}
-		out.WriteString(fmt.Sprintf(".lcomm %s, %d\n%s", queue, (target.GCEntries+1+65536*3+1)*target.PtrSize, text))
+		out.WriteString(fmt.Sprintf(".lcomm %s, %d\n%s", queue, (target.GCEntries+1+262144*3+1)*target.PtrSize, text))
 	}
 	return out.String()
 }

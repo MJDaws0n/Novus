@@ -1365,12 +1365,16 @@ func (l *Lowerer) builtinMov(e *ast.CallExpr) Operand {
 			l.emit(IRInstr{Op: IRMov, Dst: dstOp, Src1: l.slotMem(slot)})
 			return None()
 		}
+		if l.physRegs[ident.Name] {
+			l.emit(IRInstr{Op: IRMov, Dst: dstOp, Src1: l.lowerExpr(ident)})
+			return None()
+		}
 	}
 	// Expressions may invoke functions or use any scratch register. Preserve
 	// the explicit register state while evaluating them, then install the result.
 	var saved []string
 	switch e.Args[1].(type) {
-	case *ast.IdentExpr, *ast.IntLitExpr, *ast.StringLitExpr, *ast.BoolLitExpr:
+	case *ast.IntLitExpr, *ast.StringLitExpr, *ast.BoolLitExpr:
 	default:
 		if dstOp.Kind == OpPhysReg {
 			switch l.target.Arch {
@@ -1413,9 +1417,7 @@ func (l *Lowerer) builtinLea(e *ast.CallExpr) Operand {
 	if ident, ok := srcArg.(*ast.IdentExpr); ok {
 		if !l.physRegs[ident.Name] {
 			// Local variable: load its value (which is already a pointer for strings).
-			srcOp := l.lowerExpr(srcArg)
-			l.emit(IRInstr{Op: IRMov, Dst: dstOp, Src1: srcOp})
-			return None()
+			return l.builtinMov(e)
 		}
 	}
 	srcOp := l.lowerExpr(e.Args[1])
@@ -1492,13 +1494,7 @@ func (l *Lowerer) builtinNop(e *ast.CallExpr) Operand {
 
 // setreg(regname, value)
 func (l *Lowerer) builtinSetReg(e *ast.CallExpr) Operand {
-	if len(e.Args) != 2 {
-		return None()
-	}
-	dstOp := l.lowerExpr(e.Args[0])
-	srcOp := l.lowerExpr(e.Args[1])
-	l.emit(IRInstr{Op: IRSetReg, Dst: dstOp, Src1: srcOp})
-	return None()
+	return l.builtinMov(e)
 }
 
 // getreg(regname) -> value

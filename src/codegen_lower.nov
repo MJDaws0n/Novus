@@ -1467,7 +1467,11 @@ fn codegen_Lowerer_builtinMov(l: CodegenLowerer, e: AstNode) -> CodegenOperand {
         }
     }
     let saved: []str = [];
-    if (dstOp.Kind == 2 && argument.Kind != "IdentExpr" && argument.Kind != "IntLitExpr" && argument.Kind != "StringLitExpr" && argument.Kind != "BoolLitExpr") {
+    if (argument.Kind == "IdentExpr" && MapStrBool_get(l.physRegs, argument.Name)) {
+        codegen_Lowerer_emit(l, make_CodegenIRInstr_2(0, dstOp, codegen_Lowerer_lowerExpr(l, argument)));
+        return codegen_None();
+    }
+    if (dstOp.Kind == 2 && argument.Kind != "IntLitExpr" && argument.Kind != "StringLitExpr" && argument.Kind != "BoolLitExpr") {
         if (l.target.Arch == 2) {
             for (let i: i32 = 0; i < 29; i++) { array_append(saved, "x" + runtime_string_i32(i)); }
             array_append(saved, "x30");
@@ -1498,9 +1502,7 @@ fn codegen_Lowerer_builtinLea(l: CodegenLowerer, e: AstNode) -> CodegenOperand {
         let ok: bool = (srcArg != null && srcArg.Kind == "IdentExpr");
         if (ok) {
             if (!(MapStrBool_get(l.physRegs, ident.Name))) {
-                let srcOp: CodegenOperand = copy_CodegenOperand(codegen_Lowerer_lowerExpr(l, srcArg));
-                codegen_Lowerer_emit(l, make_CodegenIRInstr_2(0, copy_CodegenOperand(dstOp), copy_CodegenOperand(srcOp)));
-                return copy_CodegenOperand(codegen_None());
+                return codegen_Lowerer_builtinMov(l, e);
             }
         }
     }
@@ -1577,13 +1579,7 @@ fn codegen_Lowerer_builtinNop(l: CodegenLowerer, e: AstNode) -> CodegenOperand {
 
 // setreg(regname, value)
 fn codegen_Lowerer_builtinSetReg(l: CodegenLowerer, e: AstNode) -> CodegenOperand {
-    if ((len(e.Args) != 2)) {
-        return copy_CodegenOperand(codegen_None());
-    }
-    let dstOp: CodegenOperand = copy_CodegenOperand(codegen_Lowerer_lowerExpr(l, e.Args[0]));
-    let srcOp: CodegenOperand = copy_CodegenOperand(codegen_Lowerer_lowerExpr(l, e.Args[1]));
-    codegen_Lowerer_emit(l, make_CodegenIRInstr_2(36, copy_CodegenOperand(dstOp), copy_CodegenOperand(srcOp)));
-    return copy_CodegenOperand(codegen_None());
+    return codegen_Lowerer_builtinMov(l, e);
 }
 
 // getreg(regname) -> value

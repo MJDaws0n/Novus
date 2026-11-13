@@ -16,10 +16,14 @@ fn main(argc: i32, argv: u64) -> i32 {
     let info: FileInfo = file_info(path);
     if (!info.exists || info.directory || info.size != 33000) { return 5; }
     if (!file_info(folder).directory || file_info(path + ".missing").exists) { return 6; }
+    if (!file_error_is_not_found(file_info(path + ".missing").error)) { return 13; }
+    if (file_error_is_not_found("permission denied")) { return 14; }
     let resolved: PathResult = canonical_path(path);
     if (resolved.error != "" || !file_info(resolved.path).exists) { return 7; }
     let cwd: PathResult = working_directory();
     if (cwd.error != "" || !file_info(cwd.path).directory) { return 8; }
+    let absolute: PathResult = path_absolute(path);
+    if (absolute.error != "" || !file_info(absolute.path).exists) { return 15; }
     let started: i64 = get_time_ns();
     let process: ProcessCommand = process_command(argv_get(argv, 1), ["space in argument", "quote\"and\\slash\\", "", "semicolon; dollar$ ampersand&"]);
     let result: ProcessResult = command_run(process, true);

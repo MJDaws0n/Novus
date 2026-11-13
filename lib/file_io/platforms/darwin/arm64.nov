@@ -368,7 +368,11 @@ fn file_info(path: str) -> FileInfo {
     mov(x16, 0x2000152);
     syscall();
     let status: u64 = getreg(x0);
-    if (status != 0) { info.error = "cannot stat file: " + path; return info; }
+    if (status != 0) {
+        if (status == 2 || status == 20) { info.error = "file not found: " + path; }
+        else { info.error = "cannot stat file: " + path; }
+        return info;
+    }
     info.exists = true;
     info.directory = (load32(ptr(buffer) + 4) & 61440) == 16384;
     info.size = load64(ptr(buffer) + 96);

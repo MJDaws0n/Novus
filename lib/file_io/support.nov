@@ -20,6 +20,10 @@ class PathResult {
     pub let error: str = "";
 }
 
+fn file_error_is_not_found(error: str) -> bool {
+    return starts_with(error, "file not found: ");
+}
+
 fn read_all_bytes(path: str) -> FileReadResult {
     let result: FileReadResult = new FileReadResult();
     let descriptor: i32 = file_open_read(path);
@@ -55,6 +59,16 @@ fn path_clean(path: str) -> str {
     if (path_separator() == "\\") { normalized = str_replace(path, "\\", "/"); }
     let prefix: str = "";
     let rooted: bool = starts_with(normalized, "/");
+    if (path_separator() == "\\" && starts_with(normalized, "//")) {
+        let server_end: i32 = 2;
+        while (server_end < len(normalized) && byte_at(normalized, server_end) != 47) { server_end++; }
+        let share_end: i32 = server_end + 1;
+        while (share_end < len(normalized) && byte_at(normalized, share_end) != 47) { share_end++; }
+        if (share_end > len(normalized)) { share_end = len(normalized); }
+        prefix = str_replace(substr_len(normalized, 0, share_end), "/", "\\");
+        normalized = substr(normalized, share_end);
+        rooted = true;
+    }
     if (path_separator() == "\\" && len(normalized) >= 2 && byte_at(normalized, 1) == 58) {
         prefix = substr_len(normalized, 0, 2);
         normalized = substr(normalized, 2);
@@ -73,6 +87,7 @@ fn path_clean(path: str) -> str {
     if (rooted) { prefix = prefix + path_separator(); }
     let clean: str = prefix + string_join(result, path_separator());
     if (clean == "") { return "."; }
+    if (!rooted && len(clean) == 2 && byte_at(clean, 1) == 58) { return clean + "."; }
     return clean;
 }
 
@@ -93,18 +108,10 @@ fn path_parent(path: str) -> str {
     let index: i32 = str_last_find(clean, path_separator());
     if (index < 0) { return "."; }
     if (index == 0) { return path_separator(); }
+    if (path_separator() == "\\" && index == 2 && byte_at(clean, 1) == 58) { return substr_len(clean, 0, 3); }
     return substr_len(clean, 0, index);
 }
 
-fn path_absolute(path: str) -> PathResult {
-    let result: PathResult = new PathResult();
-    result.path = path_clean(path);
-    if (starts_with(result.path, path_separator()) || (path_separator() == "\\" && len(result.path) > 2 && byte_at(result.path, 1) == 58)) { return result; }
-    let directory: PathResult = working_directory();
-    if (directory.error != "") { return directory; }
-    result.path = path_join_all([directory.path, path]);
-    return result;
-}
 
 fn create_directories(path: str, mode: i32 = 493) -> str {
     let info: FileInfo = file_info(path);
@@ -123,6 +130,15 @@ fn create_directories(path: str, mode: i32 = 493) -> str {
 
 #if(os != "windows") {
     fn path_separator() -> str { return "/"; }
+    fn path_absolute(path: str) -> PathResult {
+        let result: PathResult = new PathResult();
+        result.path = path_clean(path);
+        if (starts_with(result.path, "/")) { return result; }
+        let directory: PathResult = working_directory();
+        if (directory.error != "") { return directory; }
+        result.path = path_join_all([directory.path, path]);
+        return result;
+    }
 }
 #if(os == "windows") {
     fn path_separator() -> str { return "\\"; }
