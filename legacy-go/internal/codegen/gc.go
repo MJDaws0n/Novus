@@ -166,7 +166,7 @@ func withCollector(mod *IRModule, target *Target) *IRModule {
 	}
 	word, load := "i64", "load64"
 	if target.PtrSize == 4 {
-		word, load = "i32", "load32"
+		word, load = "u32", "load32"
 	}
 	source := strings.ReplaceAll(collectorSource, "WORDSIZE", fmt.Sprintf("%d", target.PtrSize))
 	source = strings.ReplaceAll(source, "ENTRYSIZE", fmt.Sprintf("%d", target.PtrSize*3))
@@ -306,9 +306,9 @@ func (e *x86Emitter) emitFastCollector() {
 	w := e.b
 	w.WriteString(collectorData(e.mod, e.target))
 	w.WriteString("_novus_gc_collect:\n    pushal\n    movl %esp, %eax\n")
-	w.WriteString("    pushl $_novus_gc_queue\n    pushl $_novus_gc_freelist\n    pushl _novus_gc_stack_bottom\n    pushl %eax\n")
-	w.WriteString(fmt.Sprintf("    pushl $%d\n", len(e.mod.Globals)))
-	w.WriteString("    pushl $_novus_gc_roots\n    pushl _novus_gc_count\n    pushl $_novus_gc_table\n    call _novus_gc_trace\n    addl $32, %esp\n")
+	w.WriteString("    pushl $0\n    pushl $_novus_gc_queue\n    pushl $0\n    pushl $_novus_gc_freelist\n    pushl $0\n    pushl _novus_gc_stack_bottom\n    pushl $0\n    pushl %eax\n")
+	w.WriteString(fmt.Sprintf("    pushl $0\n    pushl $%d\n", len(e.mod.Globals)))
+	w.WriteString("    pushl $0\n    pushl $_novus_gc_roots\n    pushl $0\n    pushl _novus_gc_count\n    pushl $0\n    pushl $_novus_gc_table\n    call _novus_gc_trace\n    addl $64, %esp\n")
 	w.WriteString("    movl %eax, _novus_gc_count\n    leal 256(,%eax,2), %eax\n    movl %eax, _novus_gc_threshold\n    popal\n    ret\n")
 }
 

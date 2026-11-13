@@ -23,11 +23,11 @@ fn codegen_Lowerer_lowerArgs(l: CodegenLowerer, operands: []CodegenOperand, args
 fn codegen_Lowerer_lowerNewExpr(l: CodegenLowerer, e: AstNode) -> CodegenOperand {
     let args: []CodegenOperand = codegen_Lowerer_lowerArgs(l, [], e.Args, slice_Str(MapStrArraystr_get(l.funcParamTypes, e.Constructor), 1, len(MapStrArraystr_get(l.funcParamTypes, e.Constructor))));
     let instance: CodegenOperand = copy_CodegenOperand(codegen_VReg(codegen_Lowerer_freshVReg(l)));
-    let size: i64 = runtime_to_i64((runtime_max((16 / l.target.PtrSize), e.Slots) * l.target.PtrSize));
+    let size: i64 = runtime_to_i64((runtime_max(2, e.Slots) * 8));
     codegen_Lowerer_emit(l, make_CodegenIRInstr_2(74, copy_CodegenOperand(instance), copy_CodegenOperand(codegen_Imm(size))));
     {
         let slot: i32 = 0;
-        for (; (slot < (runtime_to_i32(size) / l.target.PtrSize)); slot++) {
+        for (; (slot < (runtime_to_i32(size) / 8)); slot++) {
             let address: CodegenOperand = copy_CodegenOperand(codegen_Lowerer_slotAddress(l, copy_CodegenOperand(instance), slot));
             codegen_Lowerer_emit(l, make_CodegenIRInstr_3(3, copy_CodegenOperand(codegen_Imm(0)), copy_CodegenOperand(address)));
         }
@@ -41,7 +41,7 @@ fn codegen_Lowerer_slotAddress(l: CodegenLowerer, base: CodegenOperand, slot: i3
         return copy_CodegenOperand(base);
     }
     let addr: CodegenOperand = copy_CodegenOperand(codegen_VReg(codegen_Lowerer_freshVReg(l)));
-    codegen_Lowerer_emit(l, make_CodegenIRInstr_5(6, copy_CodegenOperand(addr), copy_CodegenOperand(base), copy_CodegenOperand(codegen_Imm(runtime_to_i64((slot * l.target.PtrSize))))));
+    codegen_Lowerer_emit(l, make_CodegenIRInstr_5(6, copy_CodegenOperand(addr), copy_CodegenOperand(base), copy_CodegenOperand(codegen_Imm(runtime_to_i64((slot * 8))))));
     return copy_CodegenOperand(addr);
 }
 

@@ -19,10 +19,10 @@ func (l *Lowerer) lowerArgs(operands []Operand, args []ast.Expr, types []string)
 func (l *Lowerer) lowerNewExpr(e *ast.NewExpr) Operand {
 	args := l.lowerArgs(nil, e.Args, l.funcParamTypes[e.Constructor][1:])
 	instance := VReg(l.freshVReg())
-	size := int64(max(16/l.target.PtrSize, e.Slots) * l.target.PtrSize)
+	size := int64(max(2, e.Slots) * 8)
 	l.emit(IRInstr{Op: IRHeapAlloc, Dst: instance, Src1: Imm(size)})
 	// Recycled blocks may contain old values and GC pointers.
-	for slot := 0; slot < int(size)/l.target.PtrSize; slot++ {
+	for slot := 0; slot < int(size)/8; slot++ {
 		address := l.slotAddress(instance, slot)
 		l.emit(IRInstr{Op: IRStore, Src1: Imm(0), Src2: address})
 	}
@@ -35,7 +35,7 @@ func (l *Lowerer) slotAddress(base Operand, slot int) Operand {
 		return base
 	}
 	addr := VReg(l.freshVReg())
-	l.emit(IRInstr{Op: IRAdd, Dst: addr, Src1: base, Src2: Imm(int64(slot * l.target.PtrSize))})
+	l.emit(IRInstr{Op: IRAdd, Dst: addr, Src1: base, Src2: Imm(int64(slot * 8))})
 	return addr
 }
 

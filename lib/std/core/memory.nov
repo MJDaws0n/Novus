@@ -29,7 +29,8 @@ fn cstr_to_str(addr: u64) -> str {
 fn byte_at(s: str, index: i32) -> i32 { return load8(ptr(s) + i32_to_u64(index)); }
 #if(arch == "x86") {
     fn argv_get(argv: u64, index: i32) -> str {
-        return cstr_to_str(i32_to_u64(load32(argv + i32_to_u64(index) * 4)));
+        let address: u64 = i32_to_u64(load32(argv + i32_to_u64(index) * 4)) & 4294967295;
+        return cstr_to_str(address);
     }
 }
 #if(arch != "x86") {

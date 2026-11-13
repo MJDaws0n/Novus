@@ -275,7 +275,7 @@ fn codegen_Lowerer_varSlot(l: CodegenLowerer, name: str) -> i32 {
 // slotMem returns a memory operand addressing the given stack slot.
 // Slots are addressed as [rbp - (slot+1)*ptrSize].
 fn codegen_Lowerer_slotMem(l: CodegenLowerer, slot: i32) -> CodegenOperand {
-    let offset: i64 = -(runtime_to_i64((((slot + 1)) * l.target.PtrSize)));
+    let offset: i64 = -(runtime_to_i64((((slot + 1)) * 8)));
     return copy_CodegenOperand(codegen_Mem(l.target.BasePointer, offset));
 }
 
@@ -398,7 +398,7 @@ fn codegen_Lowerer_lowerFunction(l: CodegenLowerer, fn_value: AstNode, startup: 
     if (((len(irFn.Instrs) == 0) || (irFn.Instrs[(len(irFn.Instrs) - 1)].Op != 32))) {
         codegen_Lowerer_emit(l, make_CodegenIRInstr_26(32));
     }
-    let frameSize: i32 = (irFn.Locals * l.target.PtrSize);
+    let frameSize: i32 = (irFn.Locals * 8);
     if (((frameSize % 16) != 0)) {
         frameSize = (frameSize + (16 - ((frameSize % 16))));
     }
@@ -1658,7 +1658,7 @@ fn codegen_Lowerer_builtinStoreWord(l: CodegenLowerer, e: AstNode) -> CodegenOpe
     if (len(e.Args) != 2) { return codegen_None(); }
     let address: CodegenOperand = codegen_Lowerer_lowerExpr(l, e.Args[0]);
     let value: CodegenOperand = codegen_Lowerer_lowerExpr(l, e.Args[1]);
-    codegen_Lowerer_emit(l, make_CodegenIRInstr_3(3, copy_CodegenOperand(value), copy_CodegenOperand(address)));
+    codegen_Lowerer_emit(l, make_CodegenIRInstr_5(3, codegen_Imm(runtime_to_i64(l.target.PtrSize)), value, address));
     return codegen_None();
 }
 

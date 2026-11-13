@@ -2,7 +2,7 @@ name: Compiler
 
 on:
   push:
-    branches: [main, self-hosted-novus, 'release/v*']
+    branches: [main, self-hosted-novus, self-hosted-linux32, 'release/v*']
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -34,6 +34,7 @@ jobs:
           - { runner: ubuntu-24.04-arm, target: linux/arm64 }
           - { runner: windows-2025, target: windows/amd64 }
           - { runner: windows-11-arm, target: windows/arm64 }
+          - { runner: ubuntu-24.04, target: linux/386 }
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -56,7 +57,7 @@ jobs:
           "$env:ProgramFiles\NASM" >> $env:GITHUB_PATH
       - name: Bootstrap, reproduce, and test
         run: python scripts/bootstrap.py --package --target=${{ matrix.target }}
-      - name: Exercise retained 32-bit Linux backend
+      - name: Exercise 32-bit cross compilation
         if: matrix.target == 'linux/amd64'
         run: python scripts/test-x86.py --compiler dist/novus-linux-amd64
       - name: Save verified release binary
