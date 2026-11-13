@@ -7,6 +7,7 @@ import (
 	"novus/internal/parser"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -73,6 +74,8 @@ type Resolver struct {
 	// allModules is the ordered list of all resolved modules (depth-first).
 	allModules []*ImportedModule
 
+	classScopes map[string][]ast.ClassBinding
+
 	// TargetOS and TargetArch are used to resolve #if blocks in imported files.
 	TargetOS   string
 	TargetArch string
@@ -86,8 +89,9 @@ func NewResolver(sourceFilePath string) *Resolver {
 		absPath = evaled
 	}
 	return &Resolver{
-		BaseDir:  filepath.Dir(absPath),
-		resolved: make(map[string]*ImportedModule),
+		BaseDir:     filepath.Dir(absPath),
+		resolved:    make(map[string]*ImportedModule),
+		classScopes: make(map[string][]ast.ClassBinding),
 	}
 }
 
@@ -99,6 +103,10 @@ func NewResolver(sourceFilePath string) *Resolver {
 // but imported functions are added before the original functions.
 func (r *Resolver) Resolve(prog *ast.Program, sourceFile string) (*ast.Program, []*ResolveError) {
 	absSource, _ := filepath.Abs(sourceFile)
+	if canonical, err := filepath.EvalSymlinks(absSource); err == nil {
+		absSource = canonical
+	}
+	markSource(prog, absSource)
 	r.importStack = append(r.importStack, absSource)
 
 	for _, imp := range prog.Imports {
@@ -117,13 +125,21 @@ func (r *Resolver) Resolve(prog *ast.Program, sourceFile string) (*ast.Program, 
 
 	// Build the merged program: imported functions first, then original functions.
 	merged := &ast.Program{
-		Module:  prog.Module,
-		Imports: prog.Imports,
-		Pos:     prog.Pos,
+		Module:      prog.Module,
+		SourceFile:  absSource,
+		ClassScopes: r.classScopes,
+		Imports:     prog.Imports,
+		Pos:         prog.Pos,
 	}
 
+	// Emit each class declaration once, even through multiple aliases.
+	seenPrograms := make(map[string]bool)
 	// Add all imported functions (in import order, depth-first).
 	for _, mod := range r.allModules {
+		if !seenPrograms[mod.FilePath] {
+			merged.Classes = append(merged.Classes, mod.Program.Classes...)
+			seenPrograms[mod.FilePath] = true
+		}
 		for _, fn := range mod.Functions {
 			fn.Imported = true
 			merged.Functions = append(merged.Functions, fn)
@@ -138,6 +154,7 @@ func (r *Resolver) Resolve(prog *ast.Program, sourceFile string) (*ast.Program, 
 
 	// Add the original file's globals.
 	merged.Globals = append(merged.Globals, prog.Globals...)
+	merged.Classes = append(merged.Classes, prog.Classes...)
 
 	// Add the original file's functions.
 	merged.Functions = append(merged.Functions, prog.Functions...)
@@ -245,7 +262,7 @@ func (r *Resolver) resolveImport(imp *ast.ImportDecl, baseDir string, importerFi
 			SelectFns: imp.SelectFns,
 			Program:   existing.Program,
 		}
-		mod.Functions = r.filterFunctions(existing.Program.Functions, imp, absPath)
+		mod.Functions = r.importDeclarations(existing.Program, imp, importerFile, absPath)
 		r.allModules = append(r.allModules, mod)
 		return
 	}
@@ -282,6 +299,8 @@ func (r *Resolver) resolveImport(imp *ast.ImportDecl, baseDir string, importerFi
 		ast.ResolveCompTimeBlocks(prog, constants)
 	}
 
+	markSource(prog, absPath)
+
 	// Compute the effective alias: if this import has its own alias use it,
 	// otherwise inherit the root alias from the parent import chain.
 	effectiveAlias := imp.Alias
@@ -309,7 +328,7 @@ func (r *Resolver) resolveImport(imp *ast.ImportDecl, baseDir string, importerFi
 	r.importStack = r.importStack[:len(r.importStack)-1]
 
 	// Filter functions based on selective imports.
-	mod.Functions = r.filterFunctions(prog.Functions, imp, absPath)
+	mod.Functions = r.importDeclarations(prog, imp, importerFile, absPath)
 
 	// Apply mangling for aliased imports: prefix function names with the alias
 	// so that semantic analysis can resolve alias.func() calls.
@@ -391,9 +410,38 @@ func (r *Resolver) deduplicateModules() {
 	}
 }
 
-// filterFunctions returns the subset of functions matching the import's selective list.
-// If no selective list is specified, all functions are returned (excluding main).
-func (r *Resolver) filterFunctions(fns []*ast.FnDecl, imp *ast.ImportDecl, absPath string) []*ast.FnDecl {
+func markSource(prog *ast.Program, path string) {
+	prog.SourceFile = path
+	for _, class := range prog.Classes {
+		class.SourceFile = path
+		for _, method := range class.Methods {
+			method.Fn.SourceFile = path
+		}
+	}
+	for _, fn := range prog.Functions {
+		fn.SourceFile = path
+	}
+	for _, global := range prog.Globals {
+		global.SourceFile = path
+	}
+}
+
+// importDeclarations binds visible classes and returns the selected functions.
+func (r *Resolver) importDeclarations(prog *ast.Program, imp *ast.ImportDecl, importer, absPath string) []*ast.FnDecl {
+	fns := prog.Functions
+	found := make(map[string]bool)
+	for _, class := range prog.Classes {
+		if len(imp.SelectFns) != 0 && !slices.Contains(imp.SelectFns, class.Name) {
+			continue
+		}
+		found[class.Name] = true
+		name := class.Name
+		if imp.Alias != "" {
+			name = imp.Alias + "." + name
+		}
+		r.classScopes[importer] = append(r.classScopes[importer], ast.ClassBinding{Name: name, Class: class, Pos: imp.Pos})
+	}
+
 	var result []*ast.FnDecl
 
 	if len(imp.SelectFns) == 0 {
@@ -412,7 +460,6 @@ func (r *Resolver) filterFunctions(fns []*ast.FnDecl, imp *ast.ImportDecl, absPa
 		wanted[name] = true
 	}
 
-	found := make(map[string]bool)
 	for _, fn := range fns {
 		if wanted[fn.Name] {
 			result = append(result, fn)
@@ -423,7 +470,7 @@ func (r *Resolver) filterFunctions(fns []*ast.FnDecl, imp *ast.ImportDecl, absPa
 	// Report errors for functions that were requested but not found.
 	for _, name := range imp.SelectFns {
 		if !found[name] {
-			r.addError(imp.Pos, absPath, fmt.Sprintf("function %q not found in imported module %q", name, imp.Path))
+			r.addError(imp.Pos, absPath, fmt.Sprintf("function or class %q not found in imported module %q", name, imp.Path))
 		}
 	}
 

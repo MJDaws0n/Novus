@@ -48,6 +48,12 @@ type Program struct {
 	Module         *ModuleDecl
 	Imports        []*ImportDecl
 	Globals        []*GlobalVar
+	Classes        []*ClassDecl
+	ClassScopes    map[string][]ClassBinding // class imports by source file
+	SourceFile     string
+	ClassGlobals   []*GlobalVar
+	ClassFunctions []*FnDecl
+	Startup        []Stmt
 	Functions      []*FnDecl
 	CompTimeBlocks []*CompTimeIf
 	Pos            Position
@@ -61,10 +67,12 @@ func (n *Program) GetPos() Position { return n.Pos }
 
 // GlobalVar represents a top-level variable: let <name>: <type> = <value>;
 type GlobalVar struct {
-	Name  string
-	Type  *TypeExpr
-	Value Expr
-	Pos   Position
+	Name        string
+	Type        *TypeExpr
+	Value       Expr
+	SourceFile  string
+	RuntimeInit bool // the initializer must run before main
+	Pos         Position
 }
 
 func (n *GlobalVar) GetPos() Position { return n.Pos }
@@ -86,18 +94,21 @@ type ImportDecl struct {
 func (n *ImportDecl) GetPos() Position { return n.Pos }
 
 // CompTimeIf represents a compile-time conditional block:
-//   #if(os == "windows") { ... }
+//
+//	#if(os == "windows") { ... }
+//
 // The condition is a simple variable == "value" or variable != "value" check.
 // Available variables: os ("windows", "linux", "darwin"), arch ("amd64", "arm64", "x86").
 // When the condition is true, the body (imports, functions, globals) is merged
 // into the program; otherwise the block is discarded before semantic analysis.
 type CompTimeIf struct {
-	Variable  string       // "os" or "arch"
-	Operator  string       // "==" or "!="
-	Value     string       // e.g. "windows", "amd64"
+	Variable  string // "os" or "arch"
+	Operator  string // "==" or "!="
+	Value     string // e.g. "windows", "amd64"
 	Imports   []*ImportDecl
 	Functions []*FnDecl
 	Globals   []*GlobalVar
+	Classes   []*ClassDecl
 	Pos       Position
 }
 
@@ -126,7 +137,42 @@ type FnDecl struct {
 	ReturnType  *TypeExpr
 	Body        *BlockStmt
 	Pos         Position
+	SourceFile  string
 	Imported    bool // true if this function came from an imported module
+}
+
+// ClassBinding makes a class visible under a name in a source file.
+type ClassBinding struct {
+	Name  string
+	Class *ClassDecl
+	Pos   Position
+}
+
+type ClassDecl struct {
+	Name         string
+	Fields       []*ClassField
+	Initializers []Stmt
+	Methods      []*ClassMethod
+	SourceFile   string
+	Pos          Position
+}
+
+func (n *ClassDecl) GetPos() Position { return n.Pos }
+
+type ClassField struct {
+	Name   string
+	Type   *TypeExpr
+	Value  Expr
+	Public bool
+	Static bool
+	Pos    Position
+}
+
+type ClassMethod struct {
+	Fn          *FnDecl
+	Public      bool
+	Static      bool
+	Constructor bool
 }
 
 func (n *FnDecl) GetPos() Position { return n.Pos }
@@ -306,6 +352,7 @@ func (n *BinaryExpr) exprNode()        {}
 type CallExpr struct {
 	Callee         Expr
 	Args           []Expr
+	Receiver       Expr   // implicit receiver for a resolved instance method
 	ResolvedCallee string // set by semantic analysis; the mangled function name to call
 	Pos            Position
 }
@@ -315,19 +362,39 @@ func (n *CallExpr) exprNode()        {}
 
 // MemberExpr: <object>.<field>
 type MemberExpr struct {
-	Object Expr
-	Field  string
-	Pos    Position
+	Object        Expr
+	Field         string
+	ResolvedField *ResolvedField
+	Pos           Position
 }
 
 func (n *MemberExpr) GetPos() Position { return n.Pos }
 func (n *MemberExpr) exprNode()        {}
 
+// ResolvedField identifies a field's storage after semantic analysis.
+type ResolvedField struct {
+	Type   string
+	Slot   int    // instance field index
+	Global string // nonempty for static storage
+}
+
+type NewExpr struct {
+	ClassName   string
+	Args        []Expr
+	Constructor string
+	Slots       int
+	Pos         Position
+}
+
+func (n *NewExpr) GetPos() Position { return n.Pos }
+func (n *NewExpr) exprNode()        {}
+
 // IndexExpr: <object>[<index>]
 type IndexExpr struct {
-	Object Expr
-	Index  Expr
-	Pos    Position
+	Object    Expr
+	Index     Expr
+	ArrayType string // element type if semantic analysis identified an array
+	Pos       Position
 }
 
 func (n *IndexExpr) GetPos() Position { return n.Pos }
@@ -391,6 +458,7 @@ func ResolveCompTimeBlocks(prog *Program, constants map[string]string) {
 		prog.Imports = append(prog.Imports, ct.Imports...)
 		prog.Functions = append(prog.Functions, ct.Functions...)
 		prog.Globals = append(prog.Globals, ct.Globals...)
+		prog.Classes = append(prog.Classes, ct.Classes...)
 	}
 	prog.CompTimeBlocks = nil // resolved; no longer needed
 }
@@ -442,6 +510,17 @@ func debugProgram(b *strings.Builder, prog *Program, level int) {
 	for _, ct := range prog.CompTimeBlocks {
 		writeIndent(b, level+1)
 		fmt.Fprintf(b, "#if(%s %s %q)\n", ct.Variable, ct.Operator, ct.Value)
+	}
+	for _, class := range prog.Classes {
+		writeIndent(b, level+1)
+		fmt.Fprintf(b, "Class %s\n", class.Name)
+		for _, field := range class.Fields {
+			writeIndent(b, level+2)
+			fmt.Fprintf(b, "Field %s: %s\n", field.Name, field.Type.Name)
+		}
+		for _, method := range class.Methods {
+			debugFnDecl(b, method.Fn, level+2)
+		}
 	}
 	for _, fn := range prog.Functions {
 		debugFnDecl(b, fn, level+1)
@@ -579,6 +658,12 @@ func ExprString(e Expr) string {
 			args[i] = ExprString(a)
 		}
 		return fmt.Sprintf("%s(%s)", ExprString(e.Callee), strings.Join(args, ", "))
+	case *NewExpr:
+		args := make([]string, len(e.Args))
+		for i, arg := range e.Args {
+			args[i] = ExprString(arg)
+		}
+		return "new " + e.ClassName + "(" + strings.Join(args, ", ") + ")"
 	case *MemberExpr:
 		return fmt.Sprintf("%s.%s", ExprString(e.Object), e.Field)
 	case *IndexExpr:

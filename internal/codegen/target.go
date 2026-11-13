@@ -171,6 +171,10 @@ func ResolveTarget(osName, archName string) (*Target, error) {
 		return nil, fmt.Errorf("unsupported architecture: %s", archName)
 	}
 
+	if (t.OS == OS_Darwin && t.Arch == Arch_x86) || (t.OS == OS_Windows && t.Arch == Arch_x86) {
+		return nil, fmt.Errorf("unsupported target: %s/%s", t.OS, t.Arch)
+	}
+
 	// Fill target-specific details.
 	switch t.Arch {
 	case Arch_x86_64:
@@ -282,6 +286,9 @@ func (t *Target) fillARM64() {
 	}
 
 	// ARM64 AAPCS: x0–x7 for arguments
+	if t.OS == OS_Windows {
+		t.StackArgSlotSize = 8
+	}
 	t.ArgRegs = []string{"x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"}
 	t.SyscallArgRegs = []string{"x0", "x1", "x2", "x3", "x4", "x5"}
 

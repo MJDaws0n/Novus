@@ -1,0 +1,40 @@
+module classes;
+
+import ball geometry;
+import ball same;
+import alternate[Ball];
+import wrapper[Wrapper];
+
+class Box {
+    pub static let accesses: i32;
+    pub let ball: geometry.Ball;
+    pub init() {
+        self.ball = new geometry.Ball();
+    }
+    pub fn get_ball() -> geometry.Ball {
+        Box.accesses += 1;
+        return self.ball;
+    }
+}
+
+fn main() -> i32 {
+    let first: geometry.Ball = new geometry.Ball();
+    let alias: same.Ball = first;
+    let second: same.Ball = new same.Ball(3);
+    alias.move(5);
+    alias.move(second);
+    if (first.position() != 23 || second.position() != 3) { return 1; }
+    if (same.Ball.count() != 3 || geometry.Ball.count() != 3) { return 2; }
+    let local: Ball = new Ball();
+    if (local.x != 7) { return 3; }
+    let box: Box = new Box();
+    box.get_ball().radius += 9;
+    if (Box.accesses != 1 || box.ball.radius != 59) { return 4; }
+    first.tags[0]++;
+    if (first.tags[0] != 11 || second.tags[0] != 10) { return 5; }
+    let wrapper: Wrapper = new Wrapper();
+    if (wrapper.ball.position() != 0 || first.name != "ball") { return 6; }
+    gc_collect();
+    if (Wrapper.saved[0].position() != 99) { return 7; }
+    return 0;
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"novus/internal/ast"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -63,10 +64,11 @@ type funcOverloadEntry struct {
 
 // Lower translates an AST Program into an IRModule for the given target.
 func Lower(program *ast.Program, target *Target) *IRModule {
+	functions := slices.Concat(program.Functions, program.ClassFunctions)
 	// Pre-scan function signatures to know return types.
 	funcRetTypes := map[string]string{}
 	funcParamTypes := map[string][]string{}
-	for _, fn := range program.Functions {
+	for _, fn := range functions {
 		key := fn.MangledName
 		if key == "" {
 			key = fn.Name
@@ -85,7 +87,7 @@ func Lower(program *ast.Program, target *Target) *IRModule {
 
 	// Build overload resolution map: plain name → list of (mangledName, paramCount).
 	funcOverloads := map[string][]funcOverloadEntry{}
-	for _, fn := range program.Functions {
+	for _, fn := range functions {
 		irName := fn.MangledName
 		if irName == "" {
 			irName = fn.Name
@@ -108,7 +110,7 @@ func Lower(program *ast.Program, target *Target) *IRModule {
 	}
 
 	// Process global variables.
-	for _, g := range program.Globals {
+	for _, g := range slices.Concat(program.Globals, program.ClassGlobals) {
 		if _, exists := l.globals[g.Name]; exists {
 			continue // skip duplicate global (from overlapping imports)
 		}
@@ -118,7 +120,7 @@ func Lower(program *ast.Program, target *Target) *IRModule {
 	// Track emitted function names to avoid duplicate definitions
 	// (can happen when the same library is imported by multiple modules).
 	emittedFuncs := map[string]bool{}
-	for _, fn := range program.Functions {
+	for _, fn := range functions {
 		irName := fn.MangledName
 		if irName == "" {
 			irName = fn.Name
@@ -127,7 +129,7 @@ func Lower(program *ast.Program, target *Target) *IRModule {
 			continue // skip duplicate
 		}
 		emittedFuncs[irName] = true
-		l.lowerFunction(fn)
+		l.lowerFunction(fn, program.Startup)
 	}
 
 	return l.module
@@ -260,7 +262,7 @@ func (l *Lowerer) lowerGlobal(g *ast.GlobalVar) {
 
 	// Evaluate the initializer if it's a compile-time constant.
 	if g.Value != nil {
-		if strings.HasPrefix(typeName, "[]") {
+		if g.RuntimeInit || strings.HasPrefix(typeName, "[]") {
 			// Arrays use the heap-backed runtime representation, so their data
 			// cannot be encoded in this scalar global slot at assembly time.
 			l.globalInits = append(l.globalInits, g)
@@ -294,7 +296,7 @@ func (l *Lowerer) lowerGlobal(g *ast.GlobalVar) {
 // Function lowering
 // ---------------------------------------------------------------------------
 
-func (l *Lowerer) lowerFunction(fn *ast.FnDecl) {
+func (l *Lowerer) lowerFunction(fn *ast.FnDecl, startup []ast.Stmt) {
 	// Use the mangled name for the IR label (handles overloaded functions).
 	irName := fn.MangledName
 	if irName == "" {
@@ -345,11 +347,12 @@ func (l *Lowerer) lowerFunction(fn *ast.FnDecl) {
 			// x86-64 uses 8-byte pushq, ARM64 uses 16-byte str [sp,#-16]!
 			// On Windows x64, the caller allocates 32 bytes of shadow space
 			// between the return address and the pushed stack args.
+			baseOffset := 2 * l.target.PtrSize
 			shadowSpace := 0
-			if l.target.OS == OS_Windows {
+			if l.target.OS == OS_Windows && l.target.Arch == Arch_x86_64 {
 				shadowSpace = 32
 			}
-			callerOffset := int64(16 + shadowSpace + (i-len(l.target.ArgRegs))*l.target.StackArgSlotSize)
+			callerOffset := int64(baseOffset + shadowSpace + (i-len(l.target.ArgRegs))*l.target.StackArgSlotSize)
 			tmpReg := l.freshVReg()
 			l.emit(IRInstr{
 				Op:   IRLoad,
@@ -367,6 +370,9 @@ func (l *Lowerer) lowerFunction(fn *ast.FnDecl) {
 	// Heap-backed globals are constructed once at program entry. Emitters set
 	// up the allocator and GC before these first IR instructions in main.
 	if fn.Name == l.module.EntryFunc {
+		for _, stmt := range startup {
+			l.lowerStmt(stmt)
+		}
 		for _, g := range l.globalInits {
 			value := l.lowerExprForType(g.Value, typeExprName(g.Type))
 			l.emit(IRInstr{
@@ -571,6 +577,22 @@ func (l *Lowerer) lowerForStmt(s *ast.ForStmt) {
 }
 
 func (l *Lowerer) lowerAssignStmt(s *ast.AssignStmt) {
+	if binary, ok := s.Value.(*ast.BinaryExpr); ok && binary.Left == s.Target {
+		if member, ok := s.Target.(*ast.MemberExpr); ok && member.ResolvedField != nil {
+			addr := l.fieldAddress(member)
+			value := l.lowerBinaryOperands(binary, l.loadField(member.ResolvedField, addr), l.lowerExpr(binary.Right))
+			l.storeField(member.ResolvedField, addr, value)
+			return
+		}
+		if index, ok := s.Target.(*ast.IndexExpr); ok {
+			if elem := l.indexElementType(index); elem != "" {
+				base, at := l.lowerExpr(index.Object), l.lowerExpr(index.Index)
+				value := l.lowerBinaryOperands(binary, l.arrayElement(base, at, elem), l.lowerExpr(binary.Right))
+				l.emit(IRInstr{Op: IRArraySet, Dst: base, Src1: at, Src2: value})
+				return
+			}
+		}
+	}
 	switch target := s.Target.(type) {
 	case *ast.IdentExpr:
 		// Check if it's a physical register.
@@ -592,14 +614,17 @@ func (l *Lowerer) lowerAssignStmt(s *ast.AssignStmt) {
 			l.emit(IRInstr{Op: IRStoreGlobal, Dst: LabelOp(label), Src1: valOp})
 			return
 		}
+	case *ast.MemberExpr:
+		if field := target.ResolvedField; field != nil {
+			l.storeField(field, l.fieldAddress(target), l.lowerExprForType(s.Value, field.Type))
+		}
 	case *ast.IndexExpr:
 		// Check if target is an array or string.
-		objectType := l.exprType(target.Object)
-		if strings.HasPrefix(objectType, "[]") {
+		if elem := l.indexElementType(target); elem != "" {
 			// arr[idx] = val → IRArraySet
 			baseOp := l.lowerExpr(target.Object)
 			idxOp := l.lowerExpr(target.Index)
-			valOp := l.lowerExprForType(s.Value, strings.TrimPrefix(objectType, "[]"))
+			valOp := l.lowerExprForType(s.Value, elem)
 			l.emit(IRInstr{Op: IRArraySet, Dst: baseOp, Src1: idxOp, Src2: valOp})
 		} else {
 			// str[idx] = val → compute base+idx, store a single byte.
@@ -650,7 +675,12 @@ func (l *Lowerer) lowerExpr(expr ast.Expr) Operand {
 		return l.lowerAddressOfExpr(e)
 	case *ast.ArrayLitExpr:
 		return l.lowerArrayLitExpr(e)
+	case *ast.NewExpr:
+		return l.lowerNewExpr(e)
 	case *ast.MemberExpr:
+		if field := e.ResolvedField; field != nil {
+			return l.loadField(field, l.fieldAddress(e))
+		}
 		// Member expressions (import aliases) — return a label if possible.
 		if ident, ok := e.Object.(*ast.IdentExpr); ok {
 			return LabelOp(ident.Name + "." + e.Field)
@@ -821,6 +851,10 @@ func (l *Lowerer) exprType(expr ast.Expr) string {
 		return l.globalTypes[e.Name]
 	case *ast.StringLitExpr:
 		return "str"
+	case *ast.MemberExpr:
+		if e.ResolvedField != nil {
+			return e.ResolvedField.Type
+		}
 	case *ast.IndexExpr:
 		objectType := l.exprType(e.Object)
 		if strings.HasPrefix(objectType, "[]") {
@@ -875,8 +909,10 @@ func (l *Lowerer) charToStr(byteOp Operand) Operand {
 }
 
 func (l *Lowerer) lowerBinaryExpr(e *ast.BinaryExpr) Operand {
-	left := l.lowerExpr(e.Left)
-	right := l.lowerExpr(e.Right)
+	return l.lowerBinaryOperands(e, l.lowerExpr(e.Left), l.lowerExpr(e.Right))
+}
+
+func (l *Lowerer) lowerBinaryOperands(e *ast.BinaryExpr, left, right Operand) Operand {
 
 	// String concatenation: if at least one operand is a string and op is +.
 	if e.Op == "+" {
@@ -1099,14 +1135,11 @@ func (l *Lowerer) lowerCallExpr(e *ast.CallExpr) Operand {
 	// when the callee declares a str parameter.
 	var argOps []Operand
 	paramTypes := l.funcParamTypes[resolvedName]
-	for i, arg := range e.Args {
-		argType := ""
-		if i < len(paramTypes) {
-			argType = paramTypes[i]
-		}
-		argOp := l.lowerExprForType(arg, argType)
-		argOps = append(argOps, argOp)
+	if e.Receiver != nil {
+		argOps = append(argOps, l.lowerExpr(e.Receiver))
+		paramTypes = paramTypes[1:]
 	}
+	argOps = l.lowerArgs(argOps, e.Args, paramTypes)
 
 	dst := l.freshVReg()
 	l.emit(IRInstr{
@@ -1130,20 +1163,10 @@ func (l *Lowerer) lowerCallExpr(e *ast.CallExpr) Operand {
 
 func (l *Lowerer) lowerIndexExpr(e *ast.IndexExpr) Operand {
 	// Determine if the object is an array or string.
-	objectType := l.exprType(e.Object)
-	if strings.HasPrefix(objectType, "[]") {
-		// Array indexing: arr[i] → IRArrayGet
-		objOp := l.lowerExpr(e.Object)
-		idxOp := l.lowerExpr(e.Index)
-		dst := l.freshVReg()
-		l.emit(IRInstr{Op: IRArrayGet, Dst: VReg(dst), Src1: objOp, Src2: idxOp})
-		// Preserve string pointer metadata for []str indexing results.
-		elemType := strings.TrimPrefix(objectType, "[]")
-		if elemType == "str" {
-			l.vregIsStr[dst] = true
-		}
-		return VReg(dst)
+	if elem := l.indexElementType(e); elem != "" {
+		return l.arrayElement(l.lowerExpr(e.Object), l.lowerExpr(e.Index), elem)
 	}
+
 	// String indexing: str[i] → IRStrIndex
 	objOp := l.lowerExpr(e.Object)
 	idxOp := l.lowerExpr(e.Index)
@@ -1153,6 +1176,14 @@ func (l *Lowerer) lowerIndexExpr(e *ast.IndexExpr) Operand {
 }
 
 func (l *Lowerer) lowerAddressOfExpr(e *ast.AddressOfExpr) Operand {
+	if member, ok := e.Operand.(*ast.MemberExpr); ok && member.ResolvedField != nil {
+		if member.ResolvedField.Global != "" {
+			dst := VReg(l.freshVReg())
+			l.emit(IRInstr{Op: IRLea, Dst: dst, Src1: LabelOp(l.globals[member.ResolvedField.Global])})
+			return dst
+		}
+		return l.fieldAddress(member)
+	}
 	// &variable — load the address of the variable's stack slot.
 	if ident, ok := e.Operand.(*ast.IdentExpr); ok {
 		slot := l.varSlot(ident.Name)

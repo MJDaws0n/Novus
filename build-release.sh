@@ -21,8 +21,11 @@ build_one darwin amd64 novus-darwin-amd64
 build_one darwin arm64 novus-darwin-arm64
 build_one linux amd64 novus-linux-amd64
 build_one linux arm64 novus-linux-arm64
+build_one linux 386 novus-linux-386
+build_one windows arm64 novus-windows-arm64.exe
 build_one windows amd64 novus-windows-amd64.exe
 
 echo "release binaries:"
 ls -lh novus-darwin-amd64 novus-darwin-arm64 \
-    novus-linux-amd64 novus-linux-arm64 novus-windows-amd64.exe
+    novus-linux-amd64 novus-linux-arm64 novus-linux-386 \
+    novus-windows-amd64.exe novus-windows-arm64.exe

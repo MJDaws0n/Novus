@@ -147,7 +147,7 @@ func (p *Parser) synchronize() {
 		switch p.peek().Type {
 		case lexer.FN, lexer.LET, lexer.IF, lexer.WHILE, lexer.FOR,
 			lexer.RETURN, lexer.BREAK, lexer.CONTINUE,
-			lexer.MODULE, lexer.IMPORT, lexer.RBRACE:
+			lexer.MODULE, lexer.IMPORT, lexer.CLASS, lexer.RBRACE:
 			return
 		}
 		p.advance()
@@ -207,13 +207,15 @@ func (p *Parser) parseProgram() *ast.Program {
 			if g != nil {
 				prog.Globals = append(prog.Globals, g)
 			}
+		} else if p.check(lexer.CLASS) {
+			prog.Classes = append(prog.Classes, p.parseClass())
 		} else if p.check(lexer.HASH) {
 			ct := p.parseCompTimeIf()
 			if ct != nil {
 				prog.CompTimeBlocks = append(prog.CompTimeBlocks, ct)
 			}
 		} else {
-			p.addError(p.peek(), fmt.Sprintf("expected function or variable declaration, got %s", p.peek().Type))
+			p.addError(p.peek(), fmt.Sprintf("expected function, variable, or class declaration, got %s", p.peek().Type))
 			p.synchronize()
 		}
 	}
@@ -297,10 +299,10 @@ func (p *Parser) parseImportDecl() *ast.ImportDecl {
 	if p.check(lexer.LBRACKET) {
 		p.advance() // consume '['
 		if !p.check(lexer.RBRACKET) {
-			fn := p.expect(lexer.IDENT, "expected function name in import selector")
+			fn := p.expect(lexer.IDENT, "expected function or class name in import selector")
 			selectFns = append(selectFns, fn.Value)
 			for p.match(lexer.COMMA) {
-				fn = p.expect(lexer.IDENT, "expected function name in import selector")
+				fn = p.expect(lexer.IDENT, "expected function or class name in import selector")
 				selectFns = append(selectFns, fn.Value)
 			}
 		}
@@ -391,14 +393,68 @@ func (p *Parser) parseCompTimeIf() *ast.CompTimeIf {
 			if g != nil {
 				ct.Globals = append(ct.Globals, g)
 			}
+		} else if p.check(lexer.CLASS) {
+			ct.Classes = append(ct.Classes, p.parseClass())
 		} else {
-			p.addError(p.peek(), fmt.Sprintf("expected import, fn, or let inside #if block, got %s", p.peek().Type))
+			p.addError(p.peek(), fmt.Sprintf("expected import, fn, let, or class inside #if block, got %s", p.peek().Type))
 			p.synchronize()
 		}
 	}
 
 	p.expect(lexer.RBRACE, "expected '}' to close #if block")
 	return ct
+}
+
+func (p *Parser) parseClass() *ast.ClassDecl {
+	tok := p.advance()
+	name := p.expect(lexer.IDENT, "expected class name")
+	p.expect(lexer.LBRACE, "expected '{' after class name")
+	class := &ast.ClassDecl{Name: name.Value, Pos: p.position(tok)}
+	for !p.check(lexer.RBRACE) && !p.check(lexer.EOF) {
+		public := p.match(lexer.PUB)
+		if !public {
+			p.match(lexer.PRIV)
+		}
+		static := p.match(lexer.STATIC)
+		member := p.peek()
+		switch {
+		case p.match(lexer.LET):
+			name := p.expect(lexer.IDENT, "expected field name")
+			p.expect(lexer.COLON, "expected ':' after field name")
+			field := &ast.ClassField{Name: name.Value, Type: p.parseType(), Public: public, Static: static, Pos: p.position(member)}
+			if p.match(lexer.ASSIGN) {
+				field.Value = p.parseExpression()
+			}
+			p.expect(lexer.SEMICOLON, "expected ';' after class field")
+			class.Fields = append(class.Fields, field)
+		case p.check(lexer.FN):
+			class.Methods = append(class.Methods, &ast.ClassMethod{Fn: p.parseFnDecl(), Public: public, Static: static})
+		case member.Type == lexer.IDENT && member.Value == "init":
+			p.advance()
+			if static {
+				p.addError(member, "a constructor cannot be static")
+			}
+			p.expect(lexer.LPAREN, "expected '(' after init")
+			params := p.parseParamList()
+			p.expect(lexer.RPAREN, "expected ')' after constructor parameters")
+			pos := p.position(member)
+			fn := &ast.FnDecl{Name: "init", Params: params, ReturnType: &ast.TypeExpr{Name: "void", Pos: pos}, Body: p.parseBlock(), Pos: pos}
+			class.Methods = append(class.Methods, &ast.ClassMethod{Fn: fn, Public: public, Constructor: true})
+		default:
+			p.addError(member, "expected a class field, method, or constructor")
+			p.synchronize()
+		}
+	}
+	p.expect(lexer.RBRACE, "expected '}' after class body")
+	return class
+}
+
+func (p *Parser) qualifiedName() string {
+	name := p.expect(lexer.IDENT, "expected name").Value
+	if p.match(lexer.DOT) {
+		name += "." + p.expect(lexer.IDENT, "expected name after '.'").Value
+	}
+	return name
 }
 
 func (p *Parser) parseFnDecl() *ast.FnDecl {
@@ -479,8 +535,7 @@ func (p *Parser) parseType() *ast.TypeExpr {
 		return &ast.TypeExpr{Name: tok.Value, Pos: p.position(tok)}
 	}
 	if tok.Type == lexer.IDENT {
-		p.advance()
-		return &ast.TypeExpr{Name: tok.Value, Pos: p.position(tok)}
+		return &ast.TypeExpr{Name: p.qualifiedName(), Pos: p.position(tok)}
 	}
 
 	p.addError(tok, fmt.Sprintf("expected type name, got %s", tok.Type))
@@ -799,6 +854,11 @@ func (p *Parser) parsePrefix() ast.Expr {
 	tok := p.peek()
 
 	switch tok.Type {
+	case lexer.NEW:
+		p.advance()
+		name := p.qualifiedName()
+		p.expect(lexer.LPAREN, "expected '(' after class name")
+		return &ast.NewExpr{ClassName: name, Args: p.parseArguments(), Pos: p.position(tok)}
 	case lexer.IDENT:
 		p.advance()
 		return &ast.IdentExpr{Name: tok.Value, Pos: p.position(tok)}
@@ -952,6 +1012,10 @@ func (p *Parser) parseIndexExpr(object ast.Expr) ast.Expr {
 // parseCallExpr: <callee> ( [args] )
 func (p *Parser) parseCallExpr(callee ast.Expr) ast.Expr {
 	tok := p.advance() // consume (
+	return &ast.CallExpr{Callee: callee, Args: p.parseArguments(), Pos: p.position(tok)}
+}
+
+func (p *Parser) parseArguments() []ast.Expr {
 	var args []ast.Expr
 
 	if !p.check(lexer.RPAREN) {
@@ -962,7 +1026,7 @@ func (p *Parser) parseCallExpr(callee ast.Expr) ast.Expr {
 	}
 
 	p.expect(lexer.RPAREN, "expected ')' after arguments")
-	return &ast.CallExpr{Callee: callee, Args: args, Pos: p.position(tok)}
+	return args
 }
 
 // parseMemberExpr: <object> . <field>

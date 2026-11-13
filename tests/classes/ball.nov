@@ -1,0 +1,35 @@
+module ball;
+
+class Ball {
+    let x: i32;
+    pub let radius: i32 = 50;
+    pub let tags: []i32 = [10];
+    pub let name: str = "ball";
+    priv static let created: i32 = 0;
+    pub static let scale: i32 = 2;
+
+    pub init(start_x: i32 = 10) {
+        self.x = start_x;
+        Ball.created++;
+    }
+
+    pub fn move(dx: i32) -> void {
+        self.x += dx * Ball.scale;
+    }
+
+    pub fn move(other: Ball) -> void {
+        self.x += other.x;
+    }
+
+    pub fn position() -> i32 {
+        return self.x;
+    }
+
+    pub static fn count() -> i32 {
+        return Ball.created;
+    }
+
+    pub static fn origin() -> Ball {
+        return new Ball(0);
+    }
+}

@@ -49,6 +49,9 @@ func EnsureWindowsToolchain(verbose bool) (string, string, error) {
 
 	nasmPath, nasmOK := findNASM(toolsDir)
 	golinkPath, golinkOK := findGoLink(toolsDir)
+	if _, err := exec.LookPath("link.exe"); err == nil {
+		golinkOK = true
+	}
 
 	if nasmOK && golinkOK {
 		return nasmPath, golinkPath, nil

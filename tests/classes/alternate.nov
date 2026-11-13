@@ -1,0 +1,5 @@
+module alternate;
+
+class Ball {
+    pub let x: i32 = 7;
+}

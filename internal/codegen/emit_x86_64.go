@@ -402,6 +402,8 @@ func (e *x86_64Emitter) emitGASInstr(fn *IRFunc, instr IRInstr) {
 			label := e.mod.Strings[instr.Src1.Imm].Label
 			sym := e.target.Sym(label)
 			w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %s\n", sym, scratch))
+		} else if instr.Src1.Kind == OpLabel {
+			w.WriteString(fmt.Sprintf("    leaq %s(%%rip), %s\n", e.target.Sym(instr.Src1.Label), scratch))
 		} else if instr.Src1.Kind == OpVirtReg {
 			off := e.vregOffset(fn, instr.Src1.Reg)
 			w.WriteString(fmt.Sprintf("    leaq %d(%%rbp), %s\n", off, scratch))
@@ -611,6 +613,9 @@ func (e *x86_64Emitter) emitGASInstr(fn *IRFunc, instr IRInstr) {
 		e.gasStoreToOperand(fn, instr.Dst, "%r11")
 
 	// Array operations
+	case IRHeapAlloc:
+		instr.Src1, instr.Args = LabelOp("_novus_gc_alloc"), []Operand{instr.Src1}
+		e.emitGASCall(fn, instr)
 	case IRArrayNew:
 		e.emitGASArrayNew(fn, instr)
 	case IRArrayGet:
@@ -1368,6 +1373,8 @@ func (e *x86_64Emitter) emitNASMInstr(fn *IRFunc, instr IRInstr) {
 		if instr.Src1.Kind == OpStringRef {
 			label := e.mod.Strings[instr.Src1.Imm].Label
 			w.WriteString(fmt.Sprintf("    lea %s, [rel %s]\n", scratch, label))
+		} else if instr.Src1.Kind == OpLabel {
+			w.WriteString(fmt.Sprintf("    lea %s, [rel %s]\n", scratch, instr.Src1.Label))
 		} else if instr.Src1.Kind == OpVirtReg {
 			off := e.vregOffset(fn, instr.Src1.Reg)
 			w.WriteString(fmt.Sprintf("    lea %s, [rbp%+d]\n", scratch, off))
@@ -1606,6 +1613,9 @@ func (e *x86_64Emitter) emitNASMInstr(fn *IRFunc, instr IRInstr) {
 		e.nasmStoreToOperand(fn, instr.Dst, "r11")
 
 	// Array operations
+	case IRHeapAlloc:
+		instr.Src1, instr.Args = LabelOp("_novus_gc_alloc"), []Operand{instr.Src1}
+		e.emitNASMCall(fn, instr)
 	case IRArrayNew:
 		e.emitNASMArrayNew(fn, instr)
 	case IRArrayGet:
@@ -3030,7 +3040,7 @@ func (e *x86_64Emitter) usesHeap() bool {
 	for _, fn := range e.mod.Functions {
 		for _, instr := range fn.Instrs {
 			switch instr.Op {
-			case IRStrConcat, IRArrayNew, IRArrayAppend, IRGCCollect:
+			case IRHeapAlloc, IRStrConcat, IRArrayNew, IRArrayAppend, IRGCCollect:
 				return true
 			}
 		}

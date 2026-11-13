@@ -76,10 +76,16 @@ func (e *arm64Emitter) emit() {
 
 	// BSS: metadata for the mmap-backed dynamic heap allocator.
 	if e.usesHeap() {
+		if e.target.OS == OS_Windows {
+			w.WriteString(".bss\n.p2align 3\n_novus_heap:\n")
+			w.WriteString(fmt.Sprintf("    .space %d\n", e.target.HeapSize))
+		}
 		heapPtrSym := e.target.Sym("_novus_heap_ptr")
 		heapEndSym := e.target.Sym("_novus_heap_end")
 		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n", heapPtrSym))
-		w.WriteString(fmt.Sprintf(".lcomm %s, 8\n\n", heapEndSym))
+		if e.target.OS != OS_Windows {
+			w.WriteString(fmt.Sprintf(".lcomm %s, 8\n\n", heapEndSym))
+		}
 
 		// GC metadata: allocation table, free list, counters.
 		// Each GC table entry: { ptr(8), size(8), mark(8) } = 24 bytes.
@@ -244,15 +250,16 @@ func (e *arm64Emitter) emitFunction(fn *IRFunc) {
 	}
 
 	// Initialize GC stack bottom in main function (macOS entry).
-	if fn.Name == "main" && e.target.OS == OS_Darwin && e.usesHeap() {
+	if fn.Name == "main" && e.target.OS == OS_Windows && fn.ParamCount >= 2 {
+		e.emitWinMainArgs()
+	}
+	if fn.Name == "main" && e.target.OS != OS_Linux && e.usesHeap() {
 		gcStackBot := e.target.Sym("_novus_gc_stack_bottom")
-		w.WriteString(fmt.Sprintf("    adrp x9, %s@PAGE\n", gcStackBot))
-		w.WriteString(fmt.Sprintf("    add x9, x9, %s@PAGEOFF\n", gcStackBot))
+		e.emitLoadGlobal("x9", gcStackBot)
 		w.WriteString("    add x10, x29, #16\n") // entry SP (above saved x29/x30)
 		w.WriteString("    str x10, [x9]\n")
 		gcThreshold := e.target.Sym("_novus_gc_threshold")
-		w.WriteString(fmt.Sprintf("    adrp x9, %s@PAGE\n", gcThreshold))
-		w.WriteString(fmt.Sprintf("    add x9, x9, %s@PAGEOFF\n", gcThreshold))
+		e.emitLoadGlobal("x9", gcThreshold)
 		w.WriteString("    mov x10, #256\n")
 		w.WriteString("    str x10, [x9]\n")
 	}
@@ -301,6 +308,8 @@ func (e *arm64Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		dst := e.dstReg(fn, instr.Dst, "x10")
 		if instr.Src1.Kind == OpStringRef {
 			e.loadStringAddr(dst, int(instr.Src1.Imm))
+		} else if instr.Src1.Kind == OpLabel {
+			e.emitLoadGlobal(dst, e.target.Sym(instr.Src1.Label))
 		} else if instr.Src1.Kind == OpMemory {
 			off := instr.Src1.MemOffset
 			base := e.armBaseReg(instr.Src1.MemBase)
@@ -503,6 +512,9 @@ func (e *arm64Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		e.spillIfNeeded(fn, instr.Dst, dst)
 
 	// Array operations
+	case IRHeapAlloc:
+		instr.Src1, instr.Args = LabelOp("_novus_gc_alloc"), []Operand{instr.Src1}
+		e.emitCall(fn, instr)
 	case IRArrayNew:
 		e.emitArrayNew(fn, instr)
 	case IRArrayGet:
@@ -516,19 +528,17 @@ func (e *arm64Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 	case IRArrayLen:
 		e.emitArrayLen(fn, instr)
 	case IRWinCall:
-		w.WriteString("    // win_call: Windows API calls not supported on ARM64\n")
+		if e.target.OS == OS_Windows {
+			e.emitCall(fn, instr)
+		} else {
+			w.WriteString("    // win_call requires Windows\n")
+		}
 
 	case IRLoadGlobal:
 		dst := e.dstReg(fn, instr.Dst, "x10")
 		if instr.Src1.Kind == OpLabel {
 			globalSym := e.target.Sym(instr.Src1.Label)
-			if e.target.OS == OS_Darwin {
-				w.WriteString(fmt.Sprintf("    adrp x17, %s@PAGE\n", globalSym))
-				w.WriteString(fmt.Sprintf("    add x17, x17, %s@PAGEOFF\n", globalSym))
-			} else {
-				w.WriteString(fmt.Sprintf("    adrp x17, %s\n", globalSym))
-				w.WriteString(fmt.Sprintf("    add x17, x17, :lo12:%s\n", globalSym))
-			}
+			e.emitLoadGlobal("x17", globalSym)
 			w.WriteString(fmt.Sprintf("    ldr %s, [x17]\n", dst))
 		}
 		e.spillIfNeeded(fn, instr.Dst, dst)
@@ -537,13 +547,7 @@ func (e *arm64Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		src := e.loadToReg(fn, instr.Src1, "x10")
 		if instr.Dst.Kind == OpLabel {
 			globalSym := e.target.Sym(instr.Dst.Label)
-			if e.target.OS == OS_Darwin {
-				w.WriteString(fmt.Sprintf("    adrp x17, %s@PAGE\n", globalSym))
-				w.WriteString(fmt.Sprintf("    add x17, x17, %s@PAGEOFF\n", globalSym))
-			} else {
-				w.WriteString(fmt.Sprintf("    adrp x17, %s\n", globalSym))
-				w.WriteString(fmt.Sprintf("    add x17, x17, :lo12:%s\n", globalSym))
-			}
+			e.emitLoadGlobal("x17", globalSym)
 			w.WriteString(fmt.Sprintf("    str %s, [x17]\n", src))
 		}
 
@@ -721,10 +725,13 @@ func (e *arm64Emitter) emitCall(fn *IRFunc, instr IRInstr) {
 	w := e.b
 	argRegs := e.target.ArgRegs
 
-	if len(instr.Args) > len(argRegs) {
-		for i := len(instr.Args) - 1; i >= len(argRegs); i-- {
+	stackArgs := max(0, len(instr.Args)-len(argRegs))
+	stackBytes := (stackArgs*e.target.StackArgSlotSize + 15) &^ 15
+	if stackBytes != 0 {
+		e.emitSPAdj("sub", stackBytes)
+		for i := len(argRegs); i < len(instr.Args); i++ {
 			src := e.loadToReg(fn, instr.Args[i], "x10")
-			w.WriteString(fmt.Sprintf("    str %s, [sp, #-16]!\n", src))
+			e.emitStoreMem(src, "sp", (i-len(argRegs))*e.target.StackArgSlotSize)
 		}
 	}
 
@@ -743,9 +750,8 @@ func (e *arm64Emitter) emitCall(fn *IRFunc, instr IRInstr) {
 	callTarget := e.target.Sym(label)
 	w.WriteString(fmt.Sprintf("    bl %s\n", callTarget))
 
-	stackArgs := len(instr.Args) - len(argRegs)
-	if stackArgs > 0 {
-		w.WriteString(fmt.Sprintf("    add sp, sp, #%d\n", stackArgs*16))
+	if stackBytes != 0 {
+		e.emitSPAdj("add", stackBytes)
 	}
 
 	if instr.Dst.Kind != OpNone {
@@ -915,6 +921,10 @@ func (e *arm64Emitter) emitMmapSyscall() {
 //	Output: x0 = pointer to allocated block (8-byte aligned)
 //	Clobbers: x0-x5, x9-x16 (caller-saved)
 func (e *arm64Emitter) emitHeapAllocator() {
+	if e.target.OS == OS_Windows {
+		e.emitWindowsHeapAllocator()
+		return
+	}
 	w := e.b
 	allocSym := e.target.Sym("_novus_heap_alloc")
 	heapPtrSym := e.target.Sym("_novus_heap_ptr")
@@ -1529,7 +1539,7 @@ func (e *arm64Emitter) usesHeap() bool {
 	for _, fn := range e.mod.Functions {
 		for _, instr := range fn.Instrs {
 			switch instr.Op {
-			case IRStrConcat, IRArrayNew, IRArrayAppend, IRGCCollect:
+			case IRHeapAlloc, IRStrConcat, IRArrayNew, IRArrayAppend, IRGCCollect:
 				return true
 			}
 		}
@@ -1691,16 +1701,7 @@ func (e *arm64Emitter) emitStoreMem(src, baseName string, offset int) {
 }
 
 func (e *arm64Emitter) loadStringAddr(dst string, idx int) {
-	w := e.b
-	label := e.mod.Strings[idx].Label
-	sym := e.target.Sym(label)
-	if e.target.OS == OS_Darwin {
-		w.WriteString(fmt.Sprintf("    adrp %s, %s@PAGE\n", dst, sym))
-		w.WriteString(fmt.Sprintf("    add %s, %s, %s@PAGEOFF\n", dst, dst, sym))
-	} else {
-		w.WriteString(fmt.Sprintf("    adrp %s, %s\n", dst, sym))
-		w.WriteString(fmt.Sprintf("    add %s, %s, :lo12:%s\n", dst, dst, sym))
-	}
+	e.emitLoadGlobal(dst, e.target.Sym(e.mod.Strings[idx].Label))
 }
 
 // ---------------------------------------------------------------------------

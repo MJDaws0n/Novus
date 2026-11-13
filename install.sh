@@ -26,6 +26,7 @@ ARCH="$(uname -m)"
 case "$ARCH" in
     x86_64|amd64)   ARCH_NAME="amd64" ;;
     aarch64|arm64)   ARCH_NAME="arm64" ;;
+    i386|i486|i586|i686) ARCH_NAME="386" ;;
     *)
         echo "Error: Unsupported architecture: $ARCH"
         exit 1
