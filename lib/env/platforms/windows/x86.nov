@@ -1,0 +1,110 @@
+// ---------------------------------------------------------------------------
+// env/windows_x86 - environment utilities for Windows x86 (32-bit)
+// Uses GetCurrentDirectoryA, GetCurrentProcessId, GetEnvironmentVariableA,
+// GetComputerNameA, GetUserNameA.
+// ---------------------------------------------------------------------------
+
+module env_windows_x86;
+
+
+// ---------------------------------------------------------------------------
+// Get current working directory
+// ---------------------------------------------------------------------------
+
+fn getcwd() -> str {
+    let buf: str = make_buffer(1024);
+    win_call("GetCurrentDirectoryA", 1024, buf);
+    let nlen: i32 = u64_to_i32(getreg(eax));
+    if (nlen <= 0) { return ""; }
+    return copy_bytes(ptr(buf), nlen);
+}
+
+// ---------------------------------------------------------------------------
+// Get process ID
+// ---------------------------------------------------------------------------
+
+fn getpid() -> i32 {
+    win_call("GetCurrentProcessId");
+    return u64_to_i32(getreg(eax));
+}
+
+// ---------------------------------------------------------------------------
+// Get parent process ID (not available on Windows without NTDLL)
+// ---------------------------------------------------------------------------
+
+fn getppid() -> i32 {
+    return -1;
+}
+
+fn getuid() -> i32 {
+    return -1;
+}
+
+fn geteuid() -> i32 {
+    return -1;
+}
+
+// ---------------------------------------------------------------------------
+// Get environment variable
+// ---------------------------------------------------------------------------
+
+fn getenv(name: str) -> str {
+    let buf: str = make_buffer(4096);
+    win_call("GetEnvironmentVariableA", name, buf, 4096);
+    let nlen: i32 = u64_to_i32(getreg(eax));
+    if (nlen <= 0) { return ""; }
+    return copy_bytes(ptr(buf), nlen);
+}
+
+// ---------------------------------------------------------------------------
+// Get hostname
+// ---------------------------------------------------------------------------
+
+fn gethostname() -> str {
+    let buf: str = make_buffer(256);
+    let size: i32 = 256;
+    let sa: u64 = &size;
+    win_call("GetComputerNameA", buf, sa);
+    let ok: u64 = getreg(eax);
+    if (ok == 0) { return ""; }
+    return copy_bytes(ptr(buf), size);
+}
+
+fn get_home_dir() -> str {
+    let result: str = getenv("USERPROFILE");
+    if (len(result) == 0) {
+        result = getenv("HOMEDRIVE") + getenv("HOMEPATH");
+    }
+    return result;
+}
+
+fn get_username() -> str {
+    let buf: str = make_buffer(256);
+    let size: i32 = 256;
+    let sa: u64 = &size;
+    win_call("GetUserNameA", buf, sa);
+    let ok: u64 = getreg(eax);
+    if (ok == 0) { return getenv("USERNAME"); }
+    return copy_bytes(ptr(buf), size - 1);
+}
+
+fn get_os_name() -> str {
+    return "Windows";
+}
+
+fn get_os_version() -> str {
+    win_call("GetVersion");
+    let ver: u64 = getreg(eax);
+    let major: i32 = u64_to_i32(ver & 255);
+    let minor: i32 = u64_to_i32((ver / 256) & 255);
+    return int_to_str(major) + "." + int_to_str(minor);
+}
+
+fn get_arch() -> str {
+    let si: str = make_buffer(36);  // SYSTEM_INFO is 36 bytes on x86
+    win_call("GetNativeSystemInfo", si);
+    let arch: i32 = (si[0] & 255) + ((si[1] & 255) * 256);
+    if (arch == 9) { return "x86_64"; }
+    if (arch == 0) { return "x86"; }
+    return "unknown";
+}

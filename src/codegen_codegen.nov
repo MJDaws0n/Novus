@@ -1,0 +1,262 @@
+module codegen_codegen;
+
+import model;
+import runtime;
+
+// DefaultOptions returns sensible defaults (host target, build/ directory).
+fn codegen_DefaultOptions() -> CodegenOptions {
+    return make_CodegenOptions_6("build");
+}
+
+// Generate runs the full code-generation pipeline on the given AST program.
+fn codegen_Generate(program: AstNode, opts: CodegenOptions) -> ResultCodegenresultStr {
+    if ((opts == null)) {
+        opts = codegen_DefaultOptions();
+    }
+    let target: CodegenTarget = opts.Target;
+    if ((target == null)) {
+        let err: str = "";
+        let result_123: ResultCodegentargetStr = codegen_HostTarget();
+        target = result_123.value0;
+        err = result_123.value1;
+        if ((err != "")) {
+            return make_ResultCodegenresultStr(null, ("cannot detect host target: " + err));
+        }
+    }
+    if ((opts.HeapSize > 0)) {
+        target.HeapSize = opts.HeapSize;
+    }
+    if ((opts.GCEntries > 0)) {
+        target.GCEntries = opts.GCEntries;
+    }
+    codegen_Target_EnsureHeapDefaults(target);
+    let outputName: str = opts.OutputName;
+    if ((outputName == "")) {
+        if (((program.Module != null) && (program.Module.Name != ""))) {
+            outputName = program.Module.Name;
+        } else {
+            outputName = "output";
+        }
+    }
+    outputName = runtime_sanitize_name(outputName);
+    let buildDir: str = opts.BuildDir;
+    if ((buildDir == "")) {
+        buildDir = "build";
+    }
+    let platformDir: str = runtime_path_filepath_Join([buildDir, (codegen_OS_String(target.OS) + "_" + codegen_Arch_String(target.Arch))]);
+    {
+        let err: str = runtime_os_MkdirAll(platformDir, 493);
+        if ((err != "")) {
+            return make_ResultCodegenresultStr(null, ("cannot create build directory " + platformDir + ": " + err));
+        }
+    }
+    let result: CodegenResult = make_CodegenResult_7();
+    if (opts.Verbose) {
+        runtime_print(("[codegen] Lowering AST to IR..."));
+    }
+    let irMod: CodegenIRModule = codegen_Lower(program, target);
+    result.IRDump = codegen_IRModule_DebugDump(irMod);
+    if (opts.Verbose) {
+        runtime_print((result.IRDump));
+    }
+    result.Warnings = codegen_checkRegisterWarnings(irMod, target);
+    if (opts.Verbose) {
+        runtime_print_raw(("[codegen] Emitting " + codegen_Arch_String(target.Arch) + " assembly for " + codegen_OS_String(target.OS) + "/" + codegen_Arch_String(target.Arch) + "...\n"));
+    }
+    let asmText: str = "";
+    {
+        let choice_124: i32 = target.Arch;
+        if ((choice_124 == 0)) {
+            asmText = codegen_EmitX86_64(irMod, target);
+        } else if ((choice_124 == 2)) {
+            asmText = codegen_EmitARM64(irMod, target);
+        } else if ((choice_124 == 1)) {
+            {
+                let op: str = codegen_findFloatOp(irMod);
+                if ((op != "")) {
+                    return make_ResultCodegenresultStr(null, ("floating-point operations (" + op + ") are not supported on 32-bit x86 targets"));
+                }
+            }
+            asmText = codegen_EmitX86(irMod, target);
+        } else {
+            return make_ResultCodegenresultStr(null, ("unsupported architecture for emission: " + codegen_Arch_String(target.Arch)));
+        }
+    }
+    let tc: CodegenToolchain = codegen_NewToolchain(target, platformDir, outputName);
+    tc.Verbose = opts.Verbose;
+    if (((target.OS == 2) && (target.Arch == 2))) {
+        {
+            let items_125: []CodegenIRFunc = irMod.Functions;
+            let count_127: i32 = len(items_125);
+            for (let index_126: i32 = 0; index_126 < count_127; index_126++) {
+                let fn_value: CodegenIRFunc = items_125[index_126];
+                if (((fn_value.Name == "main") && (fn_value.ParamCount >= 2))) {
+                    tc.WindowsAPI = true;
+                }
+                {
+                    let items_128: []CodegenIRInstr = fn_value.Instrs;
+                    let count_130: i32 = len(items_128);
+                    for (let index_129: i32 = 0; index_129 < count_130; index_129++) {
+                        let instr: CodegenIRInstr = copy_CodegenIRInstr(items_128[index_129]);
+                        if ((instr.Op == 54)) {
+                            tc.WindowsAPI = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    {
+        let err: str = codegen_Toolchain_WriteAssembly(tc, asmText);
+        if ((err != "")) {
+            return make_ResultCodegenresultStr(null, ("cannot write assembly file: " + err));
+        }
+    }
+    result.AsmFile = tc.AsmFile;
+    if (opts.Verbose) {
+        runtime_print_raw(("[codegen] Assembly written to " + result.AsmFile + "\n"));
+    }
+    if (opts.AsmOnly) {
+        return make_ResultCodegenresultStr(result, "");
+    }
+    if (((target.OS == 2) && (target.Arch == 0))) {
+        let result_131: ResultStrStrStr = codegen_EnsureWindowsToolchain(opts.Verbose);
+        let nasmPath: str = result_131.value0;
+        let golinkPath: str = result_131.value1;
+        let dlErr: str = result_131.value2;
+        if ((dlErr != "")) {
+            runtime_print_raw(("[codegen] Warning: could not set up Windows toolchain: " + dlErr + "\n"));
+            runtime_print_raw(("[codegen] Assembly file was written to " + result.AsmFile + " — you can assemble and link manually.\n"));
+            return make_ResultCodegenresultStr(result, "");
+        }
+        tc.NASMPath = nasmPath;
+        tc.GoLinkPath = golinkPath;
+    }
+    {
+        let missing: []str = codegen_DetectToolchainWithPaths(target, tc.NASMPath, tc.GoLinkPath);
+        if ((len(missing) > 0)) {
+            runtime_print_raw(("[codegen] Warning: missing toolchain components: " + runtime_strings_Join(missing, ", ") + "\n"));
+            runtime_print_raw(("[codegen] Assembly file was written to " + result.AsmFile + " — you can assemble and link manually.\n"));
+            return make_ResultCodegenresultStr(result, "");
+        }
+    }
+    if (opts.Verbose) {
+        runtime_print(("[codegen] Assembling..."));
+    }
+    {
+        let err: str = codegen_Toolchain_Assemble(tc);
+        if ((err != "")) {
+            return make_ResultCodegenresultStr(result, ("assembly failed: " + err));
+        }
+    }
+    result.ObjFile = tc.ObjFile;
+    if (opts.SkipLink) {
+        return make_ResultCodegenresultStr(result, "");
+    }
+    if (opts.Verbose) {
+        runtime_print(("[codegen] Linking..."));
+    }
+    {
+        let err: str = codegen_Toolchain_Link(tc);
+        if ((err != "")) {
+            return make_ResultCodegenresultStr(result, ("linking failed: " + err));
+        }
+    }
+    result.ExeFile = tc.ExeFile;
+    if (opts.Verbose) {
+        runtime_print_raw(("[codegen] Executable written to " + result.ExeFile + "\n"));
+    }
+    return make_ResultCodegenresultStr(result, "");
+}
+
+// checkRegisterWarnings scans the IR for physical register references and
+// warns if registers from a different architecture are used.
+fn codegen_checkRegisterWarnings(mod: CodegenIRModule, target: CodegenTarget) -> []str {
+    let map_134: MapStrBool = new MapStrBool();
+    let usedRegs: MapStrBool = map_134;
+    {
+        let items_135: []CodegenIRFunc = mod.Functions;
+        let count_137: i32 = len(items_135);
+        for (let index_136: i32 = 0; index_136 < count_137; index_136++) {
+            let fn_value: CodegenIRFunc = items_135[index_136];
+            if (fn_value.Imported) {
+                continue;
+            }
+            {
+                let items_138: []CodegenIRInstr = fn_value.Instrs;
+                let count_140: i32 = len(items_138);
+                for (let index_139: i32 = 0; index_139 < count_140; index_139++) {
+                    let instr: CodegenIRInstr = copy_CodegenIRInstr(items_138[index_139]);
+                    {
+                        let items_141: []CodegenOperand = [copy_CodegenOperand(instr.Dst), copy_CodegenOperand(instr.Src1), copy_CodegenOperand(instr.Src2)];
+                        let count_143: i32 = len(items_141);
+                        for (let index_142: i32 = 0; index_142 < count_143; index_142++) {
+                            let op: CodegenOperand = copy_CodegenOperand(items_141[index_142]);
+                            if ((op.Kind == 2)) {
+                                MapStrBool_put(usedRegs, op.PhysReg, true);
+                            }
+                        }
+                    }
+                    {
+                        let items_144: []CodegenOperand = instr.Args;
+                        let count_146: i32 = len(items_144);
+                        for (let index_145: i32 = 0; index_145 < count_146; index_145++) {
+                            let op: CodegenOperand = copy_CodegenOperand(items_144[index_145]);
+                            if ((op.Kind == 2)) {
+                                MapStrBool_put(usedRegs, op.PhysReg, true);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let warnings: []str = [];
+    {
+        let items_147: MapStrBool = usedRegs;
+        let count_149: i32 = MapStrBool_length(items_147);
+        for (let index_148: i32 = 0; index_148 < count_149; index_148++) {
+            let reg: str = items_147.keys[index_148];
+            {
+                let choice_150: i32 = target.Arch;
+                if ((choice_150 == 2)) {
+                    if (MapStrBool_get(CompilerState.codegen_x86Registers, reg)) {
+                        warnings = append_Str(warnings, ("Warning: x86 register " + runtime_quote(reg) + " used in source but target is " + codegen_OS_String(target.OS) + "/" + codegen_Arch_String(target.Arch) + " — it will be mapped to an ARM64 equivalent at emission time"));
+                    }
+                } else if ((choice_150 == 0) || (choice_150 == 1)) {
+                    if (MapStrBool_get(CompilerState.codegen_arm64Registers, reg)) {
+                        warnings = append_Str(warnings, ("Warning: ARM64 register " + runtime_quote(reg) + " used in source but target is " + codegen_OS_String(target.OS) + "/" + codegen_Arch_String(target.Arch) + " — this register is not available on the target architecture"));
+                    }
+                }
+            }
+        }
+    }
+    return warnings;
+}
+
+// findFloatOp scans an IR module for floating-point opcodes and returns the
+// name of the first one found, or "" if there are none. Used to reject float
+// code on targets whose emitters do not support floating point (x86-32).
+fn codegen_findFloatOp(mod: CodegenIRModule) -> str {
+    {
+        let items_151: []CodegenIRFunc = mod.Functions;
+        let count_153: i32 = len(items_151);
+        for (let index_152: i32 = 0; index_152 < count_153; index_152++) {
+            let fn_value: CodegenIRFunc = items_151[index_152];
+            {
+                let items_154: []CodegenIRInstr = fn_value.Instrs;
+                let count_156: i32 = len(items_154);
+                for (let index_155: i32 = 0; index_155 < count_156; index_155++) {
+                    let instr: CodegenIRInstr = copy_CodegenIRInstr(items_154[index_155]);
+                    {
+                        let choice_157: i32 = instr.Op;
+                        if ((choice_157 == 57) || (choice_157 == 58) || (choice_157 == 59) || (choice_157 == 60) || (choice_157 == 61) || (choice_157 == 62) || (choice_157 == 63) || (choice_157 == 64) || (choice_157 == 65) || (choice_157 == 66) || (choice_157 == 67) || (choice_157 == 68) || (choice_157 == 69) || (choice_157 == 70)) {
+                            return codegen_IROp_String(instr.Op);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return "";
+}

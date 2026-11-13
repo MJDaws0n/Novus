@@ -1,0 +1,104 @@
+module codegen_classes;
+
+import model;
+import runtime;
+
+fn codegen_Lowerer_lowerArgs(l: CodegenLowerer, operands: []CodegenOperand, args: []AstNode, types: []str) -> []CodegenOperand {
+    {
+        let items_119: []AstNode = args;
+        let count_121: i32 = len(items_119);
+        for (let index_120: i32 = 0; index_120 < count_121; index_120++) {
+            let i: i32 = index_120;
+            let arg: AstNode = items_119[index_120];
+            let typ: str = "";
+            if ((i < len(types))) {
+                typ = types[i];
+            }
+            operands = append_Codegenoperand(operands, copy_CodegenOperand(codegen_Lowerer_lowerExprForType(l, arg, typ)));
+        }
+    }
+    return operands;
+}
+
+fn codegen_Lowerer_lowerNewExpr(l: CodegenLowerer, e: AstNode) -> CodegenOperand {
+    let args: []CodegenOperand = codegen_Lowerer_lowerArgs(l, [], e.Args, slice_Str(MapStrArraystr_get(l.funcParamTypes, e.Constructor), 1, len(MapStrArraystr_get(l.funcParamTypes, e.Constructor))));
+    let instance: CodegenOperand = copy_CodegenOperand(codegen_VReg(codegen_Lowerer_freshVReg(l)));
+    let size: i64 = runtime_to_i64((runtime_max((16 / l.target.PtrSize), e.Slots) * l.target.PtrSize));
+    codegen_Lowerer_emit(l, make_CodegenIRInstr_2(74, copy_CodegenOperand(instance), copy_CodegenOperand(codegen_Imm(size))));
+    {
+        let slot: i32 = 0;
+        for (; (slot < (runtime_to_i32(size) / l.target.PtrSize)); slot++) {
+            let address: CodegenOperand = copy_CodegenOperand(codegen_Lowerer_slotAddress(l, copy_CodegenOperand(instance), slot));
+            codegen_Lowerer_emit(l, make_CodegenIRInstr_3(3, copy_CodegenOperand(codegen_Imm(0)), copy_CodegenOperand(address)));
+        }
+    }
+    codegen_Lowerer_emit(l, make_CodegenIRInstr_4(31, copy_CodegenOperand(codegen_LabelOp(e.Constructor)), extend_Codegenoperand([copy_CodegenOperand(instance)], args)));
+    return copy_CodegenOperand(instance);
+}
+
+fn codegen_Lowerer_slotAddress(l: CodegenLowerer, base: CodegenOperand, slot: i32) -> CodegenOperand {
+    if ((slot == 0)) {
+        return copy_CodegenOperand(base);
+    }
+    let addr: CodegenOperand = copy_CodegenOperand(codegen_VReg(codegen_Lowerer_freshVReg(l)));
+    codegen_Lowerer_emit(l, make_CodegenIRInstr_5(6, copy_CodegenOperand(addr), copy_CodegenOperand(base), copy_CodegenOperand(codegen_Imm(runtime_to_i64((slot * l.target.PtrSize))))));
+    return copy_CodegenOperand(addr);
+}
+
+fn codegen_Lowerer_fieldAddress(l: CodegenLowerer, member: AstNode) -> CodegenOperand {
+    if ((member.ResolvedField.Global != "")) {
+        return copy_CodegenOperand(codegen_None());
+    }
+    return copy_CodegenOperand(codegen_Lowerer_slotAddress(l, copy_CodegenOperand(codegen_Lowerer_lowerExpr(l, member.Object)), member.ResolvedField.Slot));
+}
+
+fn codegen_Lowerer_storeField(l: CodegenLowerer, field: AstResolvedField, address: CodegenOperand, value: CodegenOperand) -> void {
+    value = copy_CodegenOperand(codegen_Lowerer_coerceValueToType(l, field.Type, copy_CodegenOperand(value)));
+    if ((field.Global != "")) {
+        codegen_Lowerer_emit(l, make_CodegenIRInstr_2(56, copy_CodegenOperand(codegen_LabelOp(MapStrStr_get(l.globals, field.Global))), copy_CodegenOperand(value)));
+    } else {
+        codegen_Lowerer_emit(l, make_CodegenIRInstr_3(3, copy_CodegenOperand(value), copy_CodegenOperand(address)));
+    }
+}
+
+fn codegen_Lowerer_loadField(l: CodegenLowerer, field: AstResolvedField, address: CodegenOperand) -> CodegenOperand {
+    let dst: CodegenOperand = copy_CodegenOperand(codegen_VReg(codegen_Lowerer_freshVReg(l)));
+    if ((field.Global != "")) {
+        codegen_Lowerer_emit(l, make_CodegenIRInstr_2(55, copy_CodegenOperand(dst), copy_CodegenOperand(codegen_LabelOp(MapStrStr_get(l.globals, field.Global)))));
+    } else {
+        codegen_Lowerer_emit(l, make_CodegenIRInstr_2(47, copy_CodegenOperand(dst), copy_CodegenOperand(address)));
+    }
+    codegen_Lowerer_markOperandType(l, copy_CodegenOperand(dst), field.Type);
+    return copy_CodegenOperand(dst);
+}
+
+fn codegen_Lowerer_markOperandType(l: CodegenLowerer, operand: CodegenOperand, typ: str) -> void {
+    {
+        let choice_122: str = typ;
+        if ((choice_122 == "str")) {
+            MapI32Bool_put(l.vregIsStr, operand.Reg, true);
+        } else if ((choice_122 == "f32") || (choice_122 == "f64")) {
+            MapI32Bool_put(l.vregIsFloat, operand.Reg, true);
+        } else if ((choice_122 == "u8") || (choice_122 == "u16") || (choice_122 == "u32") || (choice_122 == "u64")) {
+            MapI32Bool_put(l.vregIsUnsigned, operand.Reg, true);
+        }
+    }
+}
+
+fn codegen_Lowerer_indexElementType(l: CodegenLowerer, index: AstNode) -> str {
+    if ((index.ArrayType != "")) {
+        return index.ArrayType;
+    }
+    let objectType: str = codegen_Lowerer_exprType(l, index.Object);
+    if (runtime_strings_HasPrefix(objectType, "[]")) {
+        return runtime_strings_TrimPrefix(objectType, "[]");
+    }
+    return "";
+}
+
+fn codegen_Lowerer_arrayElement(l: CodegenLowerer, array: CodegenOperand, index: CodegenOperand, elemType: str) -> CodegenOperand {
+    let dst: CodegenOperand = copy_CodegenOperand(codegen_VReg(codegen_Lowerer_freshVReg(l)));
+    codegen_Lowerer_emit(l, make_CodegenIRInstr_5(49, copy_CodegenOperand(dst), copy_CodegenOperand(array), copy_CodegenOperand(index)));
+    codegen_Lowerer_markOperandType(l, copy_CodegenOperand(dst), elemType);
+    return copy_CodegenOperand(dst);
+}

@@ -1,0 +1,11 @@
+module library_smoke;
+import ../../lib/std;
+fn main() -> void {
+    let b: StringBuilder = new StringBuilder();
+    b.append("compiler");
+    b.append_byte(33);
+    print(b.text());
+    print(format_signed(-9223372036854775807 - 1));
+    print(format_unsigned(parse_unsigned("0xffff_ffff_ffff_ffff").value));
+    exit(0);
+}

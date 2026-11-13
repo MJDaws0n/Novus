@@ -1,0 +1,34 @@
+module novus;
+
+import src/driver_main;
+import src/ast_ast;
+import src/codegen_classes;
+import src/codegen_codegen;
+import src/codegen_emit_aarch64;
+import src/codegen_emit_arm64_coff;
+import src/codegen_emit_x86;
+import src/codegen_emit_x86_64;
+import src/codegen_gc;
+import src/codegen_ir;
+import src/codegen_lower;
+import src/codegen_runtime;
+import src/codegen_target;
+import src/codegen_toolchain;
+import src/codegen_wintools;
+import src/imports_resolver;
+import src/lexer_lexer;
+import src/parser_parser;
+import src/semantic_classes;
+import src/semantic_semantic;
+import src/model;
+import src/runtime;
+import src/tool_install;
+
+fn main(argc: i32, argv: u64) -> i32 {
+    initialize_compiler();
+    for (let i: i32 = 0; i < argc; i++) { array_append(CompilerState.arguments, argv_get(argv, i)); }
+    let started: i64 = get_time_ns();
+    let status: i32 = driver_run();
+    if (status == 0) { print("Compile time: " + format_signed((get_time_ns() - started) / 1000000) + "ms"); }
+    return status;
+}

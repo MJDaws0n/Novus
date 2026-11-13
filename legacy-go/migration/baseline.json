@@ -1,0 +1,30 @@
+{
+  "small": {
+    "source": "/Users/max/Documents/GitHub/Novus/tests/classes/main.nov",
+    "version": "0.3.1 Go",
+    "wall_seconds": [
+      0.12682445800237474,
+      0.15699187499922118,
+      0.1776792500022566,
+      0.20035004099918297,
+      0.17390462500043213,
+      0.1557055000012042
+    ],
+    "median_seconds": 0.16544824999982666,
+    "includes": "fresh process, parsing, imports, semantic analysis, assembly generation, assembly and linking"
+  },
+  "large": {
+    "source": "/tmp/novus-integration-check/Nox/main.nov",
+    "version": "0.3.1 Go",
+    "wall_seconds": [
+      1.080947375001415,
+      1.051219917000708,
+      1.002481458002876,
+      0.9746125840028981,
+      0.9737244999996619,
+      0.9746095420014171
+    ],
+    "median_seconds": 0.988547021002887,
+    "includes": "fresh process, parsing, imports, semantic analysis, assembly generation, assembly and linking"
+  }
+}

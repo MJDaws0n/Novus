@@ -1,0 +1,90 @@
+// Auto-generated test file. Run on the target platform or in VM/Docker.
+
+module process_tests_windows_x86;
+
+import ../main;
+
+fn test_pass(name: str) -> void {
+    print_raw("  [PASS] " + name + "\n");
+}
+
+fn test_fail(name: str, detail: str) -> void {
+    print_raw("  [FAIL] " + name + ": " + detail + "\n");
+}
+
+fn assert_eq_i32(name: str, got: i32, expected: i32) -> i32 {
+    if (got == expected) { test_pass(name); return 0; }
+    test_fail(name, "got " + i32_to_str(got) + ", expected " + i32_to_str(expected));
+    return 1;
+}
+
+fn assert_eq_i64(name: str, got: i64, expected: i64) -> i32 {
+    if (got == expected) { test_pass(name); return 0; }
+    test_fail(name, "got " + i64_to_str(got) + ", expected " + i64_to_str(expected));
+    return 1;
+}
+
+fn assert_eq_str(name: str, got: str, expected: str) -> i32 {
+    if (str_equals(got, expected)) { test_pass(name); return 0; }
+    test_fail(name, "got '" + got + "', expected '" + expected + "'");
+    return 1;
+}
+
+fn assert_true(name: str, val: bool) -> i32 {
+    if (val) { test_pass(name); return 0; }
+    test_fail(name, "expected true");
+    return 1;
+}
+
+fn assert_gt_i32(name: str, val: i32, threshold: i32) -> i32 {
+    if (val > threshold) { test_pass(name); return 0; }
+    test_fail(name, "expected > " + i32_to_str(threshold));
+    return 1;
+}
+
+fn assert_gt_i64(name: str, val: i64, threshold: i64) -> i32 {
+    if (val > threshold) { test_pass(name); return 0; }
+    test_fail(name, "expected > " + i64_to_str(threshold));
+    return 1;
+}
+
+fn assert_gte_i32(name: str, val: i32, threshold: i32) -> i32 {
+    if (val >= threshold) { test_pass(name); return 0; }
+    test_fail(name, "expected >= " + i32_to_str(threshold) + ", got " + i32_to_str(val));
+    return 1;
+}
+
+fn assert_neq_u64(name: str, val: u64, not_val: u64) -> i32 {
+    if (val != not_val) { test_pass(name); return 0; }
+    test_fail(name, "expected != given value");
+    return 1;
+}
+
+fn main(argc: i32, argv: u64) -> i32 {
+    let fails: i32 = 0;
+    print_raw("=== process tests (windows_x86) ===\n");
+
+    // ── shell_exec (uses CreateProcess on Windows) ──
+    print_raw("\n--- shell_exec ---\n");
+    let rc: i32 = shell_exec("echo hello > NUL");
+    fails = fails + assert_eq_i32("shell_exec echo", rc, 0);
+
+    // ── shell_output ──
+    print_raw("\n--- shell_output ---\n");
+    let out: str = shell_output("echo novus_test", 256);
+    fails = fails + assert_eq_str("shell_output echo", out, "novus_test");
+
+    // ── waitpid_nohang (assembly) ──
+    print_raw("\n--- waitpid_nohang ---\n");
+    waitpid_nohang();
+    print_raw("  [PASS] waitpid_nohang (no crash)\n");
+
+    // ── Summary ──
+    print_raw("\n");
+    if (fails > 0) {
+        print_raw(i32_to_str(fails) + " test(s) FAILED\n");
+        return 1;
+    }
+    print_raw("All tests PASSED\n");
+    return 0;
+}

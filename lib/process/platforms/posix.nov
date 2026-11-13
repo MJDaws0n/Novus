@@ -1,0 +1,47 @@
+module process_posix;
+
+import ../command;
+
+fn process_run(executable: str, arguments: []str, capture_stdout: bool, capture_stderr: bool) -> ProcessResult {
+    let result: ProcessResult = new ProcessResult();
+    let argv: []u64 = [];
+    for (let i: i32 = 0; i < len(arguments); i++) { array_append(argv, ptr(arguments[i])); }
+    array_append(argv, 0);
+    let descriptors: []i32 = [-1, -1];
+    let capture: bool = capture_stdout || capture_stderr;
+    if (capture) { pipe_create(descriptors); }
+    if (capture && (descriptors[0] < 0 || descriptors[1] < 0)) { result.error = "cannot create process pipe"; return result; }
+    let pid: i32 = fork();
+    if (pid < 0) {
+        if (capture) { file_close(descriptors[0]); file_close(descriptors[1]); }
+        result.error = "cannot start process"; return result;
+    }
+    if (pid == 0) {
+        if (capture) {
+            file_close(descriptors[0]);
+            if (capture_stdout) { dup2(descriptors[1], 1); }
+            if (capture_stderr) { dup2(descriptors[1], 2); }
+            file_close(descriptors[1]);
+        }
+        execve_raw(executable, argv);
+        exit(127);
+    }
+    if (capture) {
+        file_close(descriptors[1]);
+        let output: StringBuilder = new StringBuilder();
+        let buffer: str = make_buffer(16384);
+        while (true) {
+            let amount: i32 = file_read(descriptors[0], ptr(buffer), 16384);
+            if (amount == 0) { break; }
+            if (amount < 0) { result.error = "cannot read process output"; break; }
+            output.append(copy_bytes(ptr(buffer), amount));
+        }
+        file_close(descriptors[0]);
+        result.output = output.text();
+    }
+    let status: i32 = wait_pid(pid);
+    if ((status & 127) != 0) { result.status = 128 + (status & 127); }
+    else { result.status = (status >> 8) & 255; }
+    if (result.status != 0) { result.error = "exit status " + i32_to_str(result.status); }
+    return result;
+}

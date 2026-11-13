@@ -1,0 +1,31 @@
+module download;
+import ../std;
+import ../file_io;
+import ../process;
+
+// Download to a separate path and only publish complete files.
+fn download_file(url: str, destination: str) -> str {
+    let temporary: str = destination + ".download";
+    let error: str = download_to_file(url, temporary);
+    if (error != "") { file_delete(temporary); return error; }
+    if (!file_info(temporary).exists) { return "download did not create a file: " + url; }
+    if (file_rename(temporary, destination) != 0) { file_delete(temporary); return "cannot save download: " + destination; }
+    return "";
+}
+
+#if(os == "windows") {
+    fn download_to_file(url: str, destination: str) -> str {
+        win_call("URLDownloadToFileA", 0, url, destination, 0, 0);
+        let status: i32 = u64_to_i32(getreg(rax));
+        if (status != 0) { return "download failed: " + url; }
+        return "";
+    }
+}
+#if(os != "windows") {
+    fn download_to_file(url: str, destination: str) -> str {
+        let command: ProcessCommand = process_command("curl", ["--fail", "--location", "--silent", "--show-error", "--output", destination, url]);
+        let result: ProcessResult = command_run(command, true);
+        if (result.error != "") { return result.error + ": " + result.output; }
+        return "";
+    }
+}

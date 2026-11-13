@@ -1,0 +1,1734 @@
+package codegen
+
+import (
+	"fmt"
+	"math"
+	"novus/internal/ast"
+	"slices"
+	"strconv"
+	"strings"
+)
+
+// ---------------------------------------------------------------------------
+// Lowerer — translates an AST Program into an IRModule
+// ---------------------------------------------------------------------------
+
+// Lowerer walks the AST and produces IR instructions.
+type Lowerer struct {
+	module *IRModule
+	target *Target
+	fn     *IRFunc // current function being lowered
+
+	// Virtual register allocator — each expression result gets a fresh vreg.
+	nextVReg int
+
+	// Label counter for generating unique labels.
+	nextLabel int
+
+	// Variable table: maps variable names to stack slot offsets (from rbp/frame pointer).
+	// Each function gets its own table.
+	vars     map[string]int // name → slot index (0-based)
+	nextSlot int            // next slot index
+
+	// Type tracking for string-aware lowering.
+	varTypes       map[string]string   // variable name → declared type (e.g. "str", "i32")
+	vregIsStr      map[int]bool        // vreg number → true if it holds a string pointer
+	vregIsFloat    map[int]bool        // vreg number → true if it holds a float64 (IEEE 754 bits)
+	vregIsUnsigned map[int]bool        // vreg number → true if it holds an unsigned integer
+	funcRetTypes   map[string]string   // function name → return type (pre-scanned)
+	funcParamTypes map[string][]string // function name → parameter types (pre-scanned)
+	currentRetType string              // declared return type of the function being lowered
+
+	// Loop context for break/continue.
+	loopBreakLabel    string
+	loopContinueLabel string
+
+	// Physical register lookup: which Novus identifiers are physical registers.
+	physRegs map[string]bool
+
+	// Global variables: maps variable name to its global label.
+	globals     map[string]string // name → assembly label
+	globalTypes map[string]string // name → type
+	globalInits []*ast.GlobalVar  // globals requiring runtime initialization
+
+	// Function overload resolution: maps plain function name → mangled entries.
+	// Used as a fallback when ResolvedCallee is not set (e.g. calls inside imported function bodies).
+	funcOverloads map[string][]funcOverloadEntry
+}
+
+// funcOverloadEntry records a single overload variant of a function.
+type funcOverloadEntry struct {
+	mangledName string
+	paramCount  int
+}
+
+// Lower translates an AST Program into an IRModule for the given target.
+func Lower(program *ast.Program, target *Target) *IRModule {
+	functions := slices.Concat(program.Functions, program.ClassFunctions)
+	// Pre-scan function signatures to know return types.
+	funcRetTypes := map[string]string{}
+	funcParamTypes := map[string][]string{}
+	for _, fn := range functions {
+		key := fn.MangledName
+		if key == "" {
+			key = fn.Name
+		}
+		if fn.ReturnType != nil {
+			funcRetTypes[key] = fn.ReturnType.Name
+		}
+		paramTypes := make([]string, len(fn.Params))
+		for i, param := range fn.Params {
+			if param.Type != nil {
+				paramTypes[i] = param.Type.Name
+			}
+		}
+		funcParamTypes[key] = paramTypes
+	}
+
+	// Build overload resolution map: plain name → list of (mangledName, paramCount).
+	funcOverloads := map[string][]funcOverloadEntry{}
+	for _, fn := range functions {
+		irName := fn.MangledName
+		if irName == "" {
+			irName = fn.Name
+		}
+		funcOverloads[fn.Name] = append(funcOverloads[fn.Name], funcOverloadEntry{
+			mangledName: irName,
+			paramCount:  len(fn.Params),
+		})
+	}
+
+	l := &Lowerer{
+		module:         &IRModule{EntryFunc: "main"},
+		target:         target,
+		physRegs:       makePhysRegSet(),
+		funcRetTypes:   funcRetTypes,
+		funcParamTypes: funcParamTypes,
+		globals:        map[string]string{},
+		globalTypes:    map[string]string{},
+		funcOverloads:  funcOverloads,
+	}
+
+	// Process global variables.
+	for _, g := range slices.Concat(program.Globals, program.ClassGlobals) {
+		if _, exists := l.globals[g.Name]; exists {
+			continue // skip duplicate global (from overlapping imports)
+		}
+		l.lowerGlobal(g)
+	}
+
+	// Track emitted function names to avoid duplicate definitions
+	// (can happen when the same library is imported by multiple modules).
+	emittedFuncs := map[string]bool{}
+	for _, fn := range functions {
+		irName := fn.MangledName
+		if irName == "" {
+			irName = fn.Name
+		}
+		if emittedFuncs[irName] {
+			continue // skip duplicate
+		}
+		emittedFuncs[irName] = true
+		l.lowerFunction(fn, program.Startup)
+	}
+
+	return l.module
+}
+
+// makePhysRegSet builds the set of all physical register names recognized by
+// Novus (same list as semantic.reservedRegisters).
+func makePhysRegSet() map[string]bool {
+	regs := map[string]bool{
+		// x86 32-bit general purpose
+		"eax": true, "ebx": true, "ecx": true, "edx": true,
+		"esi": true, "edi": true, "ebp": true, "esp": true,
+		// x86 64-bit general purpose
+		"rax": true, "rbx": true, "rcx": true, "rdx": true,
+		"rsi": true, "rdi": true, "rbp": true, "rsp": true,
+		"r8": true, "r9": true, "r10": true, "r11": true,
+		"r12": true, "r13": true, "r14": true, "r15": true,
+		// x86 Instruction pointers
+		"eip": true, "rip": true,
+		// x86 Flags
+		"eflags": true, "rflags": true,
+		// x87 FPU
+		"st0": true, "st1": true, "st2": true, "st3": true,
+		"st4": true, "st5": true, "st6": true, "st7": true,
+		// MMX
+		"mm0": true, "mm1": true, "mm2": true, "mm3": true,
+		"mm4": true, "mm5": true, "mm6": true, "mm7": true,
+		// SSE
+		"xmm0": true, "xmm1": true, "xmm2": true, "xmm3": true,
+		"xmm4": true, "xmm5": true, "xmm6": true, "xmm7": true,
+		"xmm8": true, "xmm9": true, "xmm10": true, "xmm11": true,
+		"xmm12": true, "xmm13": true, "xmm14": true, "xmm15": true,
+		// ARM64 64-bit general purpose
+		"x0": true, "x1": true, "x2": true, "x3": true,
+		"x4": true, "x5": true, "x6": true, "x7": true,
+		"x8": true, "x9": true, "x10": true, "x11": true,
+		"x12": true, "x13": true, "x14": true, "x15": true,
+		"x16": true, "x17": true, "x18": true, "x19": true,
+		"x20": true, "x21": true, "x22": true, "x23": true,
+		"x24": true, "x25": true, "x26": true, "x27": true,
+		"x28": true, "x29": true, "x30": true,
+		// ARM64 32-bit general purpose
+		"w0": true, "w1": true, "w2": true, "w3": true,
+		"w4": true, "w5": true, "w6": true, "w7": true,
+		"w8": true, "w9": true, "w10": true, "w11": true,
+		"w12": true, "w13": true, "w14": true, "w15": true,
+		"w16": true, "w17": true, "w18": true, "w19": true,
+		"w20": true, "w21": true, "w22": true, "w23": true,
+		"w24": true, "w25": true, "w26": true, "w27": true,
+		"w28": true, "w29": true, "w30": true,
+		// ARM64 special registers
+		"sp": true, "xzr": true, "wzr": true, "lr": true,
+
+		// ARM64 / x86 flag names (for getflag / setflag builtins)
+		"carry": true, "zero_flag": true, "negative_flag": true, "overflow_flag": true,
+		"nzcv": true, "cf": true,
+	}
+	return regs
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+func (l *Lowerer) freshVReg() int {
+	r := l.nextVReg
+	l.nextVReg++
+	return r
+}
+
+func (l *Lowerer) freshLabel(prefix string) string {
+	lbl := fmt.Sprintf(".L%s_%d", prefix, l.nextLabel)
+	l.nextLabel++
+	return lbl
+}
+
+func (l *Lowerer) emit(instr IRInstr) {
+	l.fn.Emit(instr)
+}
+
+func (l *Lowerer) emitComment(text string) {
+	l.emit(IRInstr{Op: IRComment, Src1: LabelOp(text)})
+}
+
+// allocVar allocates a stack slot for a local variable and returns the slot index.
+func (l *Lowerer) allocVar(name string) int {
+	slot := l.nextSlot
+	l.vars[name] = slot
+	l.nextSlot++
+	if l.nextSlot > l.fn.Locals {
+		l.fn.Locals = l.nextSlot
+	}
+	return slot
+}
+
+// varSlot returns the stack slot for a variable, or -1 if not found.
+func (l *Lowerer) varSlot(name string) int {
+	if slot, ok := l.vars[name]; ok {
+		return slot
+	}
+	return -1
+}
+
+// slotMem returns a memory operand addressing the given stack slot.
+// Slots are addressed as [rbp - (slot+1)*ptrSize].
+func (l *Lowerer) slotMem(slot int) Operand {
+	offset := -int64((slot + 1) * l.target.PtrSize)
+	return Mem(l.target.BasePointer, offset)
+}
+
+// ---------------------------------------------------------------------------
+// Global variable lowering
+// ---------------------------------------------------------------------------
+
+func (l *Lowerer) lowerGlobal(g *ast.GlobalVar) {
+	label := "_g_" + g.Name
+	typeName := ""
+	if g.Type != nil {
+		typeName = g.Type.Name
+	}
+	l.globals[g.Name] = label
+	l.globalTypes[g.Name] = typeName
+
+	irGlobal := IRGlobal{
+		Name:    label,
+		Type:    typeName,
+		InitImm: 0,
+		InitStr: -1,
+	}
+
+	// Evaluate the initializer if it's a compile-time constant.
+	if g.Value != nil {
+		if g.RuntimeInit || strings.HasPrefix(typeName, "[]") {
+			// Arrays use the heap-backed runtime representation, so their data
+			// cannot be encoded in this scalar global slot at assembly time.
+			l.globalInits = append(l.globalInits, g)
+		}
+		switch v := g.Value.(type) {
+		case *ast.IntLitExpr:
+			val, err := strconv.ParseInt(v.Value, 0, 64)
+			if err == nil {
+				irGlobal.InitImm = val
+			}
+		case *ast.FloatLitExpr:
+			val, err := strconv.ParseFloat(v.Value, 64)
+			if err == nil {
+				irGlobal.InitImm = int64(math.Float64bits(val))
+			}
+		case *ast.BoolLitExpr:
+			if v.Value {
+				irGlobal.InitImm = 1
+			}
+		case *ast.StringLitExpr:
+			raw := stringLiteralValue(v.Value)
+			idx := l.module.AddString(raw)
+			irGlobal.InitStr = idx
+		}
+	}
+
+	l.module.Globals = append(l.module.Globals, irGlobal)
+}
+
+// ---------------------------------------------------------------------------
+// Function lowering
+// ---------------------------------------------------------------------------
+
+func (l *Lowerer) lowerFunction(fn *ast.FnDecl, startup []ast.Stmt) {
+	// Use the mangled name for the IR label (handles overloaded functions).
+	irName := fn.MangledName
+	if irName == "" {
+		irName = fn.Name
+	}
+
+	irFn := &IRFunc{
+		Name:       irName,
+		ParamCount: len(fn.Params),
+		ParamNames: make([]string, len(fn.Params)),
+		Imported:   fn.Imported,
+	}
+	l.fn = irFn
+	l.nextVReg = 0
+	l.nextSlot = 0
+	l.vars = make(map[string]int)
+	l.loopBreakLabel = ""
+	l.loopContinueLabel = ""
+	l.varTypes = map[string]string{}
+	l.vregIsStr = map[int]bool{}
+	l.vregIsFloat = map[int]bool{}
+	l.vregIsUnsigned = map[int]bool{}
+	l.currentRetType = typeExprName(fn.ReturnType)
+
+	// Function prologue label.
+	l.emit(IRInstr{Op: IRLabel, Dst: LabelOp(irName)})
+	l.emitComment(fmt.Sprintf("function %s", fn.Name))
+
+	// Allocate stack slots for parameters and store them.
+	for i, param := range fn.Params {
+		irFn.ParamNames[i] = param.Name
+		if param.Type != nil {
+			l.varTypes[param.Name] = param.Type.Name
+		}
+		slot := l.allocVar(param.Name)
+		// Parameters are passed in registers (on x86-64 SysV) or stack.
+		// We'll store them into their local slots.
+		if i < len(l.target.ArgRegs) {
+			// Parameter is in a register — store it to the stack slot.
+			l.emit(IRInstr{
+				Op:   IRStore,
+				Dst:  l.slotMem(slot),
+				Src1: PReg(l.target.ArgRegs[i]),
+			})
+		} else {
+			// Parameter is on the stack — load from caller's frame.
+			// Spacing must match the emitter's push style:
+			// x86-64 uses 8-byte pushq, ARM64 uses 16-byte str [sp,#-16]!
+			// On Windows x64, the caller allocates 32 bytes of shadow space
+			// between the return address and the pushed stack args.
+			baseOffset := 2 * l.target.PtrSize
+			shadowSpace := 0
+			if l.target.OS == OS_Windows && l.target.Arch == Arch_x86_64 {
+				shadowSpace = 32
+			}
+			callerOffset := int64(baseOffset + shadowSpace + (i-len(l.target.ArgRegs))*l.target.StackArgSlotSize)
+			tmpReg := l.freshVReg()
+			l.emit(IRInstr{
+				Op:   IRLoad,
+				Dst:  VReg(tmpReg),
+				Src1: Mem(l.target.BasePointer, callerOffset),
+			})
+			l.emit(IRInstr{
+				Op:   IRStore,
+				Dst:  l.slotMem(slot),
+				Src1: VReg(tmpReg),
+			})
+		}
+	}
+
+	// Heap-backed globals are constructed once at program entry. Emitters set
+	// up the allocator and GC before these first IR instructions in main.
+	if fn.Name == l.module.EntryFunc {
+		for _, stmt := range startup {
+			l.lowerStmt(stmt)
+		}
+		for _, g := range l.globalInits {
+			value := l.lowerExprForType(g.Value, typeExprName(g.Type))
+			l.emit(IRInstr{
+				Op:   IRStoreGlobal,
+				Dst:  LabelOp(l.globals[g.Name]),
+				Src1: value,
+			})
+		}
+	}
+
+	// Lower the function body.
+	l.lowerBlock(fn.Body)
+
+	// If the last instruction is not a return, emit an implicit return.
+	if len(irFn.Instrs) == 0 || irFn.Instrs[len(irFn.Instrs)-1].Op != IRRet {
+		l.emit(IRInstr{Op: IRRet})
+	}
+
+	// Calculate frame size: locals * ptrSize, aligned to 16 bytes.
+	frameSize := irFn.Locals * l.target.PtrSize
+	if frameSize%16 != 0 {
+		frameSize += 16 - (frameSize % 16)
+	}
+	irFn.FrameSize = frameSize
+
+	l.module.Functions = append(l.module.Functions, irFn)
+}
+
+// ---------------------------------------------------------------------------
+// Statement lowering
+// ---------------------------------------------------------------------------
+
+func (l *Lowerer) lowerBlock(block *ast.BlockStmt) {
+	outerVars, outerTypes := l.vars, l.varTypes
+	l.vars = make(map[string]int)
+	l.varTypes = make(map[string]string)
+	for name, slot := range outerVars {
+		l.vars[name] = slot
+	}
+	for name, typ := range outerTypes {
+		l.varTypes[name] = typ
+	}
+	for _, stmt := range block.Stmts {
+		l.lowerStmt(stmt)
+	}
+	l.vars, l.varTypes = outerVars, outerTypes
+}
+
+func (l *Lowerer) lowerStmt(stmt ast.Stmt) {
+	switch s := stmt.(type) {
+	case *ast.LetStmt:
+		l.lowerLetStmt(s)
+	case *ast.ReturnStmt:
+		l.lowerReturnStmt(s)
+	case *ast.IfStmt:
+		l.lowerIfStmt(s)
+	case *ast.WhileStmt:
+		l.lowerWhileStmt(s)
+	case *ast.ForStmt:
+		l.lowerForStmt(s)
+	case *ast.ExprStmt:
+		l.lowerExpr(s.Expression)
+	case *ast.AssignStmt:
+		l.lowerAssignStmt(s)
+	case *ast.BlockStmt:
+		l.lowerBlock(s)
+	case *ast.BreakStmt:
+		if l.loopBreakLabel != "" {
+			l.emit(IRInstr{Op: IRJmp, Dst: LabelOp(l.loopBreakLabel)})
+		}
+	case *ast.ContinueStmt:
+		if l.loopContinueLabel != "" {
+			l.emit(IRInstr{Op: IRJmp, Dst: LabelOp(l.loopContinueLabel)})
+		}
+	}
+}
+
+func (l *Lowerer) lowerLetStmt(s *ast.LetStmt) {
+	slot := l.allocVar(s.Name)
+	if s.Type != nil {
+		l.varTypes[s.Name] = s.Type.Name
+	}
+	valOp := l.lowerExprForType(s.Value, typeExprName(s.Type))
+
+	l.emit(IRInstr{
+		Op:   IRStore,
+		Dst:  l.slotMem(slot),
+		Src1: valOp,
+	})
+	_ = slot
+}
+
+func (l *Lowerer) coerceValueToType(targetType string, valOp Operand) Operand {
+	if targetType == "str" && !l.operandIsStr(valOp) && valOp.Kind != OpNone {
+		return l.charToStr(valOp)
+	}
+	width := int64(0)
+	switch targetType {
+	case "i8", "u8":
+		width = 8
+	case "i16", "u16":
+		width = 16
+	case "i32", "u32":
+		width = 32
+	}
+	if width == 0 || valOp.Kind == OpNone {
+		return valOp
+	}
+	unsigned := strings.HasPrefix(targetType, "u")
+	if valOp.Kind == OpImmediate {
+		if unsigned {
+			return Imm(valOp.Imm & ((int64(1) << width) - 1))
+		}
+		return Imm((valOp.Imm << (64 - width)) >> (64 - width))
+	}
+	if unsigned {
+		width = -width
+	}
+	dst := VReg(l.freshVReg())
+	l.emit(IRInstr{Op: IRNarrow, Dst: dst, Src1: valOp, Src2: Imm(width)})
+	l.markOperandType(dst, targetType)
+	return dst
+}
+
+func typeExprName(t *ast.TypeExpr) string {
+	if t == nil {
+		return ""
+	}
+	return t.Name
+}
+
+// lowerExprForType carries declared type context into expression lowering.
+// This makes nested array literals recursive and converts byte-form character
+// values when an array element or other destination requires a str pointer.
+func (l *Lowerer) lowerExprForType(expr ast.Expr, targetType string) Operand {
+	if array, ok := expr.(*ast.ArrayLitExpr); ok && strings.HasPrefix(targetType, "[]") {
+		return l.lowerArrayLitExprAs(array, strings.TrimPrefix(targetType, "[]"))
+	}
+	if literal, ok := expr.(*ast.StringLitExpr); ok && targetType == "str" {
+		return l.lowerStringLitAsString(literal)
+	}
+	return l.coerceValueToType(targetType, l.lowerExpr(expr))
+}
+
+func (l *Lowerer) lowerReturnStmt(s *ast.ReturnStmt) {
+	if s.Value != nil {
+		valOp := l.lowerExprForType(s.Value, l.currentRetType)
+		l.emit(IRInstr{Op: IRRet, Src1: valOp})
+	} else {
+		l.emit(IRInstr{Op: IRRet})
+	}
+}
+
+func (l *Lowerer) lowerIfStmt(s *ast.IfStmt) {
+	condOp := l.lowerExpr(s.Condition)
+	elseLabel := l.freshLabel("else")
+	endLabel := l.freshLabel("endif")
+
+	if s.Else != nil {
+		// if cond == 0, jump to else
+		l.emit(IRInstr{Op: IRJmpNot, Src1: condOp, Dst: LabelOp(elseLabel)})
+		l.lowerBlock(s.Then)
+		l.emit(IRInstr{Op: IRJmp, Dst: LabelOp(endLabel)})
+		l.emit(IRInstr{Op: IRLabel, Dst: LabelOp(elseLabel)})
+		switch e := s.Else.(type) {
+		case *ast.BlockStmt:
+			l.lowerBlock(e)
+		case *ast.IfStmt:
+			l.lowerIfStmt(e)
+		}
+	} else {
+		l.emit(IRInstr{Op: IRJmpNot, Src1: condOp, Dst: LabelOp(endLabel)})
+		l.lowerBlock(s.Then)
+	}
+	l.emit(IRInstr{Op: IRLabel, Dst: LabelOp(endLabel)})
+}
+
+func (l *Lowerer) lowerWhileStmt(s *ast.WhileStmt) {
+	condLabel := l.freshLabel("while_cond")
+	bodyLabel := l.freshLabel("while_body")
+	endLabel := l.freshLabel("while_end")
+
+	// Save and set loop context.
+	prevBreak := l.loopBreakLabel
+	prevContinue := l.loopContinueLabel
+	l.loopBreakLabel = endLabel
+	l.loopContinueLabel = condLabel
+
+	l.emit(IRInstr{Op: IRLabel, Dst: LabelOp(condLabel)})
+	condOp := l.lowerExpr(s.Condition)
+	l.emit(IRInstr{Op: IRJmpNot, Src1: condOp, Dst: LabelOp(endLabel)})
+	l.emit(IRInstr{Op: IRLabel, Dst: LabelOp(bodyLabel)})
+	l.lowerBlock(s.Body)
+	l.emit(IRInstr{Op: IRJmp, Dst: LabelOp(condLabel)})
+	l.emit(IRInstr{Op: IRLabel, Dst: LabelOp(endLabel)})
+
+	l.loopBreakLabel = prevBreak
+	l.loopContinueLabel = prevContinue
+}
+
+func (l *Lowerer) lowerForStmt(s *ast.ForStmt) {
+	outerVars, outerTypes := l.vars, l.varTypes
+	l.vars = make(map[string]int)
+	l.varTypes = make(map[string]string)
+	for name, slot := range outerVars {
+		l.vars[name] = slot
+	}
+	for name, typ := range outerTypes {
+		l.varTypes[name] = typ
+	}
+	condLabel := l.freshLabel("for_cond")
+	updateLabel := l.freshLabel("for_update")
+	endLabel := l.freshLabel("for_end")
+
+	prevBreak := l.loopBreakLabel
+	prevContinue := l.loopContinueLabel
+	l.loopBreakLabel = endLabel
+	l.loopContinueLabel = updateLabel
+
+	// Init
+	if s.Init != nil {
+		l.lowerStmt(s.Init)
+	}
+
+	// Condition
+	l.emit(IRInstr{Op: IRLabel, Dst: LabelOp(condLabel)})
+	condOp := l.lowerExpr(s.Condition)
+	l.emit(IRInstr{Op: IRJmpNot, Src1: condOp, Dst: LabelOp(endLabel)})
+
+	// Body
+	l.lowerBlock(s.Body)
+
+	// Update
+	l.emit(IRInstr{Op: IRLabel, Dst: LabelOp(updateLabel)})
+	if s.Update != nil {
+		l.lowerStmt(s.Update)
+	}
+	l.emit(IRInstr{Op: IRJmp, Dst: LabelOp(condLabel)})
+
+	l.emit(IRInstr{Op: IRLabel, Dst: LabelOp(endLabel)})
+
+	l.loopBreakLabel = prevBreak
+	l.loopContinueLabel = prevContinue
+	l.vars, l.varTypes = outerVars, outerTypes
+}
+
+func (l *Lowerer) lowerAssignStmt(s *ast.AssignStmt) {
+	if binary, ok := s.Value.(*ast.BinaryExpr); ok && binary.Left == s.Target {
+		if member, ok := s.Target.(*ast.MemberExpr); ok && member.ResolvedField != nil {
+			addr := l.fieldAddress(member)
+			value := l.lowerBinaryOperands(binary, l.loadField(member.ResolvedField, addr), l.lowerExpr(binary.Right))
+			l.storeField(member.ResolvedField, addr, value)
+			return
+		}
+		if index, ok := s.Target.(*ast.IndexExpr); ok {
+			if elem := l.indexElementType(index); elem != "" {
+				base, at := l.lowerExpr(index.Object), l.lowerExpr(index.Index)
+				value := l.lowerBinaryOperands(binary, l.arrayElement(base, at, elem), l.lowerExpr(binary.Right))
+				l.emit(IRInstr{Op: IRArraySet, Dst: base, Src1: at, Src2: value})
+				return
+			}
+		}
+	}
+	switch target := s.Target.(type) {
+	case *ast.IdentExpr:
+		// Check if it's a physical register.
+		if l.physRegs[target.Name] {
+			valOp := l.lowerExpr(s.Value)
+			l.emit(IRInstr{Op: IRMov, Dst: PReg(target.Name), Src1: valOp})
+			return
+		}
+		// Local variable?
+		slot := l.varSlot(target.Name)
+		if slot >= 0 {
+			valOp := l.lowerExprForType(s.Value, l.varTypes[target.Name])
+			l.emit(IRInstr{Op: IRStore, Dst: l.slotMem(slot), Src1: valOp})
+			return
+		}
+		// Global variable?
+		if label, ok := l.globals[target.Name]; ok {
+			valOp := l.lowerExprForType(s.Value, l.globalTypes[target.Name])
+			l.emit(IRInstr{Op: IRStoreGlobal, Dst: LabelOp(label), Src1: valOp})
+			return
+		}
+	case *ast.MemberExpr:
+		if field := target.ResolvedField; field != nil {
+			l.storeField(field, l.fieldAddress(target), l.lowerExprForType(s.Value, field.Type))
+		}
+	case *ast.IndexExpr:
+		// Check if target is an array or string.
+		if elem := l.indexElementType(target); elem != "" {
+			// arr[idx] = val → IRArraySet
+			baseOp := l.lowerExpr(target.Object)
+			idxOp := l.lowerExpr(target.Index)
+			valOp := l.lowerExprForType(s.Value, elem)
+			l.emit(IRInstr{Op: IRArraySet, Dst: baseOp, Src1: idxOp, Src2: valOp})
+		} else {
+			// str[idx] = val → compute base+idx, store a single byte.
+			baseOp := l.lowerExpr(target.Object)
+			idxOp := l.lowerExpr(target.Index)
+			valOp := l.lowerExpr(s.Value)
+			addrReg := l.freshVReg()
+			l.emit(IRInstr{Op: IRAdd, Dst: VReg(addrReg), Src1: baseOp, Src2: idxOp})
+			l.emit(IRInstr{Op: IRStoreByte, Dst: VReg(addrReg), Src1: valOp})
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Expression lowering — returns an Operand holding the result
+// ---------------------------------------------------------------------------
+
+func (l *Lowerer) lowerExpr(expr ast.Expr) Operand {
+	if expr == nil {
+		return None()
+	}
+
+	switch e := expr.(type) {
+	case *ast.NullLitExpr:
+		return Imm(0)
+	case *ast.IntLitExpr:
+		return l.lowerIntLit(e)
+	case *ast.FloatLitExpr:
+		return l.lowerFloatLit(e)
+	case *ast.StringLitExpr:
+		return l.lowerStringLit(e)
+	case *ast.BoolLitExpr:
+		if e.Value {
+			return Imm(1)
+		}
+		return Imm(0)
+	case *ast.IdentExpr:
+		return l.lowerIdentExpr(e)
+	case *ast.UnaryExpr:
+		return l.lowerUnaryExpr(e)
+	case *ast.BinaryExpr:
+		return l.lowerBinaryExpr(e)
+	case *ast.CallExpr:
+		return l.lowerCallExpr(e)
+	case *ast.GroupExpr:
+		return l.lowerExpr(e.Expression)
+	case *ast.IndexExpr:
+		return l.lowerIndexExpr(e)
+	case *ast.AddressOfExpr:
+		return l.lowerAddressOfExpr(e)
+	case *ast.ArrayLitExpr:
+		return l.lowerArrayLitExpr(e)
+	case *ast.NewExpr:
+		return l.lowerNewExpr(e)
+	case *ast.MemberExpr:
+		if field := e.ResolvedField; field != nil {
+			return l.loadField(field, l.fieldAddress(e))
+		}
+		// Member expressions (import aliases) — return a label if possible.
+		if ident, ok := e.Object.(*ast.IdentExpr); ok {
+			return LabelOp(ident.Name + "." + e.Field)
+		}
+		return None()
+	}
+	return None()
+}
+
+func (l *Lowerer) lowerIntLit(e *ast.IntLitExpr) Operand {
+	val, err := strconv.ParseInt(e.Value, 0, 64)
+	if err != nil {
+		// Try unsigned
+		uval, err2 := strconv.ParseUint(e.Value, 0, 64)
+		if err2 != nil {
+			return Imm(0)
+		}
+		return Imm(int64(uval))
+	}
+	return Imm(val)
+}
+
+func (l *Lowerer) lowerFloatLit(e *ast.FloatLitExpr) Operand {
+	val, err := strconv.ParseFloat(e.Value, 64)
+	if err != nil {
+		return Imm(0)
+	}
+	// Store the IEEE 754 double-precision bit pattern as an int64 immediate.
+	bits := int64(math.Float64bits(val))
+	dst := l.freshVReg()
+	l.vregIsFloat[dst] = true
+	l.emit(IRInstr{Op: IRMov, Dst: VReg(dst), Src1: Imm(bits)})
+	return VReg(dst)
+}
+
+func (l *Lowerer) lowerStringLit(e *ast.StringLitExpr) Operand {
+	// Strip quotes and handle escapes.
+	lexeme := e.Value
+	isSingleQuoted := len(lexeme) >= 2 && lexeme[0] == '\''
+	raw := stringLiteralValue(lexeme)
+
+	// Only single-quoted literals that decode to a single byte are treated as
+	// immediate byte values (used for comparisons with str_index results).
+	// Double-quoted strings (even length 1 like "\n") remain real strings.
+	if isSingleQuoted && len(raw) == 1 {
+		return Imm(int64(raw[0]))
+	}
+
+	return l.lowerStringLitAsString(e)
+}
+
+func (l *Lowerer) lowerStringLitAsString(e *ast.StringLitExpr) Operand {
+	return StrRef(l.module.AddString(stringLiteralValue(e.Value)))
+}
+
+func stringLiteralValue(lexeme string) string {
+	raw := lexeme
+	if len(raw) >= 2 && (raw[0] == '"' || raw[0] == '\'') {
+		raw = raw[1 : len(raw)-1]
+	}
+	return unescapeString(raw)
+}
+
+func (l *Lowerer) lowerIdentExpr(e *ast.IdentExpr) Operand {
+	// Physical register?
+	if l.physRegs[e.Name] {
+		return PReg(e.Name)
+	}
+	// Local variable?
+	slot := l.varSlot(e.Name)
+	if slot >= 0 {
+		dst := l.freshVReg()
+		l.emit(IRInstr{Op: IRLoad, Dst: VReg(dst), Src1: l.slotMem(slot)})
+		if l.varTypes[e.Name] == "str" {
+			l.vregIsStr[dst] = true
+		}
+		if l.varIsFloat(e.Name) {
+			l.vregIsFloat[dst] = true
+		}
+		if l.varIsUnsigned(e.Name) {
+			l.vregIsUnsigned[dst] = true
+		}
+		return VReg(dst)
+	}
+	// Global variable?
+	if label, ok := l.globals[e.Name]; ok {
+		dst := l.freshVReg()
+		l.emit(IRInstr{Op: IRLoadGlobal, Dst: VReg(dst), Src1: LabelOp(label)})
+		if l.globalTypes[e.Name] == "str" {
+			l.vregIsStr[dst] = true
+		}
+		if l.globalTypes[e.Name] == "f64" || l.globalTypes[e.Name] == "f32" {
+			l.vregIsFloat[dst] = true
+		}
+		gt := l.globalTypes[e.Name]
+		if gt == "u64" || gt == "u32" || gt == "u16" || gt == "u8" {
+			l.vregIsUnsigned[dst] = true
+		}
+		return VReg(dst)
+	}
+	// Could be a function name (for call targets) — return as label.
+	return LabelOp(e.Name)
+}
+
+func (l *Lowerer) lowerUnaryExpr(e *ast.UnaryExpr) Operand {
+	operand := l.lowerExpr(e.Operand)
+	dst := l.freshVReg()
+	switch e.Op {
+	case "-":
+		if l.operandIsFloat(operand) {
+			l.vregIsFloat[dst] = true
+			l.emit(IRInstr{Op: IRFNeg, Dst: VReg(dst), Src1: operand})
+		} else {
+			l.emit(IRInstr{Op: IRNeg, Dst: VReg(dst), Src1: operand})
+		}
+	case "!":
+		l.emit(IRInstr{Op: IRNot, Dst: VReg(dst), Src1: operand})
+	case "~":
+		l.emit(IRInstr{Op: IRBitNot, Dst: VReg(dst), Src1: operand})
+	default:
+		return operand
+	}
+	result := VReg(dst)
+	if e.Op != "!" {
+		t := l.exprType(e.Operand)
+		l.markOperandType(result, t)
+		return l.coerceValueToType(t, result)
+	}
+	return result
+}
+
+// operandIsStr reports whether an operand holds a string pointer.
+func (l *Lowerer) operandIsStr(op Operand) bool {
+	switch op.Kind {
+	case OpStringRef:
+		return true
+	case OpVirtReg:
+		return l.vregIsStr[op.Reg]
+	}
+	return false
+}
+
+// operandIsFloat reports whether an operand holds a float64 value (IEEE 754 bits).
+func (l *Lowerer) operandIsFloat(op Operand) bool {
+	if op.Kind == OpVirtReg {
+		return l.vregIsFloat[op.Reg]
+	}
+	return false
+}
+
+// varIsFloat reports whether a variable is declared as f64 or f32.
+func (l *Lowerer) varIsFloat(name string) bool {
+	t := l.varTypes[name]
+	return t == "f64" || t == "f32"
+}
+
+// varIsArray reports whether a variable is an array type.
+func (l *Lowerer) varIsArray(name string) bool {
+	t := l.varTypes[name]
+	if t == "" {
+		t = l.globalTypes[name]
+	}
+	return len(t) > 2 && t[:2] == "[]"
+}
+
+// exprType returns the declared/static type needed to distinguish array
+// indexing from string byte indexing, including globals and nested arrays.
+func (l *Lowerer) exprType(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.IdentExpr:
+		if t := l.varTypes[e.Name]; t != "" {
+			return t
+		}
+		return l.globalTypes[e.Name]
+	case *ast.UnaryExpr:
+		if e.Op == "!" {
+			return "bool"
+		}
+		return l.exprType(e.Operand)
+	case *ast.BinaryExpr:
+		switch e.Op {
+		case "==", "!=", "<", "<=", ">", ">=", "&&", "||":
+			return "bool"
+		}
+		if typ := l.exprType(e.Left); typ != "" {
+			return typ
+		}
+		return l.exprType(e.Right)
+	case *ast.StringLitExpr:
+		return "str"
+	case *ast.MemberExpr:
+		if e.ResolvedField != nil {
+			return e.ResolvedField.Type
+		}
+	case *ast.IndexExpr:
+		objectType := l.exprType(e.Object)
+		if strings.HasPrefix(objectType, "[]") {
+			return strings.TrimPrefix(objectType, "[]")
+		}
+		if objectType == "str" {
+			return "str"
+		}
+	case *ast.GroupExpr:
+		return l.exprType(e.Expression)
+	case *ast.CallExpr:
+		name := e.ResolvedCallee
+		if name == "" {
+			if ident, ok := e.Callee.(*ast.IdentExpr); ok {
+				name = ident.Name
+			}
+		}
+		return l.funcRetTypes[name]
+	case *ast.ArrayLitExpr:
+		if len(e.Elems) > 0 {
+			return "[]" + l.exprType(e.Elems[0])
+		}
+	}
+	return ""
+}
+
+// operandIsUnsigned reports whether an operand holds an unsigned integer value.
+func (l *Lowerer) operandIsUnsigned(op Operand) bool {
+	if op.Kind == OpVirtReg {
+		return l.vregIsUnsigned[op.Reg]
+	}
+	return false
+}
+
+// varIsUnsigned reports whether a variable is declared as an unsigned type.
+func (l *Lowerer) varIsUnsigned(name string) bool {
+	t := l.varTypes[name]
+	return t == "u64" || t == "u32" || t == "u16" || t == "u8"
+}
+
+// charToStr converts a byte value (e.g. from str_index) into a 1-char
+// null-terminated string by storing it on the stack and returning the address.
+// On little-endian systems, storing a byte value as a 64-bit qword naturally
+// places the byte at offset 0 and zeros (null terminators) at offsets 1-7.
+func (l *Lowerer) charToStr(byteOp Operand) Operand {
+	slot := l.allocVar(fmt.Sprintf("_c2s_%d", l.nextVReg))
+	l.emit(IRInstr{Op: IRStore, Dst: l.slotMem(slot), Src1: byteOp})
+	reg := l.freshVReg()
+	l.emit(IRInstr{Op: IRLea, Dst: VReg(reg), Src1: l.slotMem(slot)})
+	l.vregIsStr[reg] = true
+	return VReg(reg)
+}
+
+func (l *Lowerer) lowerBinaryExpr(e *ast.BinaryExpr) Operand {
+	if e.Op == "&&" || e.Op == "||" {
+		dst := VReg(l.freshVReg())
+		end := l.freshLabel("logical_end")
+		left := l.lowerExpr(e.Left)
+		l.emit(IRInstr{Op: IRMov, Dst: dst, Src1: left})
+		branch := IRJmpNot
+		if e.Op == "||" {
+			branch = IRJmpIf
+		}
+		l.emit(IRInstr{Op: branch, Src1: left, Dst: LabelOp(end)})
+		right := l.lowerExpr(e.Right)
+		l.emit(IRInstr{Op: IRMov, Dst: dst, Src1: right})
+		l.emit(IRInstr{Op: IRLabel, Dst: LabelOp(end)})
+		return dst
+	}
+	return l.lowerBinaryOperands(e, l.lowerExpr(e.Left), l.lowerExpr(e.Right))
+}
+
+func (l *Lowerer) lowerBinaryOperands(e *ast.BinaryExpr, left, right Operand) Operand {
+
+	// String concatenation: if at least one operand is a string and op is +.
+	if e.Op == "+" {
+		leftStr := l.operandIsStr(left)
+		rightStr := l.operandIsStr(right)
+
+		if leftStr || rightStr {
+			// Compile-time constant folding when both are literal string refs.
+			if left.Kind == OpStringRef && right.Kind == OpStringRef {
+				li := int(left.Imm)
+				ri := int(right.Imm)
+				if li >= 0 && li < len(l.module.Strings) && ri >= 0 && ri < len(l.module.Strings) {
+					combined := l.module.Strings[li].Value + l.module.Strings[ri].Value
+					idx := l.module.AddString(combined)
+					return StrRef(idx)
+				}
+			}
+			// Convert non-string operand (byte) to a 1-char string if needed.
+			if !leftStr {
+				left = l.charToStr(left)
+			}
+			if !rightStr {
+				right = l.charToStr(right)
+			}
+			// Runtime concatenation.
+			dst := l.freshVReg()
+			l.vregIsStr[dst] = true
+			l.emit(IRInstr{Op: IRStrConcat, Dst: VReg(dst), Src1: left, Src2: right})
+			return VReg(dst)
+		}
+	}
+	dst := l.freshVReg()
+
+	// String equality / inequality: compare contents, not pointer addresses.
+	if e.Op == "==" || e.Op == "!=" {
+		leftStr := l.operandIsStr(left)
+		rightStr := l.operandIsStr(right)
+		if leftStr || rightStr {
+			if !leftStr {
+				left = l.charToStr(left)
+			}
+			if !rightStr {
+				right = l.charToStr(right)
+			}
+			l.emit(IRInstr{Op: IRStrCmpEq, Dst: VReg(dst), Src1: left, Src2: right})
+			if e.Op == "!=" {
+				negDst := l.freshVReg()
+				l.emit(IRInstr{Op: IRNot, Dst: VReg(negDst), Src1: VReg(dst)})
+				return VReg(negDst)
+			}
+			return VReg(dst)
+		}
+	}
+
+	// Float arithmetic: if either operand is float, use float opcodes.
+	leftFloat := l.operandIsFloat(left)
+	rightFloat := l.operandIsFloat(right)
+	isFloat := leftFloat || rightFloat
+
+	if isFloat {
+		// Promote non-float operand to float if needed.
+		if !leftFloat {
+			conv := l.freshVReg()
+			l.vregIsFloat[conv] = true
+			l.emit(IRInstr{Op: IRIntToFloat, Dst: VReg(conv), Src1: left})
+			left = VReg(conv)
+		}
+		if !rightFloat {
+			conv := l.freshVReg()
+			l.vregIsFloat[conv] = true
+			l.emit(IRInstr{Op: IRIntToFloat, Dst: VReg(conv), Src1: right})
+			right = VReg(conv)
+		}
+
+		var op IROp
+		isCmp := false
+		switch e.Op {
+		case "+":
+			op = IRFAdd
+		case "-":
+			op = IRFSub
+		case "*":
+			op = IRFMul
+		case "/":
+			op = IRFDiv
+		case "%":
+			op = IRFMod
+		case "==":
+			op = IRFCmpEq
+			isCmp = true
+		case "!=":
+			op = IRFCmpNe
+			isCmp = true
+		case "<":
+			op = IRFCmpLt
+			isCmp = true
+		case "<=":
+			op = IRFCmpLe
+			isCmp = true
+		case ">":
+			op = IRFCmpGt
+			isCmp = true
+		case ">=":
+			op = IRFCmpGe
+			isCmp = true
+		default:
+			// Bitwise/logical ops don't make sense on floats — fall through to int.
+			goto intOps
+		}
+		if !isCmp {
+			l.vregIsFloat[dst] = true
+		}
+		l.emit(IRInstr{Op: op, Dst: VReg(dst), Src1: left, Src2: right})
+		return VReg(dst)
+	}
+
+intOps:
+	var op IROp
+	switch e.Op {
+	case "+":
+		op = IRAdd
+	case "-":
+		op = IRSub
+	case "*":
+		op = IRMul
+	case "/":
+		op = IRDiv
+		if l.operandIsUnsigned(left) || l.operandIsUnsigned(right) {
+			op = IRUDiv
+		}
+	case "%":
+		op = IRMod
+		if l.operandIsUnsigned(left) || l.operandIsUnsigned(right) {
+			op = IRUMod
+		}
+	case "==":
+		op = IRCmpEq
+	case "!=":
+		op = IRCmpNe
+	case "<":
+		op = IRCmpLt
+	case "<=":
+		op = IRCmpLe
+	case ">":
+		op = IRCmpGt
+	case ">=":
+		op = IRCmpGe
+	case "&&":
+		op = IRAnd
+	case "||":
+		op = IROr
+	case "&":
+		op = IRAnd
+	case "|":
+		op = IROr
+	case "^":
+		op = IRXor
+	case "<<":
+		op = IRShl
+	case ">>":
+		op = IRShr
+	default:
+		return left
+	}
+
+	if l.operandIsUnsigned(left) || l.operandIsUnsigned(right) {
+		switch op {
+		case IRShr:
+			op = IRUShr
+		case IRCmpLt:
+			op = IRUCmpLt
+		case IRCmpLe:
+			op = IRUCmpLe
+		case IRCmpGt:
+			op = IRUCmpGt
+		case IRCmpGe:
+			op = IRUCmpGe
+		default:
+			if !isCmpOp(op) {
+				l.vregIsUnsigned[dst] = true
+			}
+		}
+	}
+	l.emit(IRInstr{Op: op, Dst: VReg(dst), Src1: left, Src2: right})
+	return l.coerceValueToType(l.exprType(e), VReg(dst))
+}
+
+func (l *Lowerer) lowerCallExpr(e *ast.CallExpr) Operand {
+	// Determine callee name. Prefer the semantically resolved callee — it
+	// carries the mangled name for overloaded functions and disambiguates
+	// user overloads of built-in intrinsic names (e.g. `len` for arrays).
+	calleeName := ""
+	switch c := e.Callee.(type) {
+	case *ast.IdentExpr:
+		if e.ResolvedCallee != "" {
+			calleeName = e.ResolvedCallee
+		} else {
+			calleeName = c.Name
+		}
+	case *ast.MemberExpr:
+		// For import-aliased calls, use the resolved callee set by semantic analysis.
+		if e.ResolvedCallee != "" {
+			calleeName = e.ResolvedCallee
+		} else {
+			calleeName = ast.ExprString(c)
+		}
+	default:
+		calleeName = ast.ExprString(e.Callee)
+	}
+
+	// Check if this is a built-in intrinsic.
+	if handler, ok := l.builtinHandlers()[calleeName]; ok {
+		return handler(e)
+	}
+
+	// Use the resolved callee name from semantic analysis (handles overloads).
+	resolvedName := calleeName
+	if e.ResolvedCallee != "" {
+		resolvedName = e.ResolvedCallee
+	} else if entries, ok := l.funcOverloads[calleeName]; ok {
+		// Fallback: resolve overloaded functions when ResolvedCallee is not set
+		// (e.g. calls inside imported function bodies that weren't semantically analyzed).
+		if len(entries) == 1 {
+			resolvedName = entries[0].mangledName
+		} else if len(entries) > 1 {
+			// Multiple overloads — match by argument count.
+			for _, entry := range entries {
+				if entry.paramCount == len(e.Args) {
+					resolvedName = entry.mangledName
+					break
+				}
+			}
+		}
+	}
+
+	// Regular function call — lower arguments and coerce byte-like string
+	// values (single-quoted one-byte literals and string indexes) to pointers
+	// when the callee declares a str parameter.
+	var argOps []Operand
+	paramTypes := l.funcParamTypes[resolvedName]
+	if e.Receiver != nil {
+		argOps = append(argOps, l.lowerExpr(e.Receiver))
+		paramTypes = paramTypes[1:]
+	}
+	argOps = l.lowerArgs(argOps, e.Args, paramTypes)
+
+	dst := l.freshVReg()
+	l.emit(IRInstr{
+		Op:   IRCall,
+		Dst:  VReg(dst),
+		Src1: LabelOp(resolvedName),
+		Args: argOps,
+	})
+	if l.funcRetTypes[resolvedName] == "str" {
+		l.vregIsStr[dst] = true
+	}
+	if l.funcRetTypes[resolvedName] == "f64" || l.funcRetTypes[resolvedName] == "f32" {
+		l.vregIsFloat[dst] = true
+	}
+	retType := l.funcRetTypes[resolvedName]
+	if retType == "u64" || retType == "u32" || retType == "u16" || retType == "u8" {
+		l.vregIsUnsigned[dst] = true
+	}
+	return VReg(dst)
+}
+
+func (l *Lowerer) lowerIndexExpr(e *ast.IndexExpr) Operand {
+	// Determine if the object is an array or string.
+	if elem := l.indexElementType(e); elem != "" {
+		return l.arrayElement(l.lowerExpr(e.Object), l.lowerExpr(e.Index), elem)
+	}
+
+	// String indexing: str[i] → IRStrIndex
+	objOp := l.lowerExpr(e.Object)
+	idxOp := l.lowerExpr(e.Index)
+	dst := l.freshVReg()
+	l.emit(IRInstr{Op: IRStrIndex, Dst: VReg(dst), Src1: objOp, Src2: idxOp})
+	return VReg(dst)
+}
+
+func (l *Lowerer) lowerAddressOfExpr(e *ast.AddressOfExpr) Operand {
+	if member, ok := e.Operand.(*ast.MemberExpr); ok && member.ResolvedField != nil {
+		if member.ResolvedField.Global != "" {
+			dst := VReg(l.freshVReg())
+			l.emit(IRInstr{Op: IRLea, Dst: dst, Src1: LabelOp(l.globals[member.ResolvedField.Global])})
+			return dst
+		}
+		return l.fieldAddress(member)
+	}
+	// &variable — load the address of the variable's stack slot.
+	if ident, ok := e.Operand.(*ast.IdentExpr); ok {
+		slot := l.varSlot(ident.Name)
+		if slot >= 0 {
+			dst := l.freshVReg()
+			l.emit(IRInstr{Op: IRLea, Dst: VReg(dst), Src1: l.slotMem(slot)})
+			return VReg(dst)
+		}
+	}
+	return l.lowerExpr(e.Operand)
+}
+
+func (l *Lowerer) lowerArrayLitExpr(e *ast.ArrayLitExpr) Operand {
+	return l.lowerArrayLitExprAs(e, "")
+}
+
+func (l *Lowerer) lowerArrayLitExprAs(e *ast.ArrayLitExpr, elemType string) Operand {
+	// Create array with initial capacity = max(len(elems), 4).
+	cap := len(e.Elems)
+	if cap < 4 {
+		cap = 4
+	}
+	dst := l.freshVReg()
+	l.emit(IRInstr{Op: IRArrayNew, Dst: VReg(dst), Src1: Imm(8), Src2: Imm(int64(cap))})
+	// Append each initial element.
+	for _, elem := range e.Elems {
+		elemOp := l.lowerExprForType(elem, elemType)
+		l.emit(IRInstr{Op: IRArrayAppend, Dst: VReg(dst), Src1: elemOp})
+	}
+	return VReg(dst)
+}
+
+// ---------------------------------------------------------------------------
+// Built-in intrinsic handlers
+// ---------------------------------------------------------------------------
+
+type builtinHandler func(e *ast.CallExpr) Operand
+
+func (l *Lowerer) builtinHandlers() map[string]builtinHandler {
+	return map[string]builtinHandler{
+		"mov":           l.builtinMov,
+		"lea":           l.builtinLea,
+		"push":          l.builtinPush,
+		"pop":           l.builtinPop,
+		"syscall":       l.builtinSyscall,
+		"int":           l.builtinInt,
+		"call":          l.builtinCall,
+		"ret":           l.builtinRet,
+		"nop":           l.builtinNop,
+		"setreg":        l.builtinSetReg,
+		"getreg":        l.builtinGetReg,
+		"setflag":       l.builtinSetFlag,
+		"getflag":       l.builtinGetFlag,
+		"array_append":  l.builtinAppend,
+		"array_pop":     l.builtinArrayPop,
+		"len":           l.builtinLen,
+		"load8":         l.builtinLoad8,
+		"store_byte":    l.builtinStoreByte,
+		"load32":        l.builtinLoad32,
+		"load64":        l.builtinLoad64,
+		"win_call":      l.builtinWinCall,
+		"i64_to_f64":    l.builtinI64ToF64,
+		"f64_to_i64":    l.builtinF64ToI64,
+		"f64_bits":      l.builtinF64Bits,
+		"f64_from_bits": l.builtinF64FromBits,
+		"gc_collect":    l.builtinGCCollect,
+	}
+}
+
+// mov(dst, src) — move data into a register or memory.
+func (l *Lowerer) builtinMov(e *ast.CallExpr) Operand {
+	if len(e.Args) != 2 {
+		return None()
+	}
+	dstOp := l.lowerExpr(e.Args[0])
+	// Direct local-to-physical moves must not materialize a temporary through
+	// a scratch register: it may already contain another syscall argument.
+	if ident, ok := e.Args[1].(*ast.IdentExpr); ok {
+		if slot := l.varSlot(ident.Name); slot >= 0 && dstOp.Kind == OpPhysReg {
+			l.emit(IRInstr{Op: IRMov, Dst: dstOp, Src1: l.slotMem(slot)})
+			return None()
+		}
+	}
+	// Expressions may invoke functions or use any scratch register. Preserve
+	// the explicit register state while evaluating them, then install the result.
+	var saved []string
+	switch e.Args[1].(type) {
+	case *ast.IdentExpr, *ast.IntLitExpr, *ast.StringLitExpr, *ast.BoolLitExpr:
+	default:
+		if dstOp.Kind == OpPhysReg {
+			switch l.target.Arch {
+			case Arch_ARM64:
+				for i := 0; i < 29; i++ {
+					saved = append(saved, fmt.Sprintf("x%d", i))
+				}
+				saved = append(saved, "x30")
+			case Arch_x86_64:
+				saved = []string{"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"}
+			default:
+				saved = []string{"eax", "ebx", "ecx", "edx", "esi", "edi"}
+			}
+		}
+	}
+	for _, reg := range saved {
+		l.emit(IRInstr{Op: IRPush, Src1: PReg(reg)})
+	}
+	srcOp := l.lowerExpr(e.Args[1])
+	for i := len(saved) - 1; i >= 0; i-- {
+		l.emit(IRInstr{Op: IRPop, Dst: PReg(saved[i])})
+	}
+	l.emit(IRInstr{Op: IRMov, Dst: dstOp, Src1: srcOp})
+	return None()
+}
+
+// lea(dst, src) — load effective address.
+func (l *Lowerer) builtinLea(e *ast.CallExpr) Operand {
+	if len(e.Args) != 2 {
+		return None()
+	}
+	dstOp := l.lowerExpr(e.Args[0])
+
+	// For lea, we want the address of the data the source refers to.
+	// If the source is a local variable (already lowered via IRLoad into a vreg),
+	// the vreg already holds the pointer value we want.  Using IRMov is correct
+	// because the value IS the address.  IRLea is only needed for raw memory
+	// or string-literal references.
+	srcArg := e.Args[1]
+	if ident, ok := srcArg.(*ast.IdentExpr); ok {
+		if !l.physRegs[ident.Name] {
+			// Local variable: load its value (which is already a pointer for strings).
+			srcOp := l.lowerExpr(srcArg)
+			l.emit(IRInstr{Op: IRMov, Dst: dstOp, Src1: srcOp})
+			return None()
+		}
+	}
+	srcOp := l.lowerExpr(e.Args[1])
+	l.emit(IRInstr{Op: IRLea, Dst: dstOp, Src1: srcOp})
+	return None()
+}
+
+// push(value)
+func (l *Lowerer) builtinPush(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	srcOp := l.lowerExpr(e.Args[0])
+	l.emit(IRInstr{Op: IRPush, Src1: srcOp})
+	return None()
+}
+
+// pop() -> value
+func (l *Lowerer) builtinPop(e *ast.CallExpr) Operand {
+	// pop() — CPU stack pop.
+	dst := l.freshVReg()
+	l.emit(IRInstr{Op: IRPop, Dst: VReg(dst)})
+	return VReg(dst)
+}
+
+// array_pop(arr) — pop the last element from an array.
+func (l *Lowerer) builtinArrayPop(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	arrOp := l.lowerExpr(e.Args[0])
+	dst := l.freshVReg()
+	l.emit(IRInstr{Op: IRArrayPop, Dst: VReg(dst), Src1: arrOp})
+	return VReg(dst)
+}
+
+// syscall()
+func (l *Lowerer) builtinSyscall(e *ast.CallExpr) Operand {
+	l.emit(IRInstr{Op: IRSyscall})
+	return None()
+}
+
+// int(number)
+func (l *Lowerer) builtinInt(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	srcOp := l.lowerExpr(e.Args[0])
+	l.emit(IRInstr{Op: IRInt, Src1: srcOp})
+	return None()
+}
+
+// call(label)
+func (l *Lowerer) builtinCall(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	targetOp := l.lowerExpr(e.Args[0])
+	l.emit(IRInstr{Op: IRCall, Src1: targetOp})
+	return None()
+}
+
+// ret()
+func (l *Lowerer) builtinRet(e *ast.CallExpr) Operand {
+	l.emit(IRInstr{Op: IRRet})
+	return None()
+}
+
+// nop()
+func (l *Lowerer) builtinNop(e *ast.CallExpr) Operand {
+	l.emit(IRInstr{Op: IRNop})
+	return None()
+}
+
+// setreg(regname, value)
+func (l *Lowerer) builtinSetReg(e *ast.CallExpr) Operand {
+	if len(e.Args) != 2 {
+		return None()
+	}
+	dstOp := l.lowerExpr(e.Args[0])
+	srcOp := l.lowerExpr(e.Args[1])
+	l.emit(IRInstr{Op: IRSetReg, Dst: dstOp, Src1: srcOp})
+	return None()
+}
+
+// getreg(regname) -> value
+func (l *Lowerer) builtinGetReg(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	srcOp := l.lowerExpr(e.Args[0])
+	dst := l.freshVReg()
+	l.emit(IRInstr{Op: IRGetReg, Dst: VReg(dst), Src1: srcOp})
+	return VReg(dst)
+}
+
+// setflag(flag, value)
+func (l *Lowerer) builtinSetFlag(e *ast.CallExpr) Operand {
+	if len(e.Args) != 2 {
+		return None()
+	}
+	dstOp := l.lowerExpr(e.Args[0])
+	srcOp := l.lowerExpr(e.Args[1])
+	l.emit(IRInstr{Op: IRSetFlag, Dst: dstOp, Src1: srcOp})
+	return None()
+}
+
+// getflag(flag) -> bool
+func (l *Lowerer) builtinGetFlag(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	srcOp := l.lowerExpr(e.Args[0])
+	dst := l.freshVReg()
+	l.emit(IRInstr{Op: IRGetFlag, Dst: VReg(dst), Src1: srcOp})
+	return VReg(dst)
+}
+
+// array_append(arr, val) — append a value to an array.
+func (l *Lowerer) builtinAppend(e *ast.CallExpr) Operand {
+	if len(e.Args) != 2 {
+		return None()
+	}
+	arrOp := l.lowerExpr(e.Args[0])
+	elemType := strings.TrimPrefix(l.exprType(e.Args[0]), "[]")
+	valOp := l.lowerExprForType(e.Args[1], elemType)
+	l.emit(IRInstr{Op: IRArrayAppend, Dst: arrOp, Src1: valOp})
+	return None()
+}
+
+// len(s) — string length (inline, no function call, does NOT clobber regs).
+func (l *Lowerer) builtinLen(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	srcOp := l.lowerExpr(e.Args[0])
+	dst := l.freshVReg()
+	op := IRStrLen
+	if strings.HasPrefix(l.exprType(e.Args[0]), "[]") {
+		op = IRArrayLen
+	}
+	l.emit(IRInstr{Op: op, Dst: VReg(dst), Src1: srcOp})
+	return VReg(dst)
+}
+
+// load8(addr) — load unsigned byte from memory address → i32.
+func (l *Lowerer) builtinLoad8(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	srcOp := l.lowerExpr(e.Args[0])
+	dst := l.freshVReg()
+	l.emit(IRInstr{Op: IRLoad8, Dst: VReg(dst), Src1: srcOp})
+	return VReg(dst)
+}
+
+// store_byte(addr, value) — store the low byte of value to a raw memory address.
+func (l *Lowerer) builtinStoreByte(e *ast.CallExpr) Operand {
+	if len(e.Args) != 2 {
+		return None()
+	}
+	addrOp := l.lowerExpr(e.Args[0])
+	valOp := l.lowerExpr(e.Args[1])
+	l.emit(IRInstr{Op: IRStoreByte, Dst: addrOp, Src1: valOp})
+	return None()
+}
+
+// load32(addr) — load 32-bit integer from memory address → i32.
+func (l *Lowerer) builtinLoad32(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	srcOp := l.lowerExpr(e.Args[0])
+	dst := l.freshVReg()
+	l.emit(IRInstr{Op: IRLoad32, Dst: VReg(dst), Src1: srcOp})
+	return VReg(dst)
+}
+
+// load64(addr) — load 64-bit integer from memory address → i64.
+func (l *Lowerer) builtinLoad64(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	srcOp := l.lowerExpr(e.Args[0])
+	dst := l.freshVReg()
+	l.emit(IRInstr{Op: IRLoad64, Dst: VReg(dst), Src1: srcOp})
+	return VReg(dst)
+}
+
+// win_call("FuncName", arg1, arg2, ...) — call a Windows API function.
+// The first argument must be a string literal naming the API function.
+// Remaining arguments are passed via Windows x64 calling convention.
+func (l *Lowerer) builtinWinCall(e *ast.CallExpr) Operand {
+	if len(e.Args) < 1 {
+		return None()
+	}
+
+	// The first argument is the API function name (string literal).
+	// We store it as a label operand (the emitter will use it as an extern).
+	nameArg := e.Args[0]
+	apiName := ""
+	if strLit, ok := nameArg.(*ast.StringLitExpr); ok {
+		raw := strLit.Value
+		if len(raw) >= 2 && (raw[0] == '"' || raw[0] == '\'') {
+			raw = raw[1 : len(raw)-1]
+		}
+		apiName = raw
+	}
+
+	if apiName == "" {
+		// Fallback: lower the expression and use it as a label.
+		apiName = "unknown_win_api"
+	}
+
+	// Lower remaining arguments.
+	var argOps []Operand
+	for _, arg := range e.Args[1:] {
+		argOps = append(argOps, l.lowerExpr(arg))
+	}
+
+	dst := l.freshVReg()
+	l.emit(IRInstr{
+		Op:   IRWinCall,
+		Dst:  VReg(dst),
+		Src1: LabelOp(apiName),
+		Args: argOps,
+	})
+	return VReg(dst)
+}
+
+// ---------------------------------------------------------------------------
+// String unescape utility
+// ---------------------------------------------------------------------------
+
+func unescapeString(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case 'n':
+				b.WriteByte('\n')
+			case 'r':
+				b.WriteByte('\r')
+			case 't':
+				b.WriteByte('\t')
+			case '\\':
+				b.WriteByte('\\')
+			case '"':
+				b.WriteByte('"')
+			case '\'':
+				b.WriteByte('\'')
+			case '0':
+				b.WriteByte(0)
+			default:
+				b.WriteByte(s[i+1])
+			}
+			i++
+		} else {
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
+}
+
+// i64_to_f64(val) — convert integer to float64 (scvtf).
+func (l *Lowerer) builtinI64ToF64(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	src := l.lowerExpr(e.Args[0])
+	dst := l.freshVReg()
+	l.vregIsFloat[dst] = true
+	l.emit(IRInstr{Op: IRIntToFloat, Dst: VReg(dst), Src1: src})
+	return VReg(dst)
+}
+
+// f64_to_i64(val) — convert float64 to integer (fcvtzs, truncate toward zero).
+func (l *Lowerer) builtinF64ToI64(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	src := l.lowerExpr(e.Args[0])
+	dst := l.freshVReg()
+	l.emit(IRInstr{Op: IRFloatToInt, Dst: VReg(dst), Src1: src})
+	return VReg(dst)
+}
+
+// f64_bits(val) — reinterpret f64 bit pattern as raw i64 (no conversion, just type change).
+func (l *Lowerer) builtinF64Bits(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	src := l.lowerExpr(e.Args[0])
+	// Just return the value as-is — the bit pattern is already in an integer register/slot.
+	// Mark it as NOT float so subsequent ops treat it as integer.
+	dst := l.freshVReg()
+	l.emit(IRInstr{Op: IRMov, Dst: VReg(dst), Src1: src})
+	return VReg(dst)
+}
+
+// f64_from_bits(val) — reinterpret raw i64 bits as f64 (no conversion, just type change).
+func (l *Lowerer) builtinF64FromBits(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	src := l.lowerExpr(e.Args[0])
+	dst := l.freshVReg()
+	l.vregIsFloat[dst] = true
+	l.emit(IRInstr{Op: IRMov, Dst: VReg(dst), Src1: src})
+	return VReg(dst)
+}
+
+// gc_collect() — explicitly trigger garbage collection.
+func (l *Lowerer) builtinGCCollect(e *ast.CallExpr) Operand {
+	l.emit(IRInstr{Op: IRGCCollect})
+	return None()
+}

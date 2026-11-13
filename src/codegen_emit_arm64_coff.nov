@@ -1,0 +1,38 @@
+module codegen_emit_arm64_coff;
+
+import model;
+import runtime;
+
+fn codegen_arm64Emitter_emitWindowsHeapAllocator(e: CodegenArm64Emitter) -> void {
+    let w: StringBuilder = e.b;
+    w.append("\n.p2align 2\n_novus_heap_alloc:\n");
+    codegen_arm64Emitter_emitLoadGlobal(e, "x9", "_novus_heap");
+    codegen_arm64Emitter_emitLoadGlobal(e, "x10", "_novus_heap_ptr");
+    w.append("    ldr x11, [x10]\n");
+    w.append("    add x12, x11, x0\n");
+    codegen_arm64Emitter_loadImm(e, "x13", e.target.HeapSize);
+    w.append("    cmp x12, x13\n");
+    w.append("    b.hi .Lwin_heap_exhausted\n");
+    w.append("    str x12, [x10]\n");
+    w.append("    add x0, x9, x11\n");
+    w.append("    ret\n");
+    w.append(".Lwin_heap_exhausted:\n");
+    w.append("    brk #0\n");
+}
+
+fn codegen_arm64Emitter_emitWinMainArgs(e: CodegenArm64Emitter) -> void {
+    let w: StringBuilder = e.b;
+    w.append("    sub sp, sp, #48\n");
+    w.append("    stp xzr, xzr, [sp]\n");
+    w.append("    stp xzr, xzr, [sp, #16]\n");
+    w.append("    str xzr, [sp, #32]\n");
+    w.append("    mov x0, sp\n");
+    w.append("    add x1, sp, #8\n");
+    w.append("    add x2, sp, #16\n");
+    w.append("    mov x3, xzr\n");
+    w.append("    add x4, sp, #32\n");
+    w.append(("    bl " + codegen_Target_Sym(e.target, "__getmainargs") + "\n"));
+    w.append("    ldr w0, [sp]\n");
+    w.append("    ldr x1, [sp, #8]\n");
+    w.append("    add sp, sp, #48\n");
+}

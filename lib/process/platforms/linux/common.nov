@@ -1,0 +1,8 @@
+module process_linux;
+
+#if(arch == "amd64") {
+    import amd64;
+}
+#if(arch == "arm64") {
+    import arm64;
+}

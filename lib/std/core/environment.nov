@@ -1,0 +1,39 @@
+module std_environment;
+
+#if(os != "windows") {
+    fn environment_value(name: str) -> str {
+        let index: i32 = 0;
+        let needle: str = name + "=";
+        while (true) {
+            let address: u64 = environment_entry(index);
+            if (address == 0) { return ""; }
+            let value: str = cstr_to_str(address);
+            if (starts_with(value, needle)) { return substr(value, len(needle)); }
+            index++;
+        }
+    }
+}
+#if(arch != "x86") {
+    fn environment_entry(index: i32) -> u64 {
+        if (__novus_envp == 0) { return 0; }
+        return i64_to_u64(load64(__novus_envp + i32_to_u64(index) * 8));
+    }
+}
+#if(arch == "x86") {
+    fn environment_entry(index: i32) -> u64 {
+        if (__novus_envp == 0) { return 0; }
+        return i32_to_u64(load32(__novus_envp + i32_to_u64(index) * 4));
+    }
+}
+#if(os == "windows") {
+    fn environment_value(name: str) -> str {
+        win_call("GetEnvironmentVariableA", ptr(name), 0, 0);
+        let size: i32 = u64_to_i32(getreg(rax));
+        if (size <= 0) { return ""; }
+        let buffer: str = make_buffer(size);
+        win_call("GetEnvironmentVariableA", ptr(name), ptr(buffer), size);
+        let copied: i32 = u64_to_i32(getreg(rax));
+        if (copied <= 0 || copied >= size) { return ""; }
+        return copy_bytes(ptr(buffer), copied);
+    }
+}

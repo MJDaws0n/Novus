@@ -1,0 +1,71 @@
+module file_metadata_windows;
+
+import ../../support;
+
+fn metadata_handle(path: str) -> u64 {
+    win_call("CreateFileA", path, 0, 7, 0, 3, 33554432, 0);
+    return getreg(rax);
+}
+
+fn file_info(path: str) -> FileInfo {
+    let info: FileInfo = new FileInfo();
+    info.path = path;
+    let handle: u64 = metadata_handle(path);
+    if (handle == 18446744073709551615) { info.error = "cannot stat file: " + path; return info; }
+    let buffer: str = make_buffer(64);
+    win_call("GetFileInformationByHandle", handle, buffer);
+    let ok: u64 = getreg(rax);
+    win_call("CloseHandle", handle);
+    if (ok == 0) { info.error = "cannot stat file: " + path; return info; }
+    info.exists = true;
+    info.directory = (load32(ptr(buffer)) & 16) != 0;
+    let high: u64 = i32_to_u64(load32(ptr(buffer) + 32)) & 4294967295;
+    let low: u64 = i32_to_u64(load32(ptr(buffer) + 36)) & 4294967295;
+    info.size = u64_to_i64((high << 32) | low);
+    return info;
+}
+
+fn canonical_path(path: str) -> PathResult {
+    let result: PathResult = new PathResult();
+    let handle: u64 = metadata_handle(path);
+    if (handle == 18446744073709551615) { result.error = "cannot resolve path: " + path; return result; }
+    let buffer: str = make_buffer(32768);
+    win_call("GetFinalPathNameByHandleA", handle, buffer, 32768, 0);
+    let size: i32 = u64_to_i32(getreg(rax));
+    win_call("CloseHandle", handle);
+    if (size <= 0 || size >= 32768) { result.error = "cannot resolve path: " + path; return result; }
+    result.path = copy_bytes(ptr(buffer), size);
+    if (starts_with(result.path, "\\\\?\\UNC\\")) { result.path = "\\\\" + substr(result.path, 8); }
+    else if (starts_with(result.path, "\\\\?\\")) { result.path = substr(result.path, 4); }
+    return result;
+}
+
+fn working_directory() -> PathResult {
+    let result: PathResult = new PathResult();
+    let buffer: str = make_buffer(32768);
+    win_call("GetCurrentDirectoryA", 32768, buffer);
+    let size: i32 = u64_to_i32(getreg(rax));
+    if (size <= 0 || size >= 32768) { result.error = "cannot read working directory"; return result; }
+    result.path = copy_bytes(ptr(buffer), size);
+    return result;
+}
+
+fn windows_subdirectories(directory: str) -> []str {
+    let result: []str = [];
+    let buffer: str = make_buffer(592);
+    let pattern: str = path_join_all([directory, "*"]);
+    win_call("FindFirstFileA", pattern, buffer);
+    let handle: u64 = getreg(rax);
+    if (handle == 18446744073709551615) { return result; }
+    while (true) {
+        if ((load32(ptr(buffer)) & 16) != 0) {
+            let name: str = cstr_to_str(ptr(buffer) + 44);
+            if (name != "." && name != "..") { array_append(result, name); }
+        }
+        win_call("FindNextFileA", handle, buffer);
+        let next: u64 = getreg(rax);
+        if (next == 0) { break; }
+    }
+    win_call("FindClose", handle);
+    return result;
+}

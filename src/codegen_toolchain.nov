@@ -1,0 +1,431 @@
+module codegen_toolchain;
+
+import model;
+import runtime;
+
+// NewToolchain creates a Toolchain for the given target and build directory.
+fn codegen_NewToolchain(target: CodegenTarget, buildDir: str, baseName: str) -> CodegenToolchain {
+    return make_CodegenToolchain_29(target, buildDir, runtime_path_filepath_Join([buildDir, (baseName + codegen_Target_FileExtAsm(target))]), runtime_path_filepath_Join([buildDir, (baseName + codegen_Target_FileExtObj(target))]), runtime_path_filepath_Join([buildDir, (baseName + codegen_Target_FileExtExe(target))]));
+}
+
+// WriteAssembly writes the assembly string to the .s/.asm file.
+fn codegen_Toolchain_WriteAssembly(tc: CodegenToolchain, asm: str) -> str {
+    return runtime_os_WriteFile(tc.AsmFile, runtime_string_to_bytes(asm), 420);
+}
+
+// Assemble invokes the assembler to produce an object file from the assembly.
+fn codegen_Toolchain_Assemble(tc: CodegenToolchain) -> str {
+    {
+        if ((((tc.Target.Arch == 2) || ((codegen_Target_IsX86Family(tc.Target) && (tc.Target.Flavor == 0)))))) {
+            return codegen_Toolchain_assembleGAS(tc);
+        } else if (((tc.Target.Flavor == 1))) {
+            return codegen_Toolchain_assembleNASM(tc);
+        } else {
+            return codegen_Toolchain_assembleGAS(tc);
+        }
+    }
+}
+
+// Link invokes the linker to produce the final executable.
+fn codegen_Toolchain_Link(tc: CodegenToolchain) -> str {
+    {
+        let choice_473: i32 = tc.Target.OS;
+        if ((choice_473 == 1)) {
+            return codegen_Toolchain_linkDarwin(tc);
+        } else if ((choice_473 == 0)) {
+            return codegen_Toolchain_linkLinux(tc);
+        } else if ((choice_473 == 2)) {
+            return codegen_Toolchain_linkWindows(tc);
+        } else {
+            return ("unsupported OS for linking: " + codegen_OS_String(tc.Target.OS));
+        }
+    }
+}
+
+fn codegen_Toolchain_assembleGAS(tc: CodegenToolchain) -> str {
+    let cmd: ProcessCommand = null;
+    {
+        let choice_474: i32 = tc.Target.OS;
+        if ((choice_474 == 1)) {
+            if ((tc.Target.Arch == 2)) {
+                cmd = runtime_os_exec_Command("as", ["-arch", "arm64", "-o", tc.ObjFile, tc.AsmFile]);
+            } else {
+                cmd = runtime_os_exec_Command("as", ["-arch", "x86_64", "-o", tc.ObjFile, tc.AsmFile]);
+            }
+        } else if ((choice_474 == 2)) {
+            cmd = runtime_os_exec_Command("clang", ["--target=aarch64-pc-windows-msvc", "-c", tc.AsmFile, "-o", tc.ObjFile]);
+        } else if ((choice_474 == 0)) {
+            {
+                let choice_475: i32 = tc.Target.Arch;
+                if ((choice_475 == 1)) {
+                    cmd = runtime_os_exec_Command("as", ["--32", "-o", tc.ObjFile, tc.AsmFile]);
+                } else if ((choice_475 == 2)) {
+                    let asBin: str = "as";
+                    if ((runtime_host_arch() != "arm64")) {
+                        {
+                            let result_476: ResultStrBool = codegen_firstAvailableTool(["aarch64-linux-gnu-as", "as"]);
+                            let p: str = result_476.value0;
+                            let ok: bool = result_476.value1;
+                            if (ok) {
+                                asBin = p;
+                            }
+                        }
+                    }
+                    cmd = runtime_os_exec_Command(asBin, ["-o", tc.ObjFile, tc.AsmFile]);
+                } else {
+                    let asBin: str = "as";
+                    if (((runtime_host_os() != "linux") || (runtime_host_arch() != "amd64"))) {
+                        {
+                            let result_477: ResultStrBool = codegen_firstAvailableTool(["x86_64-linux-gnu-as", "as"]);
+                            let p: str = result_477.value0;
+                            let ok: bool = result_477.value1;
+                            if (ok) {
+                                asBin = p;
+                            }
+                        }
+                    }
+                    cmd = runtime_os_exec_Command(asBin, ["-o", tc.ObjFile, tc.AsmFile]);
+                }
+            }
+        } else {
+            cmd = runtime_os_exec_Command("as", ["-o", tc.ObjFile, tc.AsmFile]);
+        }
+    }
+    return codegen_Toolchain_runCmd(tc, cmd, "assemble");
+}
+
+fn codegen_Toolchain_assembleNASM(tc: CodegenToolchain) -> str {
+    let fmtArg: str = "win64";
+    {
+        let choice_478: i32 = tc.Target.ObjFmt;
+        if ((choice_478 == 0)) {
+            if ((tc.Target.Arch == 1)) {
+                fmtArg = "elf32";
+            } else {
+                fmtArg = "elf64";
+            }
+        } else if ((choice_478 == 1)) {
+            fmtArg = "macho64";
+        } else if ((choice_478 == 2)) {
+            fmtArg = "win64";
+        }
+    }
+    let nasmBin: str = "nasm";
+    if ((tc.NASMPath != "")) {
+        nasmBin = tc.NASMPath;
+    }
+    let cmd: ProcessCommand = runtime_os_exec_Command(nasmBin, ["-f", fmtArg, "-o", tc.ObjFile, tc.AsmFile]);
+    return codegen_Toolchain_runCmd(tc, cmd, "assemble (nasm)");
+}
+
+fn codegen_Toolchain_linkDarwin(tc: CodegenToolchain) -> str {
+    let result_479: ResultStrStr = codegen_findMacOSSDK();
+    let sdkPath: str = result_479.value0;
+    let err: str = result_479.value1;
+    if ((err != "")) {
+        sdkPath = "";
+    }
+    let args: []str = ["-o", tc.ExeFile, "-e", tc.Target.EntryPoint];
+    if ((tc.Target.Arch == 2)) {
+        args = append_Str(append_Str(args, "-arch"), "arm64");
+    } else {
+        args = append_Str(append_Str(args, "-arch"), "x86_64");
+    }
+    if ((sdkPath != "")) {
+        args = append_Str(append_Str(args, (("-L" + sdkPath) + "/usr/lib")), "-lSystem");
+    } else {
+        args = append_Str(args, "-lSystem");
+    }
+    args = append_Str(args, tc.ObjFile);
+    let cmd: ProcessCommand = runtime_os_exec_Command("ld", args);
+    return codegen_Toolchain_runCmd(tc, cmd, "link");
+}
+
+fn codegen_Toolchain_linkLinux(tc: CodegenToolchain) -> str {
+    {
+        let choice_480: i32 = tc.Target.Arch;
+        if ((choice_480 == 1)) {
+            let cmd: ProcessCommand = runtime_os_exec_Command("ld", ["-m", "elf_i386", "-o", tc.ExeFile, tc.ObjFile]);
+            return codegen_Toolchain_runCmd(tc, cmd, "link");
+        } else if ((choice_480 == 2)) {
+            let ldBin: str = "ld";
+            if ((runtime_host_arch() != "arm64")) {
+                {
+                    let result_481: ResultStrBool = codegen_firstAvailableTool(["aarch64-linux-gnu-ld", "ld"]);
+                    let p: str = result_481.value0;
+                    let ok: bool = result_481.value1;
+                    if (ok) {
+                        ldBin = p;
+                    }
+                }
+            }
+            let cmd: ProcessCommand = runtime_os_exec_Command(ldBin, ["-o", tc.ExeFile, tc.ObjFile]);
+            return codegen_Toolchain_runCmd(tc, cmd, "link");
+        } else {
+            let cmd: ProcessCommand = runtime_os_exec_Command("ld", ["-o", tc.ExeFile, tc.ObjFile]);
+            return codegen_Toolchain_runCmd(tc, cmd, "link");
+        }
+    }
+}
+
+fn codegen_Toolchain_linkWindows(tc: CodegenToolchain) -> str {
+    if ((tc.Target.Arch == 2)) {
+        let result_482: ResultStrBool = codegen_firstAvailableTool(["lld-link", "link.exe"]);
+        let linker: str = result_482.value0;
+        let ok: bool = result_482.value1;
+        if (!(ok)) {
+            return ("Windows ARM64 requires lld-link or link.exe");
+        }
+        let args: []str = ["/machine:arm64", "/entry:main", "/subsystem:console", ("/out:" + tc.ExeFile), tc.ObjFile];
+        if (tc.WindowsAPI) {
+            args = append_Str(append_Str(append_Str(append_Str(args, "kernel32.lib"), "user32.lib"), "gdi32.lib"), "msvcrt.lib");
+            args = append_Str(args, "urlmon.lib");
+        }
+        return codegen_Toolchain_runCmd(tc, runtime_os_exec_Command(linker, args), "link (Windows ARM64)");
+    }
+    let golinkBin: str = "";
+    if ((tc.GoLinkPath != "")) {
+        golinkBin = tc.GoLinkPath;
+    } else {
+        {
+            let result_483: ResultStrStr = runtime_os_exec_LookPath("golink");
+            let p: str = result_483.value0;
+            let err: str = result_483.value1;
+            if ((err == "")) {
+                golinkBin = p;
+            }
+        }
+    }
+    if ((golinkBin != "")) {
+        let cmd: ProcessCommand = runtime_os_exec_Command(golinkBin, ["/entry", "main", "/console", tc.ObjFile, "kernel32.dll", "user32.dll", "gdi32.dll", "msvcrt.dll", "urlmon.dll"]);
+        return codegen_Toolchain_runCmd(tc, cmd, "link (golink)");
+    }
+    let result_484: ResultStrStr = runtime_os_exec_LookPath("link.exe");
+    let link: str = result_484.value0;
+    let err: str = result_484.value1;
+    if ((err == "")) {
+        let cmd: ProcessCommand = runtime_os_exec_Command(link, ["/ENTRY:main", "/SUBSYSTEM:CONSOLE", ("/OUT:" + tc.ExeFile), tc.ObjFile, "kernel32.lib", "user32.lib", "gdi32.lib", "msvcrt.lib", "urlmon.lib"]);
+        return codegen_Toolchain_runCmd(tc, cmd, "link (msvc)");
+    }
+    return ("no suitable linker found for Windows (tried golink, link.exe)");
+}
+
+fn codegen_Toolchain_runCmd(tc: CodegenToolchain, cmd: ProcessCommand, stage: str) -> str {
+    if (tc.Verbose) {
+        runtime_print_raw(("[toolchain] " + stage + ": " + runtime_strings_Join(cmd.Args, " ") + "\n"));
+    }
+    let stderr: StringBuilder = new StringBuilder();
+    cmd.Stderr = stderr;
+    cmd.Stdout = null;
+    let err: str = runtime_os_exec_Run(cmd);
+    if ((err != "")) {
+        return (stage + " failed: " + err + "\n" + stderr.text());
+    }
+    return "";
+}
+
+fn codegen_findMacOSSDK() -> ResultStrStr {
+    if ((runtime_host_os() != "darwin")) {
+        return make_ResultStrStr("", ("not on macOS"));
+    }
+    let cmd: ProcessCommand = runtime_os_exec_Command("xcrun", ["--show-sdk-path"]);
+    let result_485: ResultArrayi32Str = runtime_os_exec_Output(cmd);
+    let out: []i32 = result_485.value0;
+    let err: str = result_485.value1;
+    if ((err != "")) {
+        return make_ResultStrStr("", err);
+    }
+    return make_ResultStrStr(runtime_strings_TrimSpace(runtime_bytes_to_string(out)), "");
+}
+
+fn codegen_firstAvailableTool(candidates: []str) -> ResultStrBool {
+    {
+        let items_486: []str = candidates;
+        let count_488: i32 = len(items_486);
+        for (let index_487: i32 = 0; index_487 < count_488; index_487++) {
+            let c: str = items_486[index_487];
+            {
+                let result_489: ResultStrStr = runtime_os_exec_LookPath(c);
+                let p: str = result_489.value0;
+                let err: str = result_489.value1;
+                if ((err == "")) {
+                    return make_ResultStrBool(p, true);
+                }
+            }
+        }
+    }
+    return make_ResultStrBool("", false);
+}
+
+// DetectToolchain checks whether the required external tools are available
+// for the given target and returns a list of missing tools.
+fn codegen_DetectToolchain(target: CodegenTarget) -> []str {
+    return codegen_DetectToolchainWithPaths(target, "", "");
+}
+
+// DetectToolchainWithPaths checks for tools using custom paths for NASM/GoLink.
+fn codegen_DetectToolchainWithPaths(target: CodegenTarget, nasmPath: str, golinkPath: str) -> []str {
+    let missing: []str = [];
+    if (((target.OS == 2) && (target.Arch == 2))) {
+        {
+            let result_490: ResultStrBool = codegen_firstAvailableTool(["clang"]);
+            let ok: bool = result_490.value1;
+            if (!(ok)) {
+                missing = append_Str(missing, "clang (Windows ARM64 assembler)");
+            }
+        }
+        {
+            let result_491: ResultStrBool = codegen_firstAvailableTool(["lld-link", "link.exe"]);
+            let ok: bool = result_491.value1;
+            if (!(ok)) {
+                missing = append_Str(missing, "lld-link or link.exe (Windows ARM64 linker)");
+            }
+        }
+        return missing;
+    }
+    {
+        if (((target.Flavor == 1))) {
+            if ((nasmPath != "")) {
+                if (!(codegen_toolExists(nasmPath))) {
+                    missing = append_Str(missing, "nasm");
+                }
+            } else {
+                {
+                    let result_493: ResultStrStr = runtime_os_exec_LookPath("nasm");
+                    let err: str = result_493.value1;
+                    if ((err != "")) {
+                        missing = append_Str(missing, "nasm");
+                    }
+                }
+            }
+        } else {
+            if (((target.OS == 1) && (runtime_host_os() != "darwin"))) {
+                missing = append_Str(missing, "darwin assembler/toolchain (host macOS or cctools cross-toolchain)");
+            } else {
+                if ((((target.OS == 0) && (target.Arch == 2)) && (runtime_host_arch() != "arm64"))) {
+                    {
+                        let result_494: ResultStrStr = runtime_os_exec_LookPath("aarch64-linux-gnu-as");
+                        let err: str = result_494.value1;
+                        if ((err != "")) {
+                            missing = append_Str(missing, "aarch64-linux-gnu-as (linux/arm64 assembler)");
+                        }
+                    }
+                } else {
+                    if ((((target.OS == 0) && (target.Arch == 0)) && (((runtime_host_os() != "linux") || (runtime_host_arch() != "amd64"))))) {
+                        {
+                            let result_495: ResultStrBool = codegen_firstAvailableTool(["x86_64-linux-gnu-as", "as"]);
+                            let ok: bool = result_495.value1;
+                            if (!(ok)) {
+                                missing = append_Str(missing, "x86_64-linux-gnu-as or as (linux/amd64 assembler)");
+                            }
+                        }
+                    } else {
+                        {
+                            let result_496: ResultStrStr = runtime_os_exec_LookPath("as");
+                            let err: str = result_496.value1;
+                            if ((err != "")) {
+                                {
+                                    let result_497: ResultStrStr = runtime_os_exec_LookPath("cc");
+                                    let err: str = result_497.value1;
+                                    if ((err != "")) {
+                                        missing = append_Str(missing, "as (assembler)");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    {
+        let choice_498: i32 = target.OS;
+        if ((choice_498 == 1)) {
+            if ((runtime_host_os() != "darwin")) {
+                missing = append_Str(missing, "darwin linker/toolchain (host macOS or cctools cross-toolchain)");
+            } else {
+                {
+                    let result_499: ResultStrStr = runtime_os_exec_LookPath("ld");
+                    let err: str = result_499.value1;
+                    if ((err != "")) {
+                        missing = append_Str(missing, "ld (linker)");
+                    }
+                }
+            }
+        } else if ((choice_498 == 0)) {
+            if (((target.Arch == 2) && (runtime_host_arch() != "arm64"))) {
+                {
+                    let result_500: ResultStrStr = runtime_os_exec_LookPath("aarch64-linux-gnu-ld");
+                    let err: str = result_500.value1;
+                    if ((err != "")) {
+                        missing = append_Str(missing, "aarch64-linux-gnu-ld (linux/arm64 linker)");
+                    }
+                }
+            } else {
+                if (((target.Arch == 0) && (((runtime_host_os() != "linux") || (runtime_host_arch() != "amd64"))))) {
+                    {
+                        let result_501: ResultStrBool = codegen_firstAvailableTool(["x86_64-linux-gnu-ld", "ld"]);
+                        let ok: bool = result_501.value1;
+                        if (!(ok)) {
+                            missing = append_Str(missing, "x86_64-linux-gnu-ld or ld (linux/amd64 linker)");
+                        }
+                    }
+                } else {
+                    {
+                        let result_502: ResultStrStr = runtime_os_exec_LookPath("ld");
+                        let err: str = result_502.value1;
+                        if ((err != "")) {
+                            missing = append_Str(missing, "ld (linker)");
+                        }
+                    }
+                }
+            }
+        } else if ((choice_498 == 2)) {
+            let hasLinker: bool = false;
+            if ((golinkPath != "")) {
+                if (codegen_toolExists(golinkPath)) {
+                    hasLinker = true;
+                }
+            }
+            if (!(hasLinker)) {
+                {
+                    let items_503: []str = ["golink", "link.exe"];
+                    let count_505: i32 = len(items_503);
+                    for (let index_504: i32 = 0; index_504 < count_505; index_504++) {
+                        let l: str = items_503[index_504];
+                        {
+                            let result_506: ResultStrStr = runtime_os_exec_LookPath(l);
+                            let err: str = result_506.value1;
+                            if ((err == "")) {
+                                hasLinker = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if (!(hasLinker)) {
+                missing = append_Str(missing, "golink or link.exe (linker)");
+            }
+        }
+    }
+    return missing;
+}
+
+fn codegen_toolExists(pathOrName: str) -> bool {
+    {
+        let result_507: ResultFileinfoStr = runtime_os_Stat(pathOrName);
+        let err: str = result_507.value1;
+        if ((err == "")) {
+            return true;
+        }
+    }
+    {
+        let result_508: ResultStrStr = runtime_os_exec_LookPath(pathOrName);
+        let err: str = result_508.value1;
+        if ((err == "")) {
+            return true;
+        }
+    }
+    return false;
+}

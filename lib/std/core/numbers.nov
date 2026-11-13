@@ -1,0 +1,152 @@
+module std_numbers;
+
+class ParsedUnsigned {
+    pub let value: u64 = 0;
+    pub let error: str = "";
+}
+class ParsedInteger {
+    pub let value: i64 = 0;
+    pub let error: str = "";
+}
+class ParsedFloat {
+    pub let value: f64 = 0.0;
+    pub let error: str = "";
+}
+
+fn numeric_digit(ch: i32) -> i32 {
+    if (ch >= 48 && ch <= 57) { return ch - 48; }
+    if (ch >= 65 && ch <= 90) { return ch - 65 + 10; }
+    if (ch >= 97 && ch <= 122) { return ch - 97 + 10; }
+    return -1;
+}
+
+fn parse_unsigned(text: str, base: i32 = 0, bits: i32 = 64) -> ParsedUnsigned {
+    let result: ParsedUnsigned = new ParsedUnsigned();
+    let size: i32 = len(text);
+    if (size == 0 || bits < 1 || bits > 64 || (base != 0 && (base < 2 || base > 36))) {
+        result.error = "invalid integer syntax"; return result;
+    }
+    let index: i32 = 0;
+    let inferred: bool = base == 0;
+    let prefix: bool = false;
+    if (inferred) {
+        base = 10;
+        if (size > 1 && byte_at(text, 0) == 48) {
+            let ch: i32 = byte_at(text, 1) | 32;
+            if (ch == 120) { base = 16; index = 2; prefix = true; }
+            else if (ch == 98) { base = 2; index = 2; prefix = true; }
+            else if (ch == 111) { base = 8; index = 2; prefix = true; }
+            else { base = 8; }
+        }
+    }
+    let maximum: u64 = 18446744073709551615;
+    if (bits < 64) { let one: u64 = 1; maximum = (one << i32_to_u64(bits)) - 1; }
+    let radix: u64 = i32_to_u64(base);
+    let any: bool = false;
+    let previous: bool = prefix;
+    for (; index < size; index++) {
+        let ch: i32 = byte_at(text, index);
+        if (ch == 95 && inferred && previous && index + 1 < size) {
+            previous = false;
+        } else {
+            let digit: i32 = numeric_digit(ch);
+            if (digit < 0 || digit >= base) { result.error = "invalid integer syntax"; return result; }
+            let part: u64 = i32_to_u64(digit);
+            if (result.value > (maximum - part) / radix) {
+                result.value = maximum; result.error = "integer value out of range"; return result;
+            }
+            result.value = result.value * radix + part;
+            previous = true;
+            any = true;
+        }
+    }
+    if (!any || !previous) { result.error = "invalid integer syntax"; }
+    return result;
+}
+
+fn parse_integer(text: str, base: i32 = 0, bits: i32 = 64) -> ParsedInteger {
+    let result: ParsedInteger = new ParsedInteger();
+    let negative: bool = false;
+    let magnitude: str = text;
+    if (len(text) > 0 && (byte_at(text, 0) == 43 || byte_at(text, 0) == 45)) {
+        negative = byte_at(text, 0) == 45;
+        magnitude = substr(text, 1);
+    }
+    let parsed: ParsedUnsigned = parse_unsigned(magnitude, base, bits);
+    result.error = parsed.error;
+    if (result.error != "") { return result; }
+    let signbit: u64 = 1;
+    signbit = signbit << i32_to_u64(bits - 1);
+    let maximum: u64 = signbit - 1;
+    if (negative) { maximum = signbit; }
+    if (parsed.value > maximum) { result.error = "integer value out of range"; return result; }
+    result.value = u64_to_i64(parsed.value);
+    if (negative) { result.value = 0 - result.value; }
+    return result;
+}
+
+fn format_unsigned(value: u64, base: i32 = 10, width: i32 = 0, uppercase: bool = false) -> str {
+    if (base < 2 || base > 36) { return ""; }
+    let digits: str = "0123456789abcdefghijklmnopqrstuvwxyz";
+    if (uppercase) { digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"; }
+    let reversed: []i32 = [];
+    let radix: u64 = i32_to_u64(base);
+    while (value > 0) {
+        array_append(reversed, byte_at(digits, u64_to_i32(value % radix)));
+        value = value / radix;
+    }
+    if (len(reversed) == 0) { array_append(reversed, 48); }
+    while (len(reversed) < width) { array_append(reversed, 48); }
+    let result: str = make_buffer(len(reversed));
+    for (let i: i32 = 0; i < len(reversed); i++) { string_set_byte(result, i, reversed[len(reversed) - i - 1]); }
+    return result;
+}
+
+fn format_signed(value: i64, base: i32 = 10) -> str {
+    let magnitude: u64 = i64_to_u64(value);
+    if (value < 0) {
+        magnitude = 0 - magnitude;
+        return "-" + format_unsigned(magnitude, base);
+    }
+    return format_unsigned(magnitude, base);
+}
+
+fn parse_float(text: str) -> ParsedFloat {
+    let result: ParsedFloat = new ParsedFloat();
+    let index: i32 = 0;
+    let size: i32 = len(text);
+    let negative: bool = false;
+    if (size > 0 && (byte_at(text, 0) == 43 || byte_at(text, 0) == 45)) {
+        negative = byte_at(text, 0) == 45; index++;
+    }
+    let any: bool = false;
+    let decimal: bool = false;
+    let exponent: i32 = 0;
+    for (; index < size; index++) {
+        let ch: i32 = byte_at(text, index);
+        if (ch == 46 && !decimal) { decimal = true; }
+        else if (ch >= 48 && ch <= 57) {
+            result.value = result.value * 10.0 + i64_to_f64(to_i64(ch - 48));
+            if (decimal) { exponent--; }
+            any = true;
+        } else if (ch == 95 && index > 0 && index + 1 < size && is_digit(byte_at(text, index - 1)) && is_digit(byte_at(text, index + 1))) {
+            continue;
+        } else { break; }
+    }
+    if (index < size && (byte_at(text, index) == 101 || byte_at(text, index) == 69)) {
+        let parsed: ParsedInteger = parse_integer(substr(text, index + 1), 10, 32);
+        if (parsed.error != "") { result.error = parsed.error; return result; }
+        exponent += to_i32(parsed.value);
+        index = size;
+    }
+    if (!any || index != size) { result.error = "invalid floating-point syntax"; return result; }
+    if (exponent > 308 || exponent < -400) {
+        if (exponent > 308) { result.error = "floating-point value out of range"; }
+        else { result.value = 0.0; }
+        return result;
+    }
+    while (exponent > 0) { result.value *= 10.0; exponent--; }
+    while (exponent < 0) { result.value /= 10.0; exponent++; }
+    if (negative) { result.value = 0.0 - result.value; }
+    return result;
+}

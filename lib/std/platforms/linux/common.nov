@@ -1,0 +1,15 @@
+// ---------------------------------------------------------------------------
+// std/platforms/linux/common - Linux platform dispatcher
+// Routes to the correct architecture implementation.
+// ---------------------------------------------------------------------------
+
+module std_linux;
+
+#if(arch == "amd64") {
+    import amd64;
+    import memory_amd64;
+}
+#if(arch == "arm64") {
+    import arm64;
+    import memory_arm64;
+}

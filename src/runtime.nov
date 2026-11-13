@@ -1,0 +1,143 @@
+module compiler_runtime;
+
+import model;
+
+fn runtime_print(value: str) -> void { print(value); }
+fn runtime_print_raw(value: str) -> void { print_raw(value); }
+fn runtime_string_i32(value: i32) -> str { return format_signed(to_i64(value)); }
+fn runtime_string_i64(value: i64) -> str { return format_signed(value); }
+fn runtime_string_u64(value: u64) -> str { return format_unsigned(value); }
+fn runtime_string_bool(value: bool) -> str { return bool_to_str(value); }
+fn runtime_substring(value: str, start: i32, end: i32) -> str { return substr_len(value, start, end - start); }
+fn runtime_quote(value: str) -> str { return quote_string(value); }
+fn runtime_character(value: i32) -> str { return byte_char(value); }
+fn runtime_max(a: i32, b: i32) -> i32 { if (a > b) { return a; } return b; }
+fn runtime_to_i32(value: i64) -> i32 { return to_i32(value); }
+fn runtime_to_i32(value: u64) -> i32 { return to_i32(value); }
+fn runtime_to_i64(value: i32) -> i64 { return to_i64(value); }
+fn runtime_to_i64(value: u64) -> i64 { return u64_to_i64(value); }
+fn runtime_to_u64(value: i64) -> u64 { return i64_to_u64(value); }
+fn runtime_math_Float64bits(value: f64) -> u64 { return i64_to_u64(f64_bits(value)); }
+fn runtime_strings_HasPrefix(value: str, prefix: str) -> bool { return starts_with(value, prefix); }
+fn runtime_strings_TrimPrefix(value: str, prefix: str) -> str {
+    if (starts_with(value, prefix)) { return substr(value, len(prefix)); }
+    return value;
+}
+fn runtime_strings_Join(values: []str, separator: str) -> str { return string_join(values, separator); }
+fn runtime_strings_Split(value: str, separator: str) -> []str { return string_split(value, separator); }
+fn runtime_strings_TrimSpace(value: str) -> str { return str_trim(value); }
+fn runtime_strings_Index(value: str, needle: str) -> i32 { return str_find(value, needle); }
+fn runtime_strings_ReplaceAll(value: str, old: str, replacement: str) -> str { return str_replace(value, old, replacement); }
+fn runtime_strings_Cut(value: str, separator: str) -> ResultStrStrBool {
+    let index: i32 = str_find(value, separator);
+    if (index < 0) { return make_ResultStrStrBool(value, "", false); }
+    return make_ResultStrStrBool(substr_len(value, 0, index), substr(value, index + len(separator)), true);
+}
+fn runtime_sanitize_name(value: str) -> str {
+    let result: StringBuilder = new StringBuilder();
+    for (let i: i32 = 0; i < len(value); i++) {
+        let ch: i32 = byte_at(value, i);
+        if ((ch >= 48 && ch <= 57) || (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122) || ch == 95 || ch == 45) { result.append_byte(ch); }
+        else { result.append("_"); }
+    }
+    return result.text();
+}
+fn runtime_bytes_to_string(values: []i32) -> str {
+    let result: ByteBuffer = new ByteBuffer();
+    result.bytes = values;
+    return result.text();
+}
+fn runtime_string_to_bytes(value: str) -> []i32 { return bytes_from_string(value).bytes; }
+fn runtime_strconv_ParseInt(value: str, base: i32, bits: i32) -> ResultI64Str {
+    let parsed: ParsedInteger = parse_integer(value, base, bits);
+    return make_ResultI64Str(parsed.value, parsed.error);
+}
+fn runtime_strconv_ParseUint(value: str, base: i32, bits: i32) -> ResultU64Str {
+    let parsed: ParsedUnsigned = parse_unsigned(value, base, bits);
+    return make_ResultU64Str(parsed.value, parsed.error);
+}
+fn runtime_strconv_Atoi(value: str) -> ResultI32Str {
+    let parsed: ParsedInteger = parse_integer(value, 10, 32);
+    return make_ResultI32Str(to_i32(parsed.value), parsed.error);
+}
+fn runtime_strconv_ParseFloat(value: str, bits: i32) -> ResultF64Str {
+    let parsed: ParsedFloat = parse_float(value);
+    return make_ResultF64Str(parsed.value, parsed.error);
+}
+fn runtime_format_integer(value: i64, format: str) -> str {
+    let spec: i32 = byte_at(format, len(format) - 1);
+    if (spec == 99) { return byte_char(to_i32(value)); }
+    let base: i32 = 10;
+    if (spec == 120 || spec == 88) { base = 16; }
+    else if (spec == 111) { base = 8; }
+    else if (spec == 98) { base = 2; }
+    let width: i32 = 0;
+    for (let i: i32 = 1; i + 1 < len(format); i++) {
+        let ch: i32 = byte_at(format, i);
+        if (ch >= 48 && ch <= 57) { width = width * 10 + ch - 48; }
+    }
+    let magnitude: u64 = i64_to_u64(value);
+    if (value < 0) { magnitude = 0 - magnitude; }
+    let result: str = format_unsigned(magnitude, base, width, spec == 88);
+    if (value < 0) { return "-" + result; }
+    return result;
+}
+fn runtime_format_integer(value: i32, format: str) -> str { return runtime_format_integer(to_i64(value), format); }
+fn runtime_format_value(value: str, format: str) -> str {
+    if (str_contains(format, "+") && !starts_with(value, "-")) { return "+" + value; }
+    return value;
+}
+fn runtime_path_filepath_Join(parts: []str) -> str { return path_join_all(parts); }
+fn runtime_path_filepath_Dir(path: str) -> str { return path_parent(path); }
+fn runtime_path_filepath_Abs(path: str) -> ResultStrStr {
+    let result: PathResult = path_absolute(path);
+    return make_ResultStrStr(result.path, result.error);
+}
+fn runtime_path_filepath_EvalSymlinks(path: str) -> ResultStrStr {
+    let result: PathResult = canonical_path(path);
+    return make_ResultStrStr(result.path, result.error);
+}
+fn runtime_os_Stat(path: str) -> ResultFileinfoStr {
+    let info: FileInfo = file_info(path);
+    return make_ResultFileinfoStr(info, info.error);
+}
+fn runtime_io_fs_IsDir(info: FileInfo) -> bool { return info.directory; }
+fn runtime_os_IsNotExist(error: str) -> bool { return error != ""; }
+fn runtime_os_ReadFile(path: str) -> ResultArrayi32Str {
+    let result: FileReadResult = read_all_bytes(path);
+    return make_ResultArrayi32Str(result.data.bytes, result.error);
+}
+fn runtime_os_WriteFile(path: str, data: []i32, mode: i32) -> str {
+    let bytes: ByteBuffer = new ByteBuffer();
+    bytes.bytes = data;
+    return write_all_bytes(path, bytes);
+}
+fn runtime_os_MkdirAll(path: str, mode: i32) -> str { return create_directories(path, mode); }
+fn runtime_os_UserHomeDir() -> ResultStrStr {
+    let home_path: str = environment_value("HOME");
+    if (runtime_host_os() == "windows") { home_path = environment_value("USERPROFILE"); }
+    if (home_path == "") { return make_ResultStrStr("", "home directory is not set"); }
+    return make_ResultStrStr(home_path, "");
+}
+fn runtime_os_exec_Command(executable: str, arguments: []str) -> ProcessCommand { return process_command(executable, arguments); }
+fn runtime_os_exec_LookPath(name: str) -> ResultStrStr {
+    let result: str = find_executable(name);
+    if (result == "") { return make_ResultStrStr("", "executable not found: " + name); }
+    return make_ResultStrStr(result, "");
+}
+fn runtime_os_exec_Run(command: ProcessCommand) -> str {
+    let result: ProcessResult = command_run(command, false);
+    if (command.Stderr != null) { command.Stderr.append(result.output); }
+    return result.error;
+}
+fn runtime_os_exec_Output(command: ProcessCommand) -> ResultArrayi32Str {
+    let result: ProcessResult = command_run(command, true);
+    return make_ResultArrayi32Str(runtime_string_to_bytes(result.output), result.error);
+}
+
+#if(os == "darwin") { fn runtime_host_os() -> str { return "darwin"; } }
+#if(os == "linux") { fn runtime_host_os() -> str { return "linux"; } }
+#if(os == "windows") { fn runtime_host_os() -> str { return "windows"; } }
+#if(arch == "arm64") { fn runtime_host_arch() -> str { return "arm64"; } }
+#if(arch == "amd64") { fn runtime_host_arch() -> str { return "amd64"; } }
+#if(arch == "x86") { fn runtime_host_arch() -> str { return "386"; } }

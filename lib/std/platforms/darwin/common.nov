@@ -1,0 +1,13 @@
+// std/platforms/darwin/common - macOS platform dispatcher
+module std_darwin;
+
+#if(arch == "arm64") {
+    import arm64;
+    import memory_arm64;
+}
+
+
+#if(arch == "amd64") {
+    import amd64;
+    import memory_amd64;
+}

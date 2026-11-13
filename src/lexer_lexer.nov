@@ -1,0 +1,439 @@
+module lexer_lexer;
+
+import model;
+import runtime;
+
+fn lexer_LexError_Error(e: LexerLexError) -> str {
+    return ("line " + runtime_string_i32(e.Line) + ", col " + runtime_string_i32(e.Column) + ": " + e.Message + " (got " + runtime_quote(e.Lexeme) + ")");
+}
+
+/**
+* Lexes the given input string into a slice of Tokens. Also returns a slice of LexErrors for any recoverable errors encountered during lexing (e.g. unterminated strings).
+* @param input The source code to lex.
+* @return A slice of Tokens and a slice of LexErrors.
+ */
+fn lexer_Lex(input: str) -> ResultArraylexertokenArraylexerlexerror {
+    let inputLength: i32 = len(input);
+    let tokens: []LexerToken = [];
+    let errors: []LexerLexError = [];
+    let assigned_623: i32 = 1;
+    let assigned_624: i32 = 1;
+    let assigned_625: i32 = 0;
+    let line: i32 = assigned_623;
+    let col: i32 = assigned_624;
+    let i: i32 = assigned_625;
+    {
+        for (; (i < inputLength); ) {
+            let ch: i32 = byte_at(input, i);
+            if (lexer_isWhitespace(ch)) {
+                if ((ch == 10)) {
+                    line++;
+                    col = 1;
+                } else {
+                    if ((ch != 13)) {
+                        col++;
+                    }
+                }
+                i++;
+                continue;
+            }
+            if (((ch == 47) && ((i + 1) < inputLength))) {
+                if ((byte_at(input, (i + 1)) == 47)) {
+                    let result_626: ResultI32I32 = lexer_skipLineComment(input, inputLength, i, col);
+                    i = result_626.value0;
+                    col = result_626.value1;
+                    continue;
+                }
+                if ((byte_at(input, (i + 1)) == 42)) {
+                    let err: LexerLexError = null;
+                    let result_627: ResultI32I32I32Lexerlexerror = lexer_skipBlockComment(input, inputLength, i, line, col);
+                    i = result_627.value0;
+                    line = result_627.value1;
+                    col = result_627.value2;
+                    err = result_627.value3;
+                    if ((err != null)) {
+                        errors = append_Lexerlexerror(errors, copy_LexerLexError(err));
+                    }
+                    continue;
+                }
+            }
+            if (((ch == 34) || (ch == 39))) {
+                let result_628: ResultLexertokenArraylexerlexerrorI32I32I32 = lexer_lexString(input, inputLength, i, line, col);
+                let tok: LexerToken = result_628.value0;
+                let errs: []LexerLexError = result_628.value1;
+                let newI: i32 = result_628.value2;
+                let newLine: i32 = result_628.value3;
+                let newCol: i32 = result_628.value4;
+                let assigned_629: i32 = newI;
+                let assigned_630: i32 = newLine;
+                let assigned_631: i32 = newCol;
+                i = assigned_629;
+                line = assigned_630;
+                col = assigned_631;
+                errors = extend_Lexerlexerror(errors, errs);
+                if ((tok != null)) {
+                    tokens = append_Lexertoken(tokens, copy_LexerToken(tok));
+                }
+                continue;
+            }
+            if (lexer_isDigit(ch)) {
+                let result_632: ResultLexertokenI32I32 = lexer_lexNumber(input, inputLength, i, line, col);
+                let tok: LexerToken = result_632.value0;
+                let newI: i32 = result_632.value1;
+                let newCol: i32 = result_632.value2;
+                tokens = append_Lexertoken(tokens, copy_LexerToken(tok));
+                let assigned_633: i32 = newI;
+                let assigned_634: i32 = newCol;
+                i = assigned_633;
+                col = assigned_634;
+                continue;
+            }
+            if (lexer_isIdentStart(ch)) {
+                let result_635: ResultLexertokenI32I32 = lexer_lexIdentifier(input, inputLength, i, line, col);
+                let tok: LexerToken = result_635.value0;
+                let newI: i32 = result_635.value1;
+                let newCol: i32 = result_635.value2;
+                tokens = append_Lexertoken(tokens, copy_LexerToken(tok));
+                let assigned_636: i32 = newI;
+                let assigned_637: i32 = newCol;
+                i = assigned_636;
+                col = assigned_637;
+                continue;
+            }
+            {
+                let result_638: ResultLexertokenI32 = lexer_lexOperatorOrDelimiter(input, inputLength, i, line, col);
+                let tok: LexerToken = result_638.value0;
+                let width: i32 = result_638.value1;
+                if ((width > 0)) {
+                    tokens = append_Lexertoken(tokens, copy_LexerToken(tok));
+                    i = (i + width);
+                    col = (col + width);
+                    continue;
+                }
+            }
+            errors = append_Lexerlexerror(errors, make_LexerLexError_38("unexpected character", runtime_character(ch), line, col));
+            i++;
+            col++;
+        }
+    }
+    tokens = append_Lexertoken(tokens, make_LexerToken_39("EOF", "", line, col));
+    return make_ResultArraylexertokenArraylexerlexerror(tokens, errors);
+}
+
+fn lexer_skipLineComment(input: str, inputLength: i32, i: i32, col: i32) -> ResultI32I32 {
+    {
+        for (; ((i < inputLength) && (byte_at(input, i) != 10)); ) {
+            i++;
+            col++;
+        }
+    }
+    return make_ResultI32I32(i, col);
+}
+
+fn lexer_skipBlockComment(input: str, inputLength: i32, i: i32, line: i32, col: i32) -> ResultI32I32I32Lexerlexerror {
+    let assigned_639: i32 = line;
+    let assigned_640: i32 = col;
+    let startLine: i32 = assigned_639;
+    let startCol: i32 = assigned_640;
+    i = (i + 2);
+    col = (col + 2);
+    {
+        for (; (i < inputLength); ) {
+            if ((((byte_at(input, i) == 42) && ((i + 1) < inputLength)) && (byte_at(input, (i + 1)) == 47))) {
+                i = (i + 2);
+                col = (col + 2);
+                return make_ResultI32I32I32Lexerlexerror(i, line, col, null);
+            }
+            if ((byte_at(input, i) == 10)) {
+                line++;
+                col = 1;
+            } else {
+                if ((byte_at(input, i) != 13)) {
+                    col++;
+                }
+            }
+            i++;
+        }
+    }
+    return make_ResultI32I32I32Lexerlexerror(i, line, col, make_LexerLexError_38("unterminated block comment", "/*", startLine, startCol));
+}
+
+fn lexer_lexString(input: str, inputLength: i32, start: i32, line: i32, col: i32) -> ResultLexertokenArraylexerlexerrorI32I32I32 {
+    let quote: i32 = byte_at(input, start);
+    let assigned_641: i32 = line;
+    let assigned_642: i32 = col;
+    let startLine: i32 = assigned_641;
+    let startCol: i32 = assigned_642;
+    let errs: []LexerLexError = [];
+    let i: i32 = (start + 1);
+    col++;
+    {
+        for (; (i < inputLength); ) {
+            let ch: i32 = byte_at(input, i);
+            if (((ch == 10) || (ch == 13))) {
+                errs = append_Lexerlexerror(errs, make_LexerLexError_38("unterminated string literal (newline in string)", lexer_source_slice(input, start, i), startLine, startCol));
+                return make_ResultLexertokenArraylexerlexerrorI32I32I32(null, errs, i, line, col);
+            }
+            if ((ch == 92)) {
+                if (((i + 1) >= inputLength)) {
+                    errs = append_Lexerlexerror(errs, make_LexerLexError_38("unterminated escape sequence at end of input", "\\", line, col));
+                    return make_ResultLexertokenArraylexerlexerrorI32I32I32(null, errs, (i + 1), line, (col + 1));
+                }
+                let next: i32 = byte_at(input, (i + 1));
+                if (!(lexer_isValidEscape(next))) {
+                    errs = append_Lexerlexerror(errs, make_LexerLexError_38(("invalid escape sequence '\\" + runtime_format_integer(next, "%c") + "'"), runtime_bytes_to_string([92, next]), line, col));
+                }
+                i = (i + 2);
+                col = (col + 2);
+                continue;
+            }
+            if ((ch == quote)) {
+                let tok: LexerToken = make_LexerToken_39("STRING", runtime_substring(input, start, (i + 1)), startLine, startCol);
+                i++;
+                col++;
+                return make_ResultLexertokenArraylexerlexerrorI32I32I32(tok, errs, i, line, col);
+            }
+            i++;
+            col++;
+        }
+    }
+    errs = append_Lexerlexerror(errs, make_LexerLexError_38("unterminated string literal (reached end of input)", lexer_source_slice(input, start, inputLength), startLine, startCol));
+    return make_ResultLexertokenArraylexerlexerrorI32I32I32(null, errs, i, line, col);
+}
+
+// lexNumber scans an integer or float literal.
+// Supports: decimal (42), hexadecimal (0xFF), float (3.14), and
+// scientific notation (1.5e10, 2.0E-3).
+// A trailing dot is only consumed as part of a float if followed by a digit,
+// so that `obj.method` after an integer is not mis-parsed.
+fn lexer_lexNumber(input: str, inputLength: i32, start: i32, line: i32, col: i32) -> ResultLexertokenI32I32 {
+    let i: i32 = start;
+    let startCol: i32 = col;
+    let isFloat: bool = false;
+    if ((((byte_at(input, i) == 48) && ((i + 1) < inputLength)) && (((byte_at(input, (i + 1)) == 120) || (byte_at(input, (i + 1)) == 88))))) {
+        i = (i + 2);
+        col = (col + 2);
+        {
+            for (; ((i < inputLength) && lexer_isHexDigit(byte_at(input, i))); ) {
+                i++;
+                col++;
+            }
+        }
+        return make_ResultLexertokenI32I32(make_LexerToken_39("INT", lexer_source_slice(input, start, i), line, startCol), i, col);
+    }
+    {
+        for (; ((i < inputLength) && lexer_isDigit(byte_at(input, i))); ) {
+            i++;
+            col++;
+        }
+    }
+    if (((((i < inputLength) && (byte_at(input, i) == 46)) && ((i + 1) < inputLength)) && lexer_isDigit(byte_at(input, (i + 1))))) {
+        isFloat = true;
+        i++;
+        col++;
+        {
+            for (; ((i < inputLength) && lexer_isDigit(byte_at(input, i))); ) {
+                i++;
+                col++;
+            }
+        }
+    }
+    if (((i < inputLength) && (((byte_at(input, i) == 101) || (byte_at(input, i) == 69))))) {
+        isFloat = true;
+        i++;
+        col++;
+        if (((i < inputLength) && (((byte_at(input, i) == 43) || (byte_at(input, i) == 45))))) {
+            i++;
+            col++;
+        }
+        {
+            for (; ((i < inputLength) && lexer_isDigit(byte_at(input, i))); ) {
+                i++;
+                col++;
+            }
+        }
+    }
+    let tokType: str = "INT";
+    if (isFloat) {
+        tokType = "FLOAT";
+    }
+    return make_ResultLexertokenI32I32(make_LexerToken_39(tokType, lexer_source_slice(input, start, i), line, startCol), i, col);
+}
+
+fn lexer_lexIdentifier(input: str, inputLength: i32, start: i32, line: i32, col: i32) -> ResultLexertokenI32I32 {
+    let i: i32 = start;
+    let startCol: i32 = col;
+    {
+        for (; ((i < inputLength) && lexer_isIdentPart(byte_at(input, i))); ) {
+            i++;
+            col++;
+        }
+    }
+    let word: str = lexer_source_slice(input, start, i);
+    let tokType: str = "IDENT";
+    {
+        let kw: str = MapStrStr_get(CompilerState.lexer_keywords, word);
+        let ok: bool = MapStrStr_has(CompilerState.lexer_keywords, word);
+        if (ok) {
+            tokType = kw;
+        }
+    }
+    return make_ResultLexertokenI32I32(make_LexerToken_39(tokType, word, line, startCol), i, col);
+}
+
+// lexOperatorOrDelimiter tries to match a 1- or 2-character operator or
+// delimiter starting at input[i]. Returns the token and the number of
+// characters consumed (0 if nothing matched).
+fn lexer_lexOperatorOrDelimiter(input: str, inputLength: i32, i: i32, line: i32, col: i32) -> ResultLexertokenI32 {
+    let ch: i32 = byte_at(input, i);
+    let next: i32 = 0;
+    if (((i + 1) < inputLength)) {
+        next = byte_at(input, (i + 1));
+    }
+    {
+        let choice_643: i32 = ch;
+        if ((choice_643 == 45)) {
+            if ((next == 62)) {
+                return make_ResultLexertokenI32(make_LexerToken_39("ARROW", "->", line, col), 2);
+            }
+            if ((next == 61)) {
+                return make_ResultLexertokenI32(make_LexerToken_39("MINUS_ASSIGN", "-=", line, col), 2);
+            }
+            if ((next == 45)) {
+                return make_ResultLexertokenI32(make_LexerToken_39("DEC", "--", line, col), 2);
+            }
+            return make_ResultLexertokenI32(make_LexerToken_39("MINUS", "-", line, col), 1);
+        } else if ((choice_643 == 61)) {
+            if ((next == 61)) {
+                return make_ResultLexertokenI32(make_LexerToken_39("EQ", "==", line, col), 2);
+            }
+            return make_ResultLexertokenI32(make_LexerToken_39("ASSIGN", "=", line, col), 1);
+        } else if ((choice_643 == 33)) {
+            if ((next == 61)) {
+                return make_ResultLexertokenI32(make_LexerToken_39("NEQ", "!=", line, col), 2);
+            }
+            return make_ResultLexertokenI32(make_LexerToken_39("BANG", "!", line, col), 1);
+        } else if ((choice_643 == 60)) {
+            if ((next == 61)) {
+                return make_ResultLexertokenI32(make_LexerToken_39("LTE", "<=", line, col), 2);
+            }
+            if ((next == 60)) {
+                return make_ResultLexertokenI32(make_LexerToken_39("SHL", "<<", line, col), 2);
+            }
+            return make_ResultLexertokenI32(make_LexerToken_39("LT", "<", line, col), 1);
+        } else if ((choice_643 == 62)) {
+            if ((next == 61)) {
+                return make_ResultLexertokenI32(make_LexerToken_39("GTE", ">=", line, col), 2);
+            }
+            if ((next == 62)) {
+                return make_ResultLexertokenI32(make_LexerToken_39("SHR", ">>", line, col), 2);
+            }
+            return make_ResultLexertokenI32(make_LexerToken_39("GT", ">", line, col), 1);
+        } else if ((choice_643 == 38)) {
+            if ((next == 38)) {
+                return make_ResultLexertokenI32(make_LexerToken_39("AND", "&&", line, col), 2);
+            }
+            return make_ResultLexertokenI32(make_LexerToken_39("AMPERSAND", "&", line, col), 1);
+        } else if ((choice_643 == 124)) {
+            if ((next == 124)) {
+                return make_ResultLexertokenI32(make_LexerToken_39("OR", "||", line, col), 2);
+            }
+            return make_ResultLexertokenI32(make_LexerToken_39("PIPE", "|", line, col), 1);
+        }
+    }
+    {
+        let choice_644: i32 = ch;
+        if ((choice_644 == 40)) {
+            return make_ResultLexertokenI32(make_LexerToken_39("LPAREN", "(", line, col), 1);
+        } else if ((choice_644 == 41)) {
+            return make_ResultLexertokenI32(make_LexerToken_39("RPAREN", ")", line, col), 1);
+        } else if ((choice_644 == 123)) {
+            return make_ResultLexertokenI32(make_LexerToken_39("LBRACE", "{", line, col), 1);
+        } else if ((choice_644 == 125)) {
+            return make_ResultLexertokenI32(make_LexerToken_39("RBRACE", "}", line, col), 1);
+        } else if ((choice_644 == 91)) {
+            return make_ResultLexertokenI32(make_LexerToken_39("LBRACKET", "[", line, col), 1);
+        } else if ((choice_644 == 93)) {
+            return make_ResultLexertokenI32(make_LexerToken_39("RBRACKET", "]", line, col), 1);
+        } else if ((choice_644 == 59)) {
+            return make_ResultLexertokenI32(make_LexerToken_39("SEMICOLON", ";", line, col), 1);
+        } else if ((choice_644 == 58)) {
+            return make_ResultLexertokenI32(make_LexerToken_39("COLON", ":", line, col), 1);
+        } else if ((choice_644 == 44)) {
+            return make_ResultLexertokenI32(make_LexerToken_39("COMMA", ",", line, col), 1);
+        } else if ((choice_644 == 46)) {
+            return make_ResultLexertokenI32(make_LexerToken_39("DOT", ".", line, col), 1);
+        } else if ((choice_644 == 43)) {
+            if ((next == 61)) {
+                return make_ResultLexertokenI32(make_LexerToken_39("PLUS_ASSIGN", "+=", line, col), 2);
+            }
+            if ((next == 43)) {
+                return make_ResultLexertokenI32(make_LexerToken_39("INC", "++", line, col), 2);
+            }
+            return make_ResultLexertokenI32(make_LexerToken_39("PLUS", "+", line, col), 1);
+        } else if ((choice_644 == 42)) {
+            if ((next == 61)) {
+                return make_ResultLexertokenI32(make_LexerToken_39("STAR_ASSIGN", "*=", line, col), 2);
+            }
+            return make_ResultLexertokenI32(make_LexerToken_39("STAR", "*", line, col), 1);
+        } else if ((choice_644 == 47)) {
+            if ((next == 61)) {
+                return make_ResultLexertokenI32(make_LexerToken_39("SLASH_ASSIGN", "/=", line, col), 2);
+            }
+            return make_ResultLexertokenI32(make_LexerToken_39("SLASH", "/", line, col), 1);
+        } else if ((choice_644 == 37)) {
+            if ((next == 61)) {
+                return make_ResultLexertokenI32(make_LexerToken_39("PERCENT_ASSIGN", "%=", line, col), 2);
+            }
+            return make_ResultLexertokenI32(make_LexerToken_39("PERCENT", "%", line, col), 1);
+        } else if ((choice_644 == 94)) {
+            return make_ResultLexertokenI32(make_LexerToken_39("CARET", "^", line, col), 1);
+        } else if ((choice_644 == 126)) {
+            return make_ResultLexertokenI32(make_LexerToken_39("TILDE", "~", line, col), 1);
+        } else if ((choice_644 == 35)) {
+            return make_ResultLexertokenI32(make_LexerToken_39("HASH", "#", line, col), 1);
+        }
+    }
+    return make_ResultLexertokenI32(make_LexerToken_40(), 0);
+}
+
+fn lexer_isWhitespace(ch: i32) -> bool {
+    return ((((ch == 32) || (ch == 9)) || (ch == 10)) || (ch == 13));
+}
+
+fn lexer_isDigit(ch: i32) -> bool {
+    return ((ch >= 48) && (ch <= 57));
+}
+
+fn lexer_isHexDigit(ch: i32) -> bool {
+    return ((lexer_isDigit(ch) || (((ch >= 97) && (ch <= 102)))) || (((ch >= 65) && (ch <= 70))));
+}
+
+fn lexer_isLetter(ch: i32) -> bool {
+    return ((((ch >= 97) && (ch <= 122))) || (((ch >= 65) && (ch <= 90))));
+}
+
+fn lexer_isIdentStart(ch: i32) -> bool {
+    return (lexer_isLetter(ch) || (ch == 95));
+}
+
+fn lexer_isIdentPart(ch: i32) -> bool {
+    return ((lexer_isLetter(ch) || lexer_isDigit(ch)) || (ch == 95));
+}
+
+fn lexer_isValidEscape(ch: i32) -> bool {
+    {
+        let choice_645: i32 = ch;
+        if ((choice_645 == 110) || (choice_645 == 114) || (choice_645 == 116) || (choice_645 == 92) || (choice_645 == 39) || (choice_645 == 34) || (choice_645 == 48)) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+}
+
+
+// Lexer indices have already been checked against the cached source length.
+fn lexer_source_slice(input: str, start: i32, end: i32) -> str {
+    return copy_bytes(ptr(input) + i32_to_u64(start), end - start);
+}

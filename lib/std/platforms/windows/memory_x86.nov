@@ -1,0 +1,2 @@
+module memory_x86;
+import ../../core/memory;

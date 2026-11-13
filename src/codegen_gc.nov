@@ -1,0 +1,221 @@
+module codegen_gc;
+
+import model;
+import runtime;
+
+fn codegen_withCollector(mod: CodegenIRModule, target: CodegenTarget) -> CodegenIRModule {
+    let needed: bool = false;
+    {
+        let items_321: []CodegenIRFunc = mod.Functions;
+        let count_323: i32 = len(items_321);
+        for (let index_322: i32 = 0; index_322 < count_323; index_322++) {
+            let fn_value: CodegenIRFunc = items_321[index_322];
+            if ((fn_value.Name == "_novus_gc_trace")) {
+                return mod;
+            }
+            {
+                let items_324: []CodegenIRInstr = fn_value.Instrs;
+                let count_326: i32 = len(items_324);
+                for (let index_325: i32 = 0; index_325 < count_326; index_325++) {
+                    let instruction: CodegenIRInstr = copy_CodegenIRInstr(items_324[index_325]);
+                    {
+                        let choice_327: i32 = instruction.Op;
+                        if ((choice_327 == 74) || (choice_327 == 40) || (choice_327 == 48) || (choice_327 == 51) || (choice_327 == 73)) {
+                            needed = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (!(needed)) {
+        return mod;
+    }
+    let assigned_328: str = "i64";
+    let assigned_329: str = "load64";
+    let word: str = assigned_328;
+    let load: str = assigned_329;
+    if ((target.PtrSize == 4)) {
+        let assigned_330: str = "i32";
+        let assigned_331: str = "load32";
+        word = assigned_330;
+        load = assigned_331;
+    }
+    let source: str = runtime_strings_ReplaceAll("fn _novus_gc_word_store(address: WORD, value: WORD) -> void {\n    for (let byte_index: WORD = 0; byte_index < WORDSIZE; byte_index++) {\n        store_byte(address + byte_index, (value >> (byte_index * 8)) & 255);\n    }\n}\nfn _novus_gc_round(bytes: WORD) -> WORD {\n    let size: WORD = MARKOFFSET;\n    while (size < bytes) { size *= 2; }\n    return size;\n}\nfn _novus_gc_bin(bytes: WORD) -> WORD {\n    let index: WORD = 0;\n    while (bytes > 1) { bytes = bytes >> 1; index++; }\n    return index;\n}\nfn _novus_gc_take(free_list: WORD, bytes: WORD) -> WORD {\n    let slot: WORD = free_list + _novus_gc_bin(bytes) * WORDSIZE;\n    let address: WORD = LOAD(slot);\n    if (address != 0) { _novus_gc_word_store(slot, LOAD(address)); }\n    return address;\n}\nfn _novus_gc_swap(table: WORD, first: WORD, second: WORD) -> void {\n    let left: WORD = table + first * ENTRYSIZE;\n    let right: WORD = table + second * ENTRYSIZE;\n    for (let offset: WORD = 0; offset < ENTRYSIZE; offset += WORDSIZE) {\n        let value: WORD = LOAD(left + offset);\n        _novus_gc_word_store(left + offset, LOAD(right + offset));\n        _novus_gc_word_store(right + offset, value);\n    }\n}\nfn _novus_gc_sift(table: WORD, root_index: WORD, size: WORD) -> void {\n    while (root_index * 2 + 1 < size) {\n        let child: WORD = root_index * 2 + 1;\n        if (child + 1 < size && LOAD(table + child * ENTRYSIZE) < LOAD(table + (child + 1) * ENTRYSIZE)) { child++; }\n        if (LOAD(table + root_index * ENTRYSIZE) >= LOAD(table + child * ENTRYSIZE)) { return; }\n        _novus_gc_swap(table, root_index, child);\n        root_index = child;\n    }\n}\nfn _novus_gc_mark(table: WORD, size: WORD, queue: WORD, candidate: WORD) -> void {\n    if (size == 0 || candidate < LOAD(table)) { return; }\n    let last: WORD = table + (size - 1) * ENTRYSIZE;\n    if (candidate >= LOAD(last) + LOAD(last + WORDSIZE)) { return; }\n    let low: WORD = 0;\n    let high: WORD = size;\n    while (low < high) {\n        let middle: WORD = low + (high - low) / 2;\n        if (LOAD(table + middle * ENTRYSIZE) <= candidate) { low = middle + 1; }\n        else { high = middle; }\n    }\n    if (low == 0) { return; }\n    let entry: WORD = table + (low - 1) * ENTRYSIZE;\n    if (candidate >= LOAD(entry) + LOAD(entry + WORDSIZE) || LOAD(entry + MARKOFFSET) != 0) { return; }\n    _novus_gc_word_store(entry + MARKOFFSET, 1);\n    let queued: WORD = LOAD(queue);\n    _novus_gc_word_store(queue + (queued + 1) * WORDSIZE, low - 1);\n    _novus_gc_word_store(queue, queued + 1);\n}\nfn _novus_gc_trace(table: WORD, size: WORD, roots: WORD, root_count: WORD, stack_low: WORD, stack_high: WORD, free_list: WORD, queue: WORD) -> WORD {\n    if (size == 0) { return 0; }\n    for (let i: WORD = 0; i < size; i++) { _novus_gc_word_store(table + i * ENTRYSIZE + MARKOFFSET, 0); }\n    let heap_root: WORD = size / 2;\n    while (heap_root > 0) { heap_root--; _novus_gc_sift(table, heap_root, size); }\n    let end: WORD = size;\n    while (end > 1) { end--; _novus_gc_swap(table, 0, end); _novus_gc_sift(table, 0, end); }\n    _novus_gc_word_store(queue, 0);\n    if (stack_high != 0) {\n        for (let cursor: WORD = stack_low; cursor < stack_high; cursor += WORDSIZE) { _novus_gc_mark(table, size, queue, LOAD(cursor)); }\n    }\n    for (let i: WORD = 0; i < root_count; i++) { _novus_gc_mark(table, size, queue, LOAD(LOAD(roots + i * WORDSIZE))); }\n    let cursor: WORD = 0;\n    while (cursor < LOAD(queue)) {\n        let entry: WORD = table + LOAD(queue + (cursor + 1) * WORDSIZE) * ENTRYSIZE;\n        let address: WORD = LOAD(entry);\n        let bytes: WORD = LOAD(entry + WORDSIZE);\n        for (let offset: WORD = 0; offset + WORDSIZE <= bytes; offset += WORDSIZE) { _novus_gc_mark(table, size, queue, LOAD(address + offset)); }\n        cursor++;\n    }\n    let kept: WORD = 0;\n    for (let i: WORD = 0; i < size; i++) {\n        let entry: WORD = table + i * ENTRYSIZE;\n        let address: WORD = LOAD(entry);\n        let bytes: WORD = LOAD(entry + WORDSIZE);\n        if (LOAD(entry + MARKOFFSET) != 0) {\n            let destination: WORD = table + kept * ENTRYSIZE;\n            _novus_gc_word_store(destination, address);\n            _novus_gc_word_store(destination + WORDSIZE, bytes);\n            _novus_gc_word_store(destination + MARKOFFSET, 0);\n            kept++;\n        } else if (bytes >= MARKOFFSET) {\n            let slot: WORD = free_list + _novus_gc_bin(bytes) * WORDSIZE;\n            _novus_gc_word_store(address, LOAD(slot));\n            _novus_gc_word_store(address + WORDSIZE, bytes);\n            _novus_gc_word_store(slot, address);\n        }\n    }\n    return kept;\n}\n", "WORDSIZE", (runtime_string_i32(target.PtrSize)));
+    source = runtime_strings_ReplaceAll(source, "ENTRYSIZE", (runtime_string_i32((target.PtrSize * 3))));
+    source = runtime_strings_ReplaceAll(source, "MARKOFFSET", (runtime_string_i32((target.PtrSize * 2))));
+    source = runtime_strings_ReplaceAll(source, "WORD", word);
+    source = runtime_strings_ReplaceAll(source, "LOAD", load);
+    let result_332: ResultArraylexertokenArraylexerlexerror = lexer_Lex(source);
+    let tokens: []LexerToken = result_332.value0;
+    let result_333: ResultAstnodeArrayparserparseerror = parser_Parse(tokens);
+    let program: AstNode = result_333.value0;
+    let runtime: CodegenIRModule = codegen_Lower(program, target);
+    let result: CodegenIRModule = copy_CodegenIRModule(mod);
+    result.Functions = extend_Codegenirfunc([], mod.Functions);
+    {
+        let items_334: []CodegenIRFunc = runtime.Functions;
+        let count_336: i32 = len(items_334);
+        for (let index_335: i32 = 0; index_335 < count_336; index_335++) {
+            let fn_value: CodegenIRFunc = items_334[index_335];
+            {
+                let items_337: []CodegenIRInstr = fn_value.Instrs;
+                let count_339: i32 = len(items_337);
+                for (let index_338: i32 = 0; index_338 < count_339; index_338++) {
+                    let i: i32 = index_338;
+                    let operands: []CodegenOperand = [fn_value.Instrs[i].Dst, fn_value.Instrs[i].Src1, fn_value.Instrs[i].Src2];
+                    {
+                        let items_340: []CodegenOperand = operands;
+                        let count_342: i32 = len(items_340);
+                        for (let index_341: i32 = 0; index_341 < count_342; index_341++) {
+                            let operand: CodegenOperand = items_340[index_341];
+                            if (((operand.Kind == 5) && runtime_strings_HasPrefix(operand.Label, ".L"))) {
+                                operand.Label = (".Lgc_runtime" + runtime_substring(operand.Label, 2, len(operand.Label)));
+                            }
+                        }
+                    }
+                }
+            }
+            result.Functions = append_Codegenirfunc(result.Functions, fn_value);
+        }
+    }
+    return result;
+}
+
+fn codegen_collectorData(mod: CodegenIRModule, target: CodegenTarget) -> str {
+    let out: StringBuilder = new StringBuilder();
+    let roots: str = codegen_Target_Sym(target, "_novus_gc_roots");
+    let queue: str = codegen_Target_Sym(target, "_novus_gc_queue");
+    if ((target.Flavor == 1)) {
+        out.append((("section .data\n" + roots) + ":\n"));
+        {
+            let items_343: []CodegenIRGlobal = mod.Globals;
+            let count_345: i32 = len(items_343);
+            for (let index_344: i32 = 0; index_344 < count_345; index_344++) {
+                let global: CodegenIRGlobal = copy_CodegenIRGlobal(items_343[index_344]);
+                out.append((("    dq " + codegen_Target_Sym(target, global.Name)) + "\n"));
+            }
+        }
+        out.append(("section .bss\n" + queue + ": resb " + runtime_string_i32((((target.GCEntries + 1)) * target.PtrSize)) + "\nsection .text\n"));
+    } else {
+        let section: str = ".data\n";
+        let text: str = ".text\n";
+        if ((target.OS == 1)) {
+            section = ".section __DATA,__data\n";
+            text = ".section __TEXT,__text\n";
+        }
+        out.append(((section + roots) + ":\n"));
+        let directive: str = ".quad";
+        if ((target.PtrSize == 4)) {
+            directive = ".long";
+        }
+        {
+            let items_346: []CodegenIRGlobal = mod.Globals;
+            let count_348: i32 = len(items_346);
+            for (let index_347: i32 = 0; index_347 < count_348; index_347++) {
+                let global: CodegenIRGlobal = copy_CodegenIRGlobal(items_346[index_347]);
+                out.append((((("    " + directive) + " ") + codegen_Target_Sym(target, global.Name)) + "\n"));
+            }
+        }
+        out.append((".lcomm " + queue + ", " + runtime_string_i32((((target.GCEntries + 1)) * target.PtrSize)) + "\n" + text));
+    }
+    return out.text();
+}
+
+fn codegen_arm64Emitter_emitFastCollector(e: CodegenArm64Emitter) -> void {
+    let w: StringBuilder = e.b;
+    w.append(codegen_collectorData(e.mod, e.target));
+    w.append((codegen_Target_Sym(e.target, "_novus_gc_collect") + ":\n"));
+    {
+        let r: i32 = 0;
+        for (; (r < 30); r = (r + 2)) {
+            w.append(("    stp x" + runtime_string_i32(r) + ", x" + runtime_string_i32((r + 1)) + ", [sp, #-16]!\n"));
+        }
+    }
+    w.append("    stp x30, xzr, [sp, #-16]!\n");
+    codegen_arm64Emitter_emitLoadGlobal(e, "x0", codegen_Target_Sym(e.target, "_novus_gc_table"));
+    codegen_arm64Emitter_emitLoadGlobal(e, "x9", codegen_Target_Sym(e.target, "_novus_gc_count"));
+    w.append("    ldr x1, [x9]\n");
+    codegen_arm64Emitter_emitLoadGlobal(e, "x2", codegen_Target_Sym(e.target, "_novus_gc_roots"));
+    codegen_arm64Emitter_loadImm(e, "x3", runtime_to_i64(len(e.mod.Globals)));
+    w.append("    mov x4, sp\n");
+    codegen_arm64Emitter_emitLoadGlobal(e, "x9", codegen_Target_Sym(e.target, "_novus_gc_stack_bottom"));
+    w.append("    ldr x5, [x9]\n");
+    codegen_arm64Emitter_emitLoadGlobal(e, "x6", codegen_Target_Sym(e.target, "_novus_gc_freelist"));
+    codegen_arm64Emitter_emitLoadGlobal(e, "x7", codegen_Target_Sym(e.target, "_novus_gc_queue"));
+    w.append((("    bl " + codegen_Target_Sym(e.target, "_novus_gc_trace")) + "\n"));
+    codegen_arm64Emitter_emitLoadGlobal(e, "x9", codegen_Target_Sym(e.target, "_novus_gc_count"));
+    w.append("    str x0, [x9]\n");
+    codegen_arm64Emitter_emitLoadGlobal(e, "x9", codegen_Target_Sym(e.target, "_novus_gc_threshold"));
+    w.append("    lsl x0, x0, #1\n    add x0, x0, #256\n    str x0, [x9]\n");
+    w.append("    ldp x30, xzr, [sp], #16\n");
+    {
+        let r: i32 = 28;
+        for (; (r >= 0); r = (r - 2)) {
+            w.append(("    ldp x" + runtime_string_i32(r) + ", x" + runtime_string_i32((r + 1)) + ", [sp], #16\n"));
+        }
+    }
+    w.append("    ret\n");
+}
+
+fn codegen_x86_64Emitter_emitFastCollector(e: CodegenX86_64Emitter, nasm: bool) -> void {
+    let w: StringBuilder = e.b;
+    w.append(codegen_collectorData(e.mod, e.target));
+    w.append((codegen_Target_Sym(e.target, "_novus_gc_collect") + ":\n"));
+    let registers: []str = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"];
+    {
+        let items_349: []str = registers;
+        let count_351: i32 = len(items_349);
+        for (let index_350: i32 = 0; index_350 < count_351; index_350++) {
+            let reg: str = items_349[index_350];
+            if (nasm) {
+                w.append((("    push " + reg) + "\n"));
+            } else {
+                w.append((("    pushq %" + reg) + "\n"));
+            }
+        }
+    }
+    if (nasm) {
+        w.append("    mov r10, rsp\n    sub rsp, 64\n");
+        w.append("    lea rcx, [rel _novus_gc_table]\n    mov rdx, [rel _novus_gc_count]\n    lea r8, [rel _novus_gc_roots]\n");
+        w.append(("    mov r9, " + runtime_string_i32(len(e.mod.Globals)) + "\n"));
+        w.append("    mov [rsp+32], r10\n    mov rax, [rel _novus_gc_stack_bottom]\n    mov [rsp+40], rax\n");
+        w.append("    lea rax, [rel _novus_gc_freelist]\n    mov [rsp+48], rax\n    lea rax, [rel _novus_gc_queue]\n    mov [rsp+56], rax\n");
+        w.append("    call _novus_gc_trace\n    add rsp, 64\n    mov [rel _novus_gc_count], rax\n");
+        w.append("    lea rax, [rax*2+256]\n    mov [rel _novus_gc_threshold], rax\n");
+    } else {
+        w.append("    movq %rsp, %r8\n");
+        w.append(("    leaq " + codegen_Target_Sym(e.target, "_novus_gc_table") + "(" + "%" + "rip), " + "%" + "rdi\n"));
+        w.append(("    movq " + codegen_Target_Sym(e.target, "_novus_gc_count") + "(" + "%" + "rip), " + "%" + "rsi\n"));
+        w.append(("    leaq " + codegen_Target_Sym(e.target, "_novus_gc_roots") + "(" + "%" + "rip), " + "%" + "rdx\n"));
+        w.append(("    movq $" + runtime_string_i32(len(e.mod.Globals)) + ", " + "%" + "rcx\n"));
+        w.append(("    movq " + codegen_Target_Sym(e.target, "_novus_gc_stack_bottom") + "(" + "%" + "rip), " + "%" + "r9\n"));
+        w.append(("    leaq " + codegen_Target_Sym(e.target, "_novus_gc_queue") + "(" + "%" + "rip), " + "%" + "rax\n    pushq " + "%" + "rax\n"));
+        w.append(("    leaq " + codegen_Target_Sym(e.target, "_novus_gc_freelist") + "(" + "%" + "rip), " + "%" + "rax\n    pushq " + "%" + "rax\n"));
+        w.append((("    call " + codegen_Target_Sym(e.target, "_novus_gc_trace")) + "\n    addq $16, %rsp\n"));
+        w.append(("    movq " + "%" + "rax, " + codegen_Target_Sym(e.target, "_novus_gc_count") + "(" + "%" + "rip)\n"));
+        w.append("    leaq 256(,%rax,2), %rax\n");
+        w.append(("    movq " + "%" + "rax, " + codegen_Target_Sym(e.target, "_novus_gc_threshold") + "(" + "%" + "rip)\n"));
+    }
+    {
+        let i: i32 = (len(registers) - 1);
+        for (; (i >= 0); i--) {
+            if (nasm) {
+                w.append((("    pop " + registers[i]) + "\n"));
+            } else {
+                w.append((("    popq %" + registers[i]) + "\n"));
+            }
+        }
+    }
+    w.append("    ret\n");
+}
+
+fn codegen_x86Emitter_emitFastCollector(e: CodegenX86Emitter) -> void {
+    let w: StringBuilder = e.b;
+    w.append(codegen_collectorData(e.mod, e.target));
+    w.append("_novus_gc_collect:\n    pushal\n    movl %esp, %eax\n");
+    w.append("    pushl $_novus_gc_queue\n    pushl $_novus_gc_freelist\n    pushl _novus_gc_stack_bottom\n    pushl %eax\n");
+    w.append(("    pushl $" + runtime_string_i32(len(e.mod.Globals)) + "\n"));
+    w.append("    pushl $_novus_gc_roots\n    pushl _novus_gc_count\n    pushl $_novus_gc_table\n    call _novus_gc_trace\n    addl $32, %esp\n");
+    w.append("    movl %eax, _novus_gc_count\n    leal 256(,%eax,2), %eax\n    movl %eax, _novus_gc_threshold\n    popal\n    ret\n");
+}

@@ -1,0 +1,168 @@
+// ---------------------------------------------------------------------------
+// env/linux_arm64 - environment utilities for Linux ARM64 (aarch64)
+// ---------------------------------------------------------------------------
+
+module env_linux_arm64;
+
+
+// ---------------------------------------------------------------------------
+// Get current working directory via getcwd syscall
+// ---------------------------------------------------------------------------
+
+fn getcwd() -> str {
+    let buf: str = make_buffer(1024);
+    mov(x0, buf);
+    mov(x1, 1024);
+    mov(x8, 17);       // SYS_getcwd
+    syscall();
+    let result: str = "";
+    let i: i32 = 0;
+    while (i < 1024) {
+        let b: i32 = buf[i] & 255;
+        if (b == 0) { break; }
+        result = result + buf[i];
+        i = i + 1;
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Get process ID
+// ---------------------------------------------------------------------------
+
+fn getpid() -> i32 {
+    mov(x8, 172);      // SYS_getpid
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
+
+// ---------------------------------------------------------------------------
+// Get parent process ID
+// ---------------------------------------------------------------------------
+
+fn getppid() -> i32 {
+    mov(x8, 173);      // SYS_getppid
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
+
+// ---------------------------------------------------------------------------
+// Get user ID
+// ---------------------------------------------------------------------------
+
+fn getuid() -> i32 {
+    mov(x8, 174);      // SYS_getuid
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
+
+// ---------------------------------------------------------------------------
+// Get effective user ID
+// ---------------------------------------------------------------------------
+
+fn geteuid() -> i32 {
+    mov(x8, 175);      // SYS_geteuid
+    syscall();
+    return u64_to_i32(getreg(x0));
+}
+
+// ---------------------------------------------------------------------------
+// Get environment variable value from /proc/self/environ
+// ---------------------------------------------------------------------------
+
+fn getenv(name: str) -> str {
+    let fd: i32 = file_open_read("/proc/self/environ");
+    if (fd < 0) { return ""; }
+
+    let buf: str = make_buffer(8192);
+    let nr: i32 = file_read(fd, ptr(buf), 8192);
+    file_close(fd);
+    if (nr <= 0) { return ""; }
+
+    let needle: str = name + "=";
+    let i: i32 = 0;
+    while (i < nr) {
+        let matched: i32 = 0;
+        while (matched < len(needle) && i + matched < nr && buf[i + matched] == needle[matched]) {
+            matched = matched + 1;
+        }
+        if (matched == len(needle)) {
+            let out: str = "";
+            let j: i32 = i + matched;
+            while (j < nr) {
+                let b: i32 = buf[j] & 255;
+                if (b == 0) {
+                    return out;
+                }
+                out = out + buf[j];
+                j = j + 1;
+            }
+            return out;
+        }
+
+        while (i < nr && (buf[i] & 255) != 0) {
+            i = i + 1;
+        }
+        i = i + 1;
+    }
+    return "";
+}
+
+// ---------------------------------------------------------------------------
+// Get hostname
+// ---------------------------------------------------------------------------
+
+fn gethostname() -> str {
+    let a0: str = "/bin/hostname";
+    let av: []u64 = [ptr(a0), 0];
+    return capture_output(a0, av, 256);
+}
+
+// ---------------------------------------------------------------------------
+// Get home directory
+// ---------------------------------------------------------------------------
+
+fn get_home_dir() -> str {
+    return getenv("HOME");
+}
+
+// ---------------------------------------------------------------------------
+// Get username
+// ---------------------------------------------------------------------------
+
+fn get_username() -> str {
+    return getenv("USER");
+}
+
+// ---------------------------------------------------------------------------
+// Get OS name
+// ---------------------------------------------------------------------------
+
+fn get_os_name() -> str {
+    let a0: str = "/usr/bin/uname";
+    let a1: str = "-s";
+    let av: []u64 = [ptr(a0), ptr(a1), 0];
+    return capture_output(a0, av, 128);
+}
+
+// ---------------------------------------------------------------------------
+// Get OS version
+// ---------------------------------------------------------------------------
+
+fn get_os_version() -> str {
+    let a0: str = "/usr/bin/uname";
+    let a1: str = "-r";
+    let av: []u64 = [ptr(a0), ptr(a1), 0];
+    return capture_output(a0, av, 128);
+}
+
+// ---------------------------------------------------------------------------
+// Get machine architecture
+// ---------------------------------------------------------------------------
+
+fn get_arch() -> str {
+    let a0: str = "/usr/bin/uname";
+    let a1: str = "-m";
+    let av: []u64 = [ptr(a0), ptr(a1), 0];
+    return capture_output(a0, av, 128);
+}

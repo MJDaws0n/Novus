@@ -1,0 +1,21 @@
+module archive;
+import ../std;
+import ../process;
+
+fn extract_zip(archive: str, destination: str) -> str {
+    let result: ProcessResult = extract_zip_process(archive, destination);
+    if (result.error != "") { return result.error + ": " + result.output; }
+    return "";
+}
+
+#if(os == "windows") {
+    fn extract_zip_process(archive: str, destination: str) -> ProcessResult {
+        let script: str = "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath '" + str_replace(archive, "'", "''") + "' -DestinationPath '" + str_replace(destination, "'", "''") + "' -Force";
+        return command_run(process_command("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]), true);
+    }
+}
+#if(os != "windows") {
+    fn extract_zip_process(archive: str, destination: str) -> ProcessResult {
+        return command_run(process_command("unzip", ["-o", archive, "-d", destination]), true);
+    }
+}

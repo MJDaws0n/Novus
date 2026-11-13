@@ -1,0 +1,257 @@
+module codegen_target;
+
+import model;
+import runtime;
+
+fn codegen_OS_String(o: i32) -> str {
+    {
+        let choice_461: i32 = o;
+        if ((choice_461 == 0)) {
+            return "linux";
+        } else if ((choice_461 == 1)) {
+            return "darwin";
+        } else if ((choice_461 == 2)) {
+            return "windows";
+        } else {
+            return "unknown";
+        }
+    }
+}
+
+fn codegen_Arch_String(a: i32) -> str {
+    {
+        let choice_462: i32 = a;
+        if ((choice_462 == 0)) {
+            return "x86_64";
+        } else if ((choice_462 == 1)) {
+            return "x86";
+        } else if ((choice_462 == 2)) {
+            return "arm64";
+        } else {
+            return "unknown";
+        }
+    }
+}
+
+fn codegen_ObjFormat_String(f: i32) -> str {
+    {
+        let choice_463: i32 = f;
+        if ((choice_463 == 0)) {
+            return "elf64";
+        } else if ((choice_463 == 1)) {
+            return "macho64";
+        } else if ((choice_463 == 2)) {
+            return "win64";
+        } else {
+            return "unknown";
+        }
+    }
+}
+
+// HostTarget returns a Target matching the current Go runtime (GOOS/GOARCH).
+fn codegen_HostTarget() -> ResultCodegentargetStr {
+    let goos: str = runtime_host_os();
+    let goarch: str = runtime_host_arch();
+    return codegen_ResolveTarget(goos, goarch);
+}
+
+// ResolveTarget builds a Target from OS/Arch name strings (same names Go uses).
+fn codegen_ResolveTarget(osName: str, archName: str) -> ResultCodegentargetStr {
+    let t: CodegenTarget = make_CodegenTarget_28();
+    {
+        let choice_464: str = osName;
+        if ((choice_464 == "linux")) {
+            t.OS = 0;
+        } else if ((choice_464 == "darwin")) {
+            t.OS = 1;
+        } else if ((choice_464 == "windows")) {
+            t.OS = 2;
+        } else {
+            return make_ResultCodegentargetStr(null, ("unsupported OS: " + osName));
+        }
+    }
+    {
+        let choice_465: str = archName;
+        if ((choice_465 == "amd64") || (choice_465 == "x86_64")) {
+            t.Arch = 0;
+        } else if ((choice_465 == "386") || (choice_465 == "x86")) {
+            t.Arch = 1;
+        } else if ((choice_465 == "arm64") || (choice_465 == "aarch64")) {
+            t.Arch = 2;
+        } else {
+            return make_ResultCodegentargetStr(null, ("unsupported architecture: " + archName));
+        }
+    }
+    if (((((t.OS == 1) && (t.Arch == 1))) || (((t.OS == 2) && (t.Arch == 1))))) {
+        return make_ResultCodegentargetStr(null, ("unsupported target: " + codegen_OS_String(t.OS) + "/" + codegen_Arch_String(t.Arch)));
+    }
+    {
+        let choice_466: i32 = t.Arch;
+        if ((choice_466 == 0)) {
+            codegen_Target_fillX86_64(t);
+        } else if ((choice_466 == 1)) {
+            codegen_Target_fillX86(t);
+        } else if ((choice_466 == 2)) {
+            codegen_Target_fillARM64(t);
+        }
+    }
+    {
+        let choice_467: i32 = t.OS;
+        if ((choice_467 == 1)) {
+            t.ObjFmt = 1;
+            t.SymbolPrefix = "_";
+            t.EntryPoint = "_main";
+            if ((t.Arch == 0)) {
+                t.SyscallNumOffset = 33554432;
+            }
+        } else if ((choice_467 == 0)) {
+            t.ObjFmt = 0;
+            t.SymbolPrefix = "";
+            t.EntryPoint = "_start";
+            t.SyscallNumOffset = 0;
+        } else if ((choice_467 == 2)) {
+            t.ObjFmt = 2;
+            t.SymbolPrefix = "";
+            t.EntryPoint = "main";
+            t.SyscallNumOffset = 0;
+        }
+    }
+    return make_ResultCodegentargetStr(t, "");
+}
+
+// EnsureHeapDefaults fills in HeapSize and GCEntries with default values
+// if they are zero.
+fn codegen_Target_EnsureHeapDefaults(t: CodegenTarget) -> void {
+    if ((t.HeapSize <= 0)) {
+        t.HeapSize = 67108864;
+    }
+    if ((t.GCEntries <= 0)) {
+        t.GCEntries = 65536;
+    }
+}
+
+fn codegen_Target_fillX86_64(t: CodegenTarget) -> void {
+    t.PtrSize = 8;
+    t.StackArgSlotSize = 8;
+    t.Flavor = 0;
+    t.ReturnReg = "rax";
+    t.StackPointer = "rsp";
+    t.BasePointer = "rbp";
+    t.SyscallReg = "rax";
+    t.SyscallInstr = "syscall";
+    {
+        let choice_468: i32 = t.OS;
+        if ((choice_468 == 2)) {
+            t.ArgRegs = ["rcx", "rdx", "r8", "r9"];
+            t.SyscallArgRegs = ["rcx", "rdx", "r8", "r9", "r10"];
+            t.Flavor = 1;
+        } else {
+            t.ArgRegs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"];
+            t.SyscallArgRegs = ["rdi", "rsi", "rdx", "r10", "r8", "r9"];
+        }
+    }
+}
+
+fn codegen_Target_fillX86(t: CodegenTarget) -> void {
+    t.PtrSize = 4;
+    t.StackArgSlotSize = 4;
+    t.Flavor = 0;
+    t.ReturnReg = "eax";
+    t.StackPointer = "esp";
+    t.BasePointer = "ebp";
+    t.SyscallReg = "eax";
+    t.SyscallInstr = "int $0x80";
+    t.ArgRegs = [];
+    t.SyscallArgRegs = ["ebx", "ecx", "edx", "esi", "edi", "ebp"];
+}
+
+fn codegen_Target_fillARM64(t: CodegenTarget) -> void {
+    t.PtrSize = 8;
+    t.StackArgSlotSize = 16;
+    t.Flavor = 0;
+    t.ReturnReg = "x0";
+    t.StackPointer = "sp";
+    t.BasePointer = "x29";
+    {
+        let choice_469: i32 = t.OS;
+        if ((choice_469 == 1)) {
+            t.SyscallReg = "x16";
+        } else {
+            t.SyscallReg = "x8";
+        }
+    }
+    if ((t.OS == 2)) {
+        t.StackArgSlotSize = 8;
+    }
+    t.ArgRegs = ["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"];
+    t.SyscallArgRegs = ["x0", "x1", "x2", "x3", "x4", "x5"];
+    {
+        let choice_470: i32 = t.OS;
+        if ((choice_470 == 1)) {
+            t.SyscallInstr = "svc #0x80";
+        } else {
+            t.SyscallInstr = "svc #0";
+        }
+    }
+}
+
+// FileExtObj returns the platform object file extension (.o or .obj).
+fn codegen_Target_FileExtObj(t: CodegenTarget) -> str {
+    if ((t.OS == 2)) {
+        return ".obj";
+    }
+    return ".o";
+}
+
+// FileExtExe returns the platform executable extension ("" or ".exe").
+fn codegen_Target_FileExtExe(t: CodegenTarget) -> str {
+    if ((t.OS == 2)) {
+        return ".exe";
+    }
+    return "";
+}
+
+// FileExtAsm returns the assembly file extension (.s or .asm).
+fn codegen_Target_FileExtAsm(t: CodegenTarget) -> str {
+    if ((t.Flavor == 1)) {
+        return ".asm";
+    }
+    return ".s";
+}
+
+// Sym returns a symbol name with the target prefix applied.
+fn codegen_Target_Sym(t: CodegenTarget, name: str) -> str {
+    return (t.SymbolPrefix + name);
+}
+
+// Is64Bit reports whether the target is a 64-bit architecture.
+fn codegen_Target_Is64Bit(t: CodegenTarget) -> bool {
+    return (t.PtrSize == 8);
+}
+
+// IsX86Family reports whether the target is x86 or x86-64.
+fn codegen_Target_IsX86Family(t: CodegenTarget) -> bool {
+    return ((t.Arch == 0) || (t.Arch == 1));
+}
+
+// OSName returns the OS as a lowercase string matching the #if constant values.
+fn codegen_Target_OSName(t: CodegenTarget) -> str {
+    return codegen_OS_String(t.OS);
+}
+
+// ArchName returns the architecture as a string matching the #if constant values.
+// Uses Go-style names: "amd64", "arm64", "x86".
+fn codegen_Target_ArchName(t: CodegenTarget) -> str {
+    {
+        let choice_471: i32 = t.Arch;
+        if ((choice_471 == 0)) {
+            return "amd64";
+        } else if ((choice_471 == 1)) {
+            return "x86";
+        } else if ((choice_471 == 2)) {
+            return "arm64";
+        } else {
+            return "unknown";
+        }
+    }
+}

@@ -1,0 +1,69 @@
+module file_metadata_linux;
+
+import ../../support;
+
+// Linux statx uses the same public structure on every supported architecture.
+fn file_info(path: str) -> FileInfo {
+    let info: FileInfo = new FileInfo();
+    info.path = path;
+    let buffer: str = make_buffer(256);
+    if (file_statx(path, ptr(buffer)) != 0) {
+        info.error = "cannot stat file: " + path;
+        return info;
+    }
+    info.exists = true;
+    info.directory = (load32(ptr(buffer) + 28) & 61440) == 16384;
+    info.size = load64(ptr(buffer) + 40);
+    return info;
+}
+
+fn canonical_path(path: str) -> PathResult {
+    let result: PathResult = new PathResult();
+    // O_PATH follows symlinks without requiring read permission on the file.
+    let descriptor: i32 = file_open(path, 2097152, 0);
+    if (descriptor < 0) { result.error = "cannot resolve path: " + path; return result; }
+    let link: str = "/proc/self/fd/" + i32_to_str(descriptor);
+    let buffer: str = make_buffer(4096);
+    let size: i32 = file_readlink(link, ptr(buffer), 4096);
+    file_close(descriptor);
+    if (size < 0 || size >= 4096) { result.error = "cannot resolve path: " + path; return result; }
+    result.path = copy_bytes(ptr(buffer), size);
+    return result;
+}
+
+fn working_directory() -> PathResult {
+    let result: PathResult = new PathResult();
+    let buffer: str = make_buffer(4096);
+    if (file_getcwd(ptr(buffer), 4096) < 0) { result.error = "cannot read working directory"; return result; }
+    result.path = cstr_to_str(ptr(buffer));
+    return result;
+}
+
+#if(arch == "amd64") {
+    fn file_statx(path: str, buffer: u64) -> i32 {
+        mov(rdi, -100); mov(rsi, path); mov(rdx, 0); mov(r10, 2047); mov(r8, buffer); mov(rax, 332);
+        syscall(); return u64_to_i32(getreg(rax));
+    }
+    fn file_readlink(path: str, buffer: u64, size: i32) -> i32 {
+        mov(rdi, path); mov(rsi, buffer); mov(rdx, size); mov(rax, 89);
+        syscall(); return u64_to_i32(getreg(rax));
+    }
+    fn file_getcwd(buffer: u64, size: i32) -> i32 {
+        mov(rdi, buffer); mov(rsi, size); mov(rax, 79);
+        syscall(); return u64_to_i32(getreg(rax));
+    }
+}
+#if(arch == "arm64") {
+    fn file_statx(path: str, buffer: u64) -> i32 {
+        mov(x0, -100); mov(x1, path); mov(x2, 0); mov(x3, 2047); mov(x4, buffer); mov(x8, 291);
+        syscall(); return u64_to_i32(getreg(x0));
+    }
+    fn file_readlink(path: str, buffer: u64, size: i32) -> i32 {
+        mov(x0, -100); mov(x1, path); mov(x2, buffer); mov(x3, size); mov(x8, 78);
+        syscall(); return u64_to_i32(getreg(x0));
+    }
+    fn file_getcwd(buffer: u64, size: i32) -> i32 {
+        mov(x0, buffer); mov(x1, size); mov(x8, 17);
+        syscall(); return u64_to_i32(getreg(x0));
+    }
+}

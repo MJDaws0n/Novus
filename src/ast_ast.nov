@@ -1,0 +1,497 @@
+module ast_ast;
+
+import model;
+import runtime;
+
+fn ast_Position_String(p: AstPosition) -> str {
+    return (runtime_string_i32(p.Line) + ":" + runtime_string_i32(p.Column));
+}
+
+fn ast_Program_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_GlobalVar_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_ModuleDecl_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_ImportDecl_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_CompTimeIf_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_ClassDecl_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_FnDecl_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_BlockStmt_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_LetStmt_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_ReturnStmt_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_BreakStmt_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_ContinueStmt_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_IfStmt_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_WhileStmt_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_ForStmt_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_ExprStmt_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_AssignStmt_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_IdentExpr_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_IntLitExpr_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_FloatLitExpr_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_StringLitExpr_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_BoolLitExpr_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_NullLitExpr_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_UnaryExpr_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_BinaryExpr_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_CallExpr_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_MemberExpr_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_NewExpr_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_IndexExpr_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_GroupExpr_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_AddressOfExpr_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+fn ast_ArrayLitExpr_GetPos(n: AstNode) -> AstPosition {
+    return copy_AstPosition(n.Pos);
+}
+
+// ResolveCompTimeBlocks evaluates all #if blocks in the program and merges
+// the contents of matching blocks into the program's imports, functions, and
+// globals.  Non-matching blocks are discarded.
+//
+// Constants is a map of compile-time variable values, e.g.:
+//
+//	{"os": "windows", "arch": "amd64"}
+fn ast_ResolveCompTimeBlocks(prog: AstNode, constants: MapStrStr) -> void {
+    {
+        let items_75: []AstNode = prog.CompTimeBlocks;
+        let count_77: i32 = len(items_75);
+        for (let index_76: i32 = 0; index_76 < count_77; index_76++) {
+            let ct: AstNode = items_75[index_76];
+            let actual: str = MapStrStr_get(constants, ct.Variable);
+            let ok: bool = MapStrStr_has(constants, ct.Variable);
+            if (!(ok)) {
+                continue;
+            }
+            let match: bool = false;
+            {
+                let choice_78: str = ct.Operator;
+                if ((choice_78 == "==")) {
+                    match = (actual == ct.TextValue);
+                } else if ((choice_78 == "!=")) {
+                    match = (actual != ct.TextValue);
+                }
+            }
+            if (!(match)) {
+                continue;
+            }
+            prog.Imports = extend_Astnode(prog.Imports, ct.Imports);
+            prog.Functions = extend_Astnode(prog.Functions, ct.Functions);
+            prog.Globals = extend_Astnode(prog.Globals, ct.Globals);
+            prog.Classes = extend_Astnode(prog.Classes, ct.Classes);
+        }
+    }
+    prog.CompTimeBlocks = [];
+}
+
+// DebugString returns a readable multi-line representation of the AST.
+fn ast_DebugString(prog: AstNode) -> str {
+    let b: StringBuilder = new StringBuilder();
+    ast_debugProgram(b, prog, 0);
+    return b.text();
+}
+
+fn ast_writeIndent(b: StringBuilder, level: i32) -> void {
+    {
+        let i: i32 = 0;
+        for (; (i < level); i++) {
+            b.append("  ");
+        }
+    }
+}
+
+fn ast_debugProgram(b: StringBuilder, prog: AstNode, level: i32) -> void {
+    ast_writeIndent(b, level);
+    b.append("Program\n");
+    if ((prog.Module != null)) {
+        ast_writeIndent(b, (level + 1));
+        b.append(("Module: " + prog.Module.Name + "\n"));
+    }
+    {
+        let items_79: []AstNode = prog.Imports;
+        let count_81: i32 = len(items_79);
+        for (let index_80: i32 = 0; index_80 < count_81; index_80++) {
+            let imp: AstNode = items_79[index_80];
+            ast_writeIndent(b, (level + 1));
+            let info: str = imp.Path;
+            if ((len(imp.SelectFns) > 0)) {
+                info = (info + (("[" + runtime_strings_Join(imp.SelectFns, ", ")) + "]"));
+            }
+            if ((imp.Alias != "")) {
+                info = (info + (" as " + imp.Alias));
+            }
+            b.append(("Import: " + info + "\n"));
+        }
+    }
+    {
+        let items_82: []AstNode = prog.Globals;
+        let count_84: i32 = len(items_82);
+        for (let index_83: i32 = 0; index_83 < count_84; index_83++) {
+            let g: AstNode = items_82[index_83];
+            ast_writeIndent(b, (level + 1));
+            let typeName: str = "unknown";
+            if ((g.Type != null)) {
+                typeName = g.Type.Name;
+            }
+            b.append(("Global: let " + g.Name + ": " + typeName + " = " + ast_ExprString(g.Value) + "\n"));
+        }
+    }
+    {
+        let items_85: []AstNode = prog.CompTimeBlocks;
+        let count_87: i32 = len(items_85);
+        for (let index_86: i32 = 0; index_86 < count_87; index_86++) {
+            let ct: AstNode = items_85[index_86];
+            ast_writeIndent(b, (level + 1));
+            b.append(("#if(" + ct.Variable + " " + ct.Operator + " " + runtime_quote(ct.TextValue) + ")\n"));
+        }
+    }
+    {
+        let items_88: []AstNode = prog.Classes;
+        let count_90: i32 = len(items_88);
+        for (let index_89: i32 = 0; index_89 < count_90; index_89++) {
+            let class_value: AstNode = items_88[index_89];
+            ast_writeIndent(b, (level + 1));
+            b.append(("Class " + class_value.Name + "\n"));
+            {
+                let items_91: []AstClassField = class_value.Fields;
+                let count_93: i32 = len(items_91);
+                for (let index_92: i32 = 0; index_92 < count_93; index_92++) {
+                    let field: AstClassField = items_91[index_92];
+                    ast_writeIndent(b, (level + 2));
+                    b.append(("Field " + field.Name + ": " + field.Type.Name + "\n"));
+                }
+            }
+            {
+                let items_94: []AstClassMethod = class_value.Methods;
+                let count_96: i32 = len(items_94);
+                for (let index_95: i32 = 0; index_95 < count_96; index_95++) {
+                    let method: AstClassMethod = items_94[index_95];
+                    ast_debugFnDecl(b, method.Fn, (level + 2));
+                }
+            }
+        }
+    }
+    {
+        let items_97: []AstNode = prog.Functions;
+        let count_99: i32 = len(items_97);
+        for (let index_98: i32 = 0; index_98 < count_99; index_98++) {
+            let fn_value: AstNode = items_97[index_98];
+            ast_debugFnDecl(b, fn_value, (level + 1));
+        }
+    }
+}
+
+fn ast_debugFnDecl(b: StringBuilder, fn_value: AstNode, level: i32) -> void {
+    ast_writeIndent(b, level);
+    let params: []str = array_Str(len(fn_value.Params));
+    {
+        let items_100: []AstParam = fn_value.Params;
+        let count_102: i32 = len(items_100);
+        for (let index_101: i32 = 0; index_101 < count_102; index_101++) {
+            let i: i32 = index_101;
+            let p: AstParam = items_100[index_101];
+            let s: str = ((p.Name + ": ") + p.Type.Name);
+            if ((p.Default != null)) {
+                s = (s + (" = " + ast_ExprString(p.Default)));
+            }
+            params[i] = s;
+        }
+    }
+    let retName: str = "void";
+    if ((fn_value.ReturnType != null)) {
+        retName = fn_value.ReturnType.Name;
+    }
+    b.append(("Fn " + fn_value.Name + "(" + runtime_strings_Join(params, ", ") + ") -> " + retName + "\n"));
+    ast_debugBlock(b, fn_value.Body, (level + 1));
+}
+
+fn ast_debugBlock(b: StringBuilder, block: AstNode, level: i32) -> void {
+    ast_writeIndent(b, level);
+    b.append(("Block [" + runtime_string_i32(len(block.Stmts)) + " statements]\n"));
+    {
+        let items_103: []AstNode = block.Stmts;
+        let count_105: i32 = len(items_103);
+        for (let index_104: i32 = 0; index_104 < count_105; index_104++) {
+            let s: AstNode = items_103[index_104];
+            ast_debugStmt(b, s, (level + 1));
+        }
+    }
+}
+
+fn ast_debugStmt(b: StringBuilder, s: AstNode, level: i32) -> void {
+    {
+        let choice_106: AstNode = s;
+        if ((choice_106 != null && choice_106.Kind == "LetStmt")) {
+            let s: AstNode = choice_106;
+            ast_writeIndent(b, level);
+            b.append(("LetStmt " + s.Name + ": " + s.Type.Name + " = " + ast_ExprString(s.Value) + "\n"));
+        } else if ((choice_106 != null && choice_106.Kind == "ReturnStmt")) {
+            let s: AstNode = choice_106;
+            ast_writeIndent(b, level);
+            if ((s.Value != null)) {
+                b.append(("ReturnStmt " + ast_ExprString(s.Value) + "\n"));
+            } else {
+                b.append("ReturnStmt\n");
+            }
+        } else if ((choice_106 != null && choice_106.Kind == "BreakStmt")) {
+            let s: AstNode = choice_106;
+            ast_writeIndent(b, level);
+            b.append("BreakStmt\n");
+        } else if ((choice_106 != null && choice_106.Kind == "ContinueStmt")) {
+            let s: AstNode = choice_106;
+            ast_writeIndent(b, level);
+            b.append("ContinueStmt\n");
+        } else if ((choice_106 != null && choice_106.Kind == "IfStmt")) {
+            let s: AstNode = choice_106;
+            ast_writeIndent(b, level);
+            b.append(("IfStmt (" + ast_ExprString(s.Condition) + ")\n"));
+            ast_debugBlock(b, s.Then, (level + 1));
+            if ((s.Else != null)) {
+                ast_writeIndent(b, (level + 1));
+                b.append("Else:\n");
+                {
+                    let choice_107: AstNode = s.Else;
+                    if ((choice_107 != null && choice_107.Kind == "BlockStmt")) {
+                        let e: AstNode = choice_107;
+                        ast_debugBlock(b, e, (level + 2));
+                    } else if ((choice_107 != null && choice_107.Kind == "IfStmt")) {
+                        let e: AstNode = choice_107;
+                        ast_debugStmt(b, e, (level + 2));
+                    }
+                }
+            }
+        } else if ((choice_106 != null && choice_106.Kind == "WhileStmt")) {
+            let s: AstNode = choice_106;
+            ast_writeIndent(b, level);
+            b.append(("WhileStmt (" + ast_ExprString(s.Condition) + ")\n"));
+            ast_debugBlock(b, s.Body, (level + 1));
+        } else if ((choice_106 != null && choice_106.Kind == "ForStmt")) {
+            let s: AstNode = choice_106;
+            ast_writeIndent(b, level);
+            b.append("ForStmt\n");
+            ast_writeIndent(b, (level + 1));
+            b.append(("Init: "));
+            ast_debugStmtInline(b, s.Init);
+            ast_writeIndent(b, (level + 1));
+            b.append(("Cond: " + ast_ExprString(s.Condition) + "\n"));
+            ast_writeIndent(b, (level + 1));
+            b.append(("Update: "));
+            ast_debugStmtInline(b, s.Update);
+            ast_debugBlock(b, s.Body, (level + 1));
+        } else if ((choice_106 != null && choice_106.Kind == "AssignStmt")) {
+            let s: AstNode = choice_106;
+            ast_writeIndent(b, level);
+            b.append(("AssignStmt " + ast_ExprString(s.Target) + " = " + ast_ExprString(s.Value) + "\n"));
+        } else if ((choice_106 != null && choice_106.Kind == "ExprStmt")) {
+            let s: AstNode = choice_106;
+            ast_writeIndent(b, level);
+            b.append(("ExprStmt " + ast_ExprString(s.Expression) + "\n"));
+        } else if ((choice_106 != null && choice_106.Kind == "BlockStmt")) {
+            let s: AstNode = choice_106;
+            ast_debugBlock(b, s, level);
+        } else {
+            ast_writeIndent(b, level);
+            b.append("<unknown stmt>\n");
+        }
+    }
+}
+
+// debugStmtInline writes a one-line summary (used inside for-loop headers).
+fn ast_debugStmtInline(b: StringBuilder, s: AstNode) -> void {
+    {
+        let choice_108: AstNode = s;
+        if ((choice_108 != null && choice_108.Kind == "LetStmt")) {
+            let s: AstNode = choice_108;
+            b.append(("let " + s.Name + ": " + s.Type.Name + " = " + ast_ExprString(s.Value) + "\n"));
+        } else if ((choice_108 != null && choice_108.Kind == "AssignStmt")) {
+            let s: AstNode = choice_108;
+            b.append((ast_ExprString(s.Target) + " = " + ast_ExprString(s.Value) + "\n"));
+        } else if ((choice_108 != null && choice_108.Kind == "ExprStmt")) {
+            let s: AstNode = choice_108;
+            b.append((ast_ExprString(s.Expression) + "\n"));
+        } else {
+            b.append("<stmt>\n");
+        }
+    }
+}
+
+// ExprString returns a concise one-line representation of an expression.
+fn ast_ExprString(e: AstNode) -> str {
+    if ((e == null)) {
+        return "<nil>";
+    }
+    {
+        let choice_109: AstNode = e;
+        if ((choice_109 != null && choice_109.Kind == "NullLitExpr")) {
+            let e: AstNode = choice_109;
+            return "null";
+        } else if ((choice_109 != null && choice_109.Kind == "IdentExpr")) {
+            let e: AstNode = choice_109;
+            return e.Name;
+        } else if ((choice_109 != null && choice_109.Kind == "IntLitExpr")) {
+            let e: AstNode = choice_109;
+            return e.TextValue;
+        } else if ((choice_109 != null && choice_109.Kind == "FloatLitExpr")) {
+            let e: AstNode = choice_109;
+            return e.TextValue;
+        } else if ((choice_109 != null && choice_109.Kind == "StringLitExpr")) {
+            let e: AstNode = choice_109;
+            return e.TextValue;
+        } else if ((choice_109 != null && choice_109.Kind == "BoolLitExpr")) {
+            let e: AstNode = choice_109;
+            if (e.BoolValue) {
+                return "true";
+            }
+            return "false";
+        } else if ((choice_109 != null && choice_109.Kind == "UnaryExpr")) {
+            let e: AstNode = choice_109;
+            return ("(" + e.Op + ast_ExprString(e.Operand) + ")");
+        } else if ((choice_109 != null && choice_109.Kind == "BinaryExpr")) {
+            let e: AstNode = choice_109;
+            return ("(" + ast_ExprString(e.Left) + " " + e.Op + " " + ast_ExprString(e.Right) + ")");
+        } else if ((choice_109 != null && choice_109.Kind == "CallExpr")) {
+            let e: AstNode = choice_109;
+            let args: []str = array_Str(len(e.Args));
+            {
+                let items_110: []AstNode = e.Args;
+                let count_112: i32 = len(items_110);
+                for (let index_111: i32 = 0; index_111 < count_112; index_111++) {
+                    let i: i32 = index_111;
+                    let a: AstNode = items_110[index_111];
+                    args[i] = ast_ExprString(a);
+                }
+            }
+            return (ast_ExprString(e.Callee) + "(" + runtime_strings_Join(args, ", ") + ")");
+        } else if ((choice_109 != null && choice_109.Kind == "NewExpr")) {
+            let e: AstNode = choice_109;
+            let args: []str = array_Str(len(e.Args));
+            {
+                let items_113: []AstNode = e.Args;
+                let count_115: i32 = len(items_113);
+                for (let index_114: i32 = 0; index_114 < count_115; index_114++) {
+                    let i: i32 = index_114;
+                    let arg: AstNode = items_113[index_114];
+                    args[i] = ast_ExprString(arg);
+                }
+            }
+            return (((("new " + e.ClassName) + "(") + runtime_strings_Join(args, ", ")) + ")");
+        } else if ((choice_109 != null && choice_109.Kind == "MemberExpr")) {
+            let e: AstNode = choice_109;
+            return (ast_ExprString(e.Object) + "." + e.Field);
+        } else if ((choice_109 != null && choice_109.Kind == "IndexExpr")) {
+            let e: AstNode = choice_109;
+            return (ast_ExprString(e.Object) + "[" + ast_ExprString(e.Index) + "]");
+        } else if ((choice_109 != null && choice_109.Kind == "GroupExpr")) {
+            let e: AstNode = choice_109;
+            return ("(" + ast_ExprString(e.Expression) + ")");
+        } else if ((choice_109 != null && choice_109.Kind == "AddressOfExpr")) {
+            let e: AstNode = choice_109;
+            return ("(&" + ast_ExprString(e.Operand) + ")");
+        } else if ((choice_109 != null && choice_109.Kind == "ArrayLitExpr")) {
+            let e: AstNode = choice_109;
+            let elems: []str = array_Str(len(e.Elems));
+            {
+                let items_116: []AstNode = e.Elems;
+                let count_118: i32 = len(items_116);
+                for (let index_117: i32 = 0; index_117 < count_118; index_117++) {
+                    let i: i32 = index_117;
+                    let el: AstNode = items_116[index_117];
+                    elems[i] = ast_ExprString(el);
+                }
+            }
+            return ("[" + runtime_strings_Join(elems, ", ") + "]");
+        } else {
+            return "<unknown expr>";
+        }
+    }
+}

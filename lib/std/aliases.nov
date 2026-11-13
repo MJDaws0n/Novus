@@ -1,0 +1,3 @@
+module std_aliases_shim;
+
+import core/aliases;

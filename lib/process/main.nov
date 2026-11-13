@@ -1,0 +1,19 @@
+// Auto-generated platform dispatcher.
+module process_main;
+
+// Process implementations call helpers supplied by these package dependencies.
+// Keep the imports here so consumers only need to import lib/process.
+import ../std;
+import ../file_io;
+import command;
+#if(os != "windows") { import platforms/posix; }
+
+#if(os == "darwin") {
+    import platforms/darwin/common;
+}
+#if(os == "linux") {
+    import platforms/linux/common;
+}
+#if(os == "windows") {
+    import platforms/windows/common;
+}

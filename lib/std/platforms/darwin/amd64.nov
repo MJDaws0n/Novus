@@ -1,0 +1,421 @@
+// ---------------------------------------------------------------------------
+// std/darwin_amd64 - macOS x86-64 platform layer
+// ---------------------------------------------------------------------------
+
+module std_darwin_amd64;
+
+import ../../core/core;
+
+fn i32_to_u64(val: i32) -> u64 {
+    mov(r9, val);
+    return getreg(r9);
+}
+
+fn i64_to_u64(val: i64) -> u64 {
+    mov(r9, val);
+    return getreg(r9);
+}
+
+fn u64_to_i64(val: u64) -> i64 { return load64(&val); }
+
+fn array_len(arr: []i32) -> i32 {
+    mov(r9, arr);
+    let hdr: u64 = getreg(r9);
+    return load32(hdr + 8);
+}
+
+fn array_len_u64(arr: []u64) -> i32 {
+    mov(r9, arr);
+    let hdr: u64 = getreg(r9);
+    return load32(hdr + 8);
+}
+
+fn array_len_str(arr: []str) -> i32 {
+    mov(r9, arr);
+    let hdr: u64 = getreg(r9);
+    return load32(hdr + 8);
+}
+
+fn array_len_i64(arr: []i64) -> i32 {
+    mov(r9, arr);
+    let hdr: u64 = getreg(r9);
+    return load32(hdr + 8);
+}
+
+fn array_len_u32(arr: []u32) -> i32 {
+    mov(r9, arr);
+    let hdr: u64 = getreg(r9);
+    return load32(hdr + 8);
+}
+
+fn array_len_bool(arr: []bool) -> i32 {
+    mov(r9, arr);
+    let hdr: u64 = getreg(r9);
+    return load32(hdr + 8);
+}
+
+fn array_len_f32(arr: []f32) -> i32 {
+    mov(r9, arr);
+    let hdr: u64 = getreg(r9);
+    return load32(hdr + 8);
+}
+
+fn array_len_f64(arr: []f64) -> i32 {
+    mov(r9, arr);
+    let hdr: u64 = getreg(r9);
+    return load32(hdr + 8);
+}
+
+fn array_data_ptr_i32(arr: []i32) -> i64 {
+    mov(r9, arr);
+    let hdr: u64 = getreg(r9);
+    return load64(hdr);
+}
+
+fn array_data_ptr_str(arr: []str) -> i64 {
+    mov(r9, arr);
+    let hdr: u64 = getreg(r9);
+    return load64(hdr);
+}
+
+fn array_data_ptr_i64(arr: []i64) -> i64 {
+    mov(r9, arr);
+    let hdr: u64 = getreg(r9);
+    return load64(hdr);
+}
+
+fn print(msg: str) -> void {
+    msg = msg + "\n";
+    mov(rdi, 1);
+    mov(rsi, msg);
+    mov(rdx, len(msg));
+    mov(rax, 0x2000004);
+    syscall();
+}
+
+fn print_raw(msg: str) -> void {
+    mov(rdi, 1);
+    mov(rsi, msg);
+    mov(rdx, len(msg));
+    mov(rax, 0x2000004);
+    syscall();
+}
+
+fn exit(code: i32) -> void {
+    mov(rdi, code);
+    mov(rax, 0x2000001);
+    syscall();
+}
+
+fn get_time_ns() -> i64 {
+    let buf: str = make_buffer(16);
+    mov(rdi, buf);
+    mov(rsi, 0);
+    // Darwin's raw syscall has a third optional mach-time output pointer.
+    mov(rdx, 0);
+    mov(rax, 0x2000074);
+    syscall();
+    mov(r9, buf);
+    let base: u64 = getreg(r9);
+    let tv_sec: i64 = load64(base);
+    let tv_usec: i64 = u64_to_i64(i32_to_u64(load32(base + 8)));
+    return tv_sec * 1000000000 + tv_usec * 1000;
+}
+
+fn input(prompt: str, buf_len: i32 = 128) -> str {
+    mov(rdi, 1);
+    mov(rsi, prompt);
+    mov(rdx, len(prompt));
+    mov(rax, 0x2000004);
+    syscall();
+    let buf: str = "";
+    while(len(buf) < buf_len) {
+        buf = buf + " ";
+    }
+    mov(rdi, 0);
+    mov(rsi, buf);
+    mov(rdx, buf_len);
+    mov(rax, 0x2000003);
+    syscall();
+    let nread: i32 = u64_to_i32(getreg(rax));
+    let out: str = "";
+    let i: i32 = 0;
+    while (i < nread) {
+        if (buf[i] == '\n') {
+            break;
+        }
+        out = out + buf[i];
+        i = i + 1;
+    }
+    return out;
+}
+
+fn ptr(s: str) -> u64 {
+    mov(r9, s);
+    return getreg(r9);
+}
+
+fn array_data_ptr_u64(arr: []u64) -> i64 {
+    mov(r9, arr);
+    let hdr: u64 = getreg(r9);
+    return load64(hdr);
+}
+
+fn execve_raw(path: str, argv: []u64) -> i32 {
+    let argv_ptr: i64 = array_data_ptr_u64(argv);
+    let envp_ptr: u64 = __novus_envp;
+    mov(rdi, path);
+    mov(rsi, argv_ptr);
+    mov(rdx, envp_ptr);
+    mov(rax, 0x2000000 + 59);
+    syscall();
+    return u64_to_i32(getreg(rax));
+}
+
+fn fork() -> i32 {
+    mov(rax, 0x2000000 + 2);
+    syscall();
+    let raw_x0: u64 = getreg(rax);
+    let raw_x1: u64 = getreg(rdx);
+    let x1_val: i32 = u64_to_i32(raw_x1);
+    if (x1_val == 1) {
+        return 0;
+    }
+    return u64_to_i32(raw_x0);
+}
+
+fn spawn_execve(path: str, argv: []u64) -> i32 {
+    let pid: i32 = fork();
+    if (pid == 0) {
+        execve_raw(path, argv);
+        exit(1);
+        return 1;
+    }
+    return pid;
+}
+
+// ---------------------------------------------------------------------------
+// User info: get_home_dir / get_username
+// On macOS, /etc/passwd often omits normal GUI users, so prefer `id -P`.
+// Falls back to /etc/passwd when command execution fails.
+// ---------------------------------------------------------------------------
+
+fn _read_macos_user_record() -> str {
+    let pipebuf: str = "\0\0\0\0\0\0\0\0";
+    mov(rax, 0x200002A);   // SYS_pipe
+    syscall();
+    let rfd: i32 = u64_to_i32(getreg(rax));
+    let wfd: i32 = u64_to_i32(getreg(rdx));
+    if (rfd < 0 || wfd < 0) { return ""; }
+
+    let pid: i32 = fork();
+    if (pid == 0) {
+        mov(rdi, rfd);
+        mov(rax, 0x2000000 + 6);   // SYS_close
+        syscall();
+
+        mov(rdi, wfd);
+        mov(rsi, 1);
+        mov(rax, 0x2000000 + 90);  // SYS_dup2
+        syscall();
+
+        mov(rdi, wfd);
+        mov(rax, 0x2000000 + 6);   // SYS_close
+        syscall();
+
+        let path: str = "/usr/bin/id\0";
+        let flag: str = "-P\0";
+        let argv: []u64 = [ptr(path), ptr(flag), 0];
+        execve_raw(path, argv);
+        exit(1);
+        return "";
+    }
+
+    mov(rdi, wfd);
+    mov(rax, 0x2000000 + 6);   // SYS_close
+    syscall();
+
+    if (pid < 0) {
+        mov(rdi, rfd);
+        mov(rax, 0x2000000 + 6);   // SYS_close
+        syscall();
+        return "";
+    }
+
+    let buf: str = "";
+    let k: i32 = 0;
+    while (k < 512) { buf = buf + " "; k = k + 1; }
+    mov(rdi, rfd);
+    mov(rsi, buf);
+    mov(rdx, 512);
+    mov(rax, 0x2000000 + 3);   // SYS_read
+    syscall();
+    let nread: i32 = u64_to_i32(getreg(rax));
+
+    mov(rdi, rfd);
+    mov(rax, 0x2000000 + 6);   // SYS_close
+    syscall();
+
+    if (nread <= 0) { return ""; }
+    let line: str = substr_len(buf, 0, nread);
+    let newline_at: i32 = str_find(line, "\n");
+    if (newline_at >= 0) {
+        return substr_len(line, 0, newline_at);
+    }
+    return line;
+}
+
+fn _get_macos_user_record_field(target_field: i32) -> str {
+    let record: str = _read_macos_user_record();
+    if (len(record) == 0) { return ""; }
+    let field: i32 = 0;
+    let field_start: i32 = 0;
+    let record_len: i32 = len(record);
+    let i: i32 = 0;
+    while (i <= record_len) {
+        if (i == record_len || record[i] == ':') {
+            if (field == target_field) {
+                return substr_len(record, field_start, i - field_start);
+            }
+            field = field + 1;
+            field_start = i + 1;
+        }
+        i = i + 1;
+    }
+    return "";
+}
+
+fn get_home_dir() -> str {
+    let home: str = _get_macos_user_record_field(8);
+    if (len(home) > 0) { return home; }
+
+    // Fallback to /etc/passwd for environments where `id -P` is unavailable.
+    mov(rax, 0x2000000 + 24);  // SYS_getuid
+    syscall();
+    let uid: i32 = u64_to_i32(getreg(rax));
+    let uid_str: str = i32_to_str(uid);
+
+    let path: str = "/etc/passwd\0";
+    mov(rdi, path);
+    mov(rsi, 0);
+    mov(rdx, 0);
+    mov(rax, 0x2000000 + 5);   // SYS_open
+    syscall();
+    let fd: i32 = u64_to_i32(getreg(rax));
+    if (fd < 0) { return ""; }
+
+    let buf: str = "";
+    let k: i32 = 0;
+    while (k < 4096) { buf = buf + " "; k = k + 1; }
+    mov(rdi, fd);
+    mov(rsi, buf);
+    mov(rdx, 4096);
+    mov(rax, 0x2000000 + 3);   // SYS_read
+    syscall();
+    let nread: i32 = u64_to_i32(getreg(rax));
+
+    mov(rdi, fd);
+    mov(rax, 0x2000000 + 6);   // SYS_close
+    syscall();
+
+    if (nread <= 0) { return ""; }
+
+    let i: i32 = 0;
+    while (i < nread) {
+        let line_start: i32 = i;
+        while (i < nread && buf[i] != '\n') { i = i + 1; }
+        let line: str = substr_len(buf, line_start, i - line_start);
+        i = i + 1;
+
+        let field: i32 = 0;
+        let field_start: i32 = 0;
+        let line_len: i32 = len(line);
+        let found_uid: str = "";
+        let found_home: str = "";
+        let j: i32 = 0;
+        while (j <= line_len) {
+            if (j == line_len || line[j] == ':') {
+                if (field == 2) {
+                    found_uid = substr_len(line, field_start, j - field_start);
+                }
+                if (field == 5) {
+                    found_home = substr_len(line, field_start, j - field_start);
+                }
+                field = field + 1;
+                field_start = j + 1;
+            }
+            j = j + 1;
+        }
+        if (str_equals(found_uid, uid_str)) {
+            return found_home;
+        }
+    }
+    return "";
+}
+
+fn get_username() -> str {
+    let username: str = _get_macos_user_record_field(0);
+    if (len(username) > 0) { return username; }
+
+    mov(rax, 0x2000000 + 24);  // SYS_getuid
+    syscall();
+    let uid: i32 = u64_to_i32(getreg(rax));
+    let uid_str: str = i32_to_str(uid);
+
+    let path: str = "/etc/passwd\0";
+    mov(rdi, path);
+    mov(rsi, 0);
+    mov(rdx, 0);
+    mov(rax, 0x2000000 + 5);   // SYS_open
+    syscall();
+    let fd: i32 = u64_to_i32(getreg(rax));
+    if (fd < 0) { return ""; }
+
+    let buf: str = "";
+    let k: i32 = 0;
+    while (k < 4096) { buf = buf + " "; k = k + 1; }
+    mov(rdi, fd);
+    mov(rsi, buf);
+    mov(rdx, 4096);
+    mov(rax, 0x2000000 + 3);   // SYS_read
+    syscall();
+    let nread: i32 = u64_to_i32(getreg(rax));
+
+    mov(rdi, fd);
+    mov(rax, 0x2000000 + 6);   // SYS_close
+    syscall();
+
+    if (nread <= 0) { return ""; }
+
+    let i: i32 = 0;
+    while (i < nread) {
+        let line_start: i32 = i;
+        while (i < nread && buf[i] != '\n') { i = i + 1; }
+        let line: str = substr_len(buf, line_start, i - line_start);
+        i = i + 1;
+
+        let field: i32 = 0;
+        let field_start: i32 = 0;
+        let line_len: i32 = len(line);
+        let found_uid: str = "";
+        let found_user: str = "";
+        let j: i32 = 0;
+        while (j <= line_len) {
+            if (j == line_len || line[j] == ':') {
+                if (field == 0) {
+                    found_user = substr_len(line, field_start, j - field_start);
+                }
+                if (field == 2) {
+                    found_uid = substr_len(line, field_start, j - field_start);
+                }
+                field = field + 1;
+                field_start = j + 1;
+            }
+            j = j + 1;
+        }
+        if (str_equals(found_uid, uid_str)) {
+            return found_user;
+        }
+    }
+    return "";
+}

@@ -1,0 +1,11 @@
+module time_memory;
+import ../../lib/std;
+class Item { pub let value: i32 = 0; }
+fn main() -> i32 {
+    let item: Item = new Item();
+    let tick: i64 = get_time_ns();
+    print(format_signed(tick));
+    print(i32_to_str(item.value));
+    if (item.value != 0) { return 1; }
+    return 0;
+}
