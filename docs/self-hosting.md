@@ -86,41 +86,60 @@ scans and copies ranges without allocating a string for each line. These paths,
 including embedded zero bytes, Unicode, builder snapshots and GC reuse, have
 runtime regression tests.
 
-## Local compilation benchmark
+## Compilation benchmarks
 
-Measured on 13 November 2026 on an Apple M2 running macOS. Each measurement starts
-a fresh compiler process and includes parsing, imports, semantic analysis,
-assembly generation, assembly and linking. One warm-up was excluded; the six
-measured runs alternate compiler order. No local self-build or container workload
-ran alongside the measurements.
+All seven hosts pass the 1.25× limit for both large workloads in
+[run 43502727450](https://github.com/MJDaws0n/Novus/actions/runs/43502727450), using compiler source `977a6ae4777ad5e6816cd5f00264a16f56400d67`.
+Each pair uses identical source files, bundled libraries and target architecture;
+the 32-bit Linux comparison uses a 32-bit Go bootstrap. A ratio below 1 means
+Novus compiles faster than Go.
+
+| Host | Nox: Novus / Go | Compiler: Novus / Go |
+| --- | ---: | ---: |
+| macOS ARM64 | 0.915× | 0.493× |
+| macOS Intel | 0.724× | 0.170× |
+| Linux x64 | 0.493× | 0.137× |
+| Linux ARM64 | 1.233× | 0.304× |
+| Windows x64 | 0.989× | 0.315× |
+| Windows ARM64 | 1.099× | 0.727× |
+| Linux x86 (32-bit) | 1.090× | 0.329× |
+
+Measurements start a fresh compiler process and include parsing, imports,
+semantic analysis, assembly generation, assembly and linking. One warm-up is
+excluded; six measured runs alternate compiler order. CI fails if either large
+workload exceeds 1.25×. These are measured workload results, not a guarantee for
+every possible program or machine. Small-program timings are recorded separately
+and are not part of the large-program limit.
+
+The application is Nox 3.4.2 at `af635107c6e8d81d1059062fecdbb96e408fc43f`;
+CI also runs the resulting executable's version command. Complete samples,
+source/library/compiler hashes and timings are in
+[self-hosting-performance.json](self-hosting-performance.json).
+
+### Local macOS measurement
+
+Measured on 13 November 2026 on an Apple M2, with no local build or container
+workload running alongside the benchmark, using the same procedure:
 
 | Application | Go bootstrap median | Novus median | Novus / Go |
 | --- | ---: | ---: | ---: |
-| Small class/import fixture | 0.150 s | 0.670 s | 4.46× |
-| Nox 3.4.2 | 1.904 s | 13.769 s | 7.23× |
+| Small class/import fixture | 0.177 s | 0.184 s | 1.039× |
+| Nox 3.4.2 | 1.951 s | 1.981 s | 1.016× |
+| Novus compiler | 16.804 s | 11.508 s | 0.685× |
 
-Both compilers used identical application sources and the current bundled
-libraries. Nox was taken from commit
-`af635107c6e8d81d1059062fecdbb96e408fc43f`; its compiled `version` and `help`
-commands also ran successfully. The complete samples and input/compiler hashes
-are in [self-hosting-benchmark.json](self-hosting-benchmark.json).
+The local samples are in [self-hosting-benchmark.json](self-hosting-benchmark.json).
+The earlier port's 7.23× Nox result is preserved in
+[self-hosting-benchmark-before-optimization.json](self-hosting-benchmark-before-optimization.json).
+Each comparison uses matching dependencies at its own revision. The Go bootstrap
+includes the compiler correctness fixes and runtime intrinsics needed by the port.
 
-The port is currently slower than Go. This benchmark measures the completed
-compilation pipeline, including the cost of the generated compiler's allocation
-and data-structure operations; it is not a performance-parity claim.
-
-The earlier pre-migration record in `legacy-go/migration/baseline.json` measured
-0.165 s for the small fixture and 0.989 s for Nox. That Nox run used an earlier
-temporary dependency tree, so it is historical context rather than the controlled
-same-input comparison above. The comparison Go bootstrap includes the compiler
-correctness fixes needed by the port.
-
-To repeat the controlled measurement, prepare a Nox source copy with its `lib/`
-pointing at this checkout's bundled libraries, then run:
+To repeat the measurement, prepare the pinned Nox source with its `lib/` pointing
+at this checkout's bundled libraries, then run:
 
 ```sh
 python3 scripts/benchmark.py \
   --reference build/selfhost/darwin_arm64/bootstrap-go \
   --compiler dist/novus-darwin-arm64 \
-  --large /absolute/path/to/nox/main.nov
+  --large /absolute/path/to/nox/main.nov \
+  --include-self --target=darwin/arm64 --runs=6 --max-ratio=1.25
 ```

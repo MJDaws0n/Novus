@@ -21,13 +21,16 @@ on an x64 Linux runner. Results and executable artifacts are attached to the
 | Windows x64 | Passed in CI |
 | Linux x86 (32-bit) | Passed in CI |
 
-All seven targets passed in [run 43489144967](https://github.com/MJDaws0n/Novus/actions/runs/43489144967)
-at compiler commit `79f98fca7be9c073bbec0b5dc33e6596947d386d`: 21 compiler builds,
-763 Go/Novus comparisons and 110 recorded runtime checks, plus the Go suite and
-first-generation smoke tests. Generations two and three emitted identical
-assembly on every target. The same compiler source was verified locally on
-macOS ARM64. [Machine-readable results](self-hosting-verification.json) include
-source/assembly/binary hashes and individual checks.
+All seven targets passed in [run 43502727450](https://github.com/MJDaws0n/Novus/actions/runs/43502727450)
+at compiler commit `977a6ae4777ad5e6816cd5f00264a16f56400d67`: 21 compiler builds,
+763 Go/Novus comparisons and 138 recorded runtime checks, plus the Go suite,
+first-generation smoke tests and seven 32-bit cross-compiled runtime fixtures.
+Generations two and three emitted identical assembly on every target. The same
+compiler source was verified locally on macOS ARM64.
+[Machine-readable results](self-hosting-verification.json) include source,
+assembly and binary hashes and individual checks. Both large compilation
+benchmarks also pass the 1.25× limit on every host; see the
+[performance report](self-hosting.md#compilation-benchmarks).
 
 ## Coverage
 
@@ -39,7 +42,11 @@ source/assembly/binary hashes and individual checks.
   exact decimal literal conversion. The rounding suite has 184 reference inputs.
 - Explicit register arguments and their preservation across computed values.
 - Global and graph roots, automatic/manual collection, array growth and reuse,
-  including a 1,024-entry allocation-table stress run.
+  including a 1,024-entry allocation-table stress run, a 31-entry table with
+  interior pointers and cycles, and pointer-cache reset between collections.
+- Hash-map collisions, deletion/reinsertion and insertion order; independent AST
+  lists; text-builder growth, snapshots and embedded zero bytes; word-copy tails;
+  string replacement boundaries and ARM64 cleanup whitespace/end-of-file cases.
 - Binary files larger than one I/O buffer, metadata, path resolution, deletion,
   time and memory helpers, Unicode paths/imports and file positions beyond 4 GiB.
 - Executable lookup skips directories and non-executable files on Unix.
