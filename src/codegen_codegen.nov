@@ -71,12 +71,6 @@ fn codegen_Generate(program: AstNode, opts: CodegenOptions) -> ResultCodegenresu
         } else if ((choice_124 == 2)) {
             asmText = codegen_EmitARM64(irMod, target);
         } else if ((choice_124 == 1)) {
-            {
-                let op: str = codegen_findFloatOp(irMod);
-                if ((op != "")) {
-                    return make_ResultCodegenresultStr(null, ("floating-point operations (" + op + ") are not supported on 32-bit x86 targets"));
-                }
-            }
             asmText = codegen_EmitX86(irMod, target);
         } else {
             return make_ResultCodegenresultStr(null, ("unsupported architecture for emission: " + codegen_Arch_String(target.Arch)));

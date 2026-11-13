@@ -69,3 +69,18 @@ fn working_directory() -> PathResult {
         syscall(); return u64_to_i32(getreg(x0));
     }
 }
+
+#if(arch == "x86") {
+    fn file_statx(path: str, buffer: u64) -> i32 {
+        mov(ebx, -100); mov(ecx, path); mov(edx, 0); mov(esi, 2047); mov(edi, buffer); mov(eax, 383);
+        int(128); return u64_to_i32(getreg(eax));
+    }
+    fn file_readlink(path: str, buffer: u64, size: i32) -> i32 {
+        mov(ebx, path); mov(ecx, buffer); mov(edx, size); mov(eax, 85);
+        int(128); return u64_to_i32(getreg(eax));
+    }
+    fn file_getcwd(buffer: u64, size: i32) -> i32 {
+        mov(ebx, buffer); mov(ecx, size); mov(eax, 183);
+        int(128); return u64_to_i32(getreg(eax));
+    }
+}

@@ -9,7 +9,7 @@ import (
 // x86 (32-bit) Assembly Emitter
 //
 // Produces GAS (AT&T syntax) assembly for 32-bit Linux (ELF).
-// Uses cdecl calling convention: all arguments on stack, return in eax.
+// Uses eight-byte stack arguments and returns 64-bit values in edx:eax.
 // ---------------------------------------------------------------------------
 
 // EmitX86 converts an IRModule to x86 (32-bit) assembly text.
@@ -54,7 +54,7 @@ func (e *x86Emitter) computeFrameSize(fn *IRFunc) int {
 		}
 	}
 	totalSlots := fn.Locals + maxVReg + 4
-	size := totalSlots * 4
+	size := totalSlots * 8
 	if size%16 != 0 {
 		size += 16 - (size % 16)
 	}
@@ -65,7 +65,7 @@ func (e *x86Emitter) computeFrameSize(fn *IRFunc) int {
 }
 
 func (e *x86Emitter) vregOffset(fn *IRFunc, reg int) int {
-	return -((fn.Locals + reg + 1) * 4)
+	return -((fn.Locals + reg + 1) * 8)
 }
 
 func (e *x86Emitter) emit() {
@@ -103,18 +103,16 @@ func (e *x86Emitter) emit() {
 		w.WriteString("    .space 4\n\n")
 	}
 
-	// Global variables in data section.
+	// Global values are eight bytes, including on this 32-bit target.
 	if len(e.mod.Globals) > 0 {
-		if len(e.mod.Strings) == 0 {
-			w.WriteString(".data\n")
-		}
+		w.WriteString(".data\n")
 		for _, g := range e.mod.Globals {
 			w.WriteString(fmt.Sprintf("%s:\n", g.Name))
 			if g.InitStr >= 0 {
 				strLabel := e.mod.Strings[g.InitStr].Label
-				w.WriteString(fmt.Sprintf("    .long %s\n", strLabel))
+				w.WriteString(fmt.Sprintf("    .long %s\n    .long 0\n", strLabel))
 			} else {
-				w.WriteString(fmt.Sprintf("    .long %d\n", int32(g.InitImm)))
+				w.WriteString(fmt.Sprintf("    .quad %d\n", g.InitImm))
 			}
 		}
 		w.WriteString("\n")
@@ -137,7 +135,7 @@ func (e *x86Emitter) emit() {
 		w.WriteString("    leal 8(%esp,%eax,4), %edx\n")
 		w.WriteString(fmt.Sprintf("    movl %%edx, %s\n", envpSym))
 	}
-	w.WriteString("    call main\n")
+	w.WriteString("    movl (%esp), %eax\n    leal 4(%esp), %ecx\n    pushl $0\n    pushl %ecx\n    pushl $0\n    pushl %eax\n    call main\n    addl $16, %esp\n")
 	w.WriteString("    movl %eax, %ebx\n")
 	w.WriteString("    movl $1, %eax\n") // exit syscall
 	w.WriteString("    int $0x80\n\n")
@@ -146,6 +144,7 @@ func (e *x86Emitter) emit() {
 		e.emitFunction(fn)
 	}
 
+	e.emitWideDivisionRuntime()
 	if e.usesHeap() {
 		e.emitX86GCRuntime()
 	}
@@ -163,6 +162,7 @@ func (e *x86Emitter) emitFunction(fn *IRFunc) {
 		w.WriteString(fmt.Sprintf("    subl $%d, %%esp\n", frameSize))
 	}
 
+	w.WriteString("    pushl %ebx\n    pushl %esi\n    pushl %edi\n")
 	for _, instr := range fn.Instrs {
 		e.emitInstr(fn, instr)
 	}
@@ -172,6 +172,9 @@ func (e *x86Emitter) emitFunction(fn *IRFunc) {
 }
 
 func (e *x86Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
+	if e.emitWide(instr) {
+		return
+	}
 	w := e.b
 
 	switch instr.Op {
@@ -554,6 +557,10 @@ func (e *x86Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 	case IRGCCollect:
 		w.WriteString("    call _novus_gc_collect\n")
 	}
+	switch instr.Op {
+	case IRStrLen, IRStrIndex, IRStrConcat, IRStrCmpEq, IRGetFlag:
+		w.WriteString(fmt.Sprintf("    movl $0, %s\n", e.widePart(instr.Dst, true)))
+	}
 }
 
 func (e *x86Emitter) emitBinOp(instr IRInstr, mnemonic string) {
@@ -688,9 +695,9 @@ func (e *x86Emitter) emitStrConcat(instr IRInstr) {
 	w.WriteString("    pushl %esi\n")
 	w.WriteString("    pushl %edx\n")
 	// Call gc_alloc(size) — cdecl.
-	w.WriteString("    pushl %eax\n")
+	w.WriteString("    pushl $0\n    pushl %eax\n")
 	w.WriteString("    call _novus_gc_alloc\n")
-	w.WriteString("    addl $4, %esp\n")
+	w.WriteString("    addl $8, %esp\n")
 	w.WriteString("    popl %edx\n")
 	w.WriteString("    popl %esi\n")
 	// eax = allocated buffer. Save in ebx (callee-saved).
@@ -953,9 +960,9 @@ func (e *x86Emitter) emitArrayAppend(instr IRInstr) {
 	// Allocate new data via gc_alloc: new_cap * 4 bytes. cdecl.
 	w.WriteString("    movl %edi, %eax\n")
 	w.WriteString("    shll $2, %eax\n") // eax = new_cap * 4
-	w.WriteString("    pushl %eax\n")
+	w.WriteString("    pushl $0\n    pushl %eax\n")
 	w.WriteString("    call _novus_gc_alloc\n")
-	w.WriteString("    addl $4, %esp\n")
+	w.WriteString("    addl $8, %esp\n")
 	// eax = new data block.
 
 	// Restore saved values.
@@ -1043,7 +1050,7 @@ func (e *x86Emitter) emitX86GCRuntime() {
 	w.WriteString("    addl $_novus_gc_table, %ebx\n")
 	w.WriteString("    movl 8(%ebp), %ecx\n") // ptr arg
 	w.WriteString("    movl %ecx, (%ebx)\n")
-	w.WriteString("    movl 12(%ebp), %ecx\n") // size arg
+	w.WriteString("    movl 16(%ebp), %ecx\n") // size arg
 	w.WriteString("    movl %ecx, 4(%ebx)\n")
 	w.WriteString("    movl $0, 8(%ebx)\n") // mark = 0
 	w.WriteString("    incl %eax\n")
@@ -1056,6 +1063,6 @@ func (e *x86Emitter) emitX86GCRuntime() {
 	e.emitFastCollector()
 
 	// ---- _novus_gc_alloc(size) → eax ----
-	w.WriteString(strings.ReplaceAll(strings.ReplaceAll("\n_novus_gc_alloc:\n    pushl %ebp\n    movl %esp, %ebp\n    pushl %ebx\n    pushl %esi\n    pushl %edi\n    pushl 8(%ebp)\n    call _novus_gc_round\n    addl $4, %esp\n    movl %eax, %esi\n    movl _novus_gc_count, %eax\n    cmpl _novus_gc_threshold, %eax\n    jge .gca32_collect\n    cmpl $CAPACITY, %eax\n    jl .gca32_take\n.gca32_collect:\n    call _novus_gc_collect\n.gca32_take:\n    pushl %esi\n    pushl $_novus_gc_freelist\n    call _novus_gc_take\n    addl $8, %esp\n    testl %eax, %eax\n    jnz .gca32_register\n    movl _novus_heap_ptr, %eax\n    testl %eax, %eax\n    jnz .gca32_heap_ready\n    movl $_novus_heap, %eax\n.gca32_heap_ready:\n    leal (%eax,%esi), %ebx\n    cmpl $_novus_heap+HEAPSIZE, %ebx\n    jbe .gca32_heap_space\n    ud2\n.gca32_heap_space:\n    movl %ebx, _novus_heap_ptr\n.gca32_register:\n    movl %eax, %edi\n    pushl %esi\n    pushl %eax\n    call _novus_gc_register\n    addl $8, %esp\n    movl %edi, %eax\n    popl %edi\n    popl %esi\n    popl %ebx\n    popl %ebp\n    ret\n", "CAPACITY", fmt.Sprint(e.target.GCEntries)), "HEAPSIZE", fmt.Sprint(e.target.HeapSize)))
+	w.WriteString(strings.ReplaceAll(strings.ReplaceAll("\n_novus_gc_alloc:\n    pushl %ebp\n    movl %esp, %ebp\n    pushl %ebx\n    pushl %esi\n    pushl %edi\n    pushl $0\n    pushl 8(%ebp)\n    call _novus_gc_round\n    addl $8, %esp\n    movl %eax, %esi\n    movl _novus_gc_count, %eax\n    cmpl _novus_gc_threshold, %eax\n    jge .gca32_collect\n    cmpl $CAPACITY, %eax\n    jl .gca32_take\n.gca32_collect:\n    call _novus_gc_collect\n.gca32_take:\n    pushl $0\n    pushl %esi\n    pushl $0\n    pushl $_novus_gc_freelist\n    call _novus_gc_take\n    addl $16, %esp\n    testl %eax, %eax\n    jnz .gca32_register\n    movl _novus_heap_ptr, %eax\n    testl %eax, %eax\n    jnz .gca32_heap_ready\n    movl $_novus_heap, %eax\n.gca32_heap_ready:\n    leal (%eax,%esi), %ebx\n    cmpl $_novus_heap+HEAPSIZE, %ebx\n    jbe .gca32_heap_space\n    ud2\n.gca32_heap_space:\n    movl %ebx, _novus_heap_ptr\n.gca32_register:\n    movl %eax, %edi\n    pushl $0\n    pushl %esi\n    pushl $0\n    pushl %eax\n    call _novus_gc_register\n    addl $16, %esp\n    movl %edi, %eax\n    movl $0, %edx\n    popl %edi\n    popl %esi\n    popl %ebx\n    popl %ebp\n    ret\n", "CAPACITY", fmt.Sprint(e.target.GCEntries)), "HEAPSIZE", fmt.Sprint(e.target.HeapSize)))
 
 }

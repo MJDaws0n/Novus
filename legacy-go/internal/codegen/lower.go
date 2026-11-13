@@ -236,7 +236,7 @@ func (l *Lowerer) varSlot(name string) int {
 // slotMem returns a memory operand addressing the given stack slot.
 // Slots are addressed as [rbp - (slot+1)*ptrSize].
 func (l *Lowerer) slotMem(slot int) Operand {
-	offset := -int64((slot + 1) * l.target.PtrSize)
+	offset := -int64((slot + 1) * 8)
 	return Mem(l.target.BasePointer, offset)
 }
 
@@ -392,7 +392,7 @@ func (l *Lowerer) lowerFunction(fn *ast.FnDecl, startup []ast.Stmt) {
 	}
 
 	// Calculate frame size: locals * ptrSize, aligned to 16 bytes.
-	frameSize := irFn.Locals * l.target.PtrSize
+	frameSize := irFn.Locals * 8
 	if frameSize%16 != 0 {
 		frameSize += 16 - (frameSize % 16)
 	}
@@ -1586,7 +1586,7 @@ func (l *Lowerer) builtinStoreWord(e *ast.CallExpr) Operand {
 	}
 	address := l.lowerExpr(e.Args[0])
 	value := l.lowerExpr(e.Args[1])
-	l.emit(IRInstr{Op: IRStore, Src1: value, Src2: address})
+	l.emit(IRInstr{Op: IRStore, Dst: Imm(int64(l.target.PtrSize)), Src1: value, Src2: address})
 	return None()
 }
 

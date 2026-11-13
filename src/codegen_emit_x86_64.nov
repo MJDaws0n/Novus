@@ -1552,7 +1552,7 @@ fn codegen_x86_64Emitter_emitNASMInstr(e: CodegenX86_64Emitter, fn_value: Codege
             codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
         } else if ((choice_297 == 46)) {
             let addr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
-            w.append(("    mov r11d, dword [" + addr + "]\n"));
+            w.append(("    movsxd r11, dword [" + addr + "]\n"));
             codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r11");
         } else if ((choice_297 == 47)) {
             let addr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");

@@ -154,7 +154,7 @@ fn codegen_Target_fillX86_64(t: CodegenTarget) -> void {
 
 fn codegen_Target_fillX86(t: CodegenTarget) -> void {
     t.PtrSize = 4;
-    t.StackArgSlotSize = 4;
+    t.StackArgSlotSize = 8;
     t.Flavor = 0;
     t.ReturnReg = "eax";
     t.StackPointer = "esp";

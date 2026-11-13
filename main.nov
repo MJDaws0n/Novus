@@ -20,6 +20,7 @@ import src/lexer_lexer;
 import src/parser_parser;
 import src/semantic_classes;
 import src/semantic_semantic;
+import src/codegen_emit_x86_wide;
 import src/model;
 import src/runtime;
 import src/tool_install;

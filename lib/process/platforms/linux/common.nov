@@ -6,3 +6,7 @@ module process_linux;
 #if(arch == "arm64") {
     import arm64;
 }
+
+#if(arch == "x86") {
+    import x86;
+}

@@ -22,7 +22,8 @@ module std_environment;
 #if(arch == "x86") {
     fn environment_entry(index: i32) -> u64 {
         if (__novus_envp == 0) { return 0; }
-        return i32_to_u64(load32(__novus_envp + i32_to_u64(index) * 4));
+        let address: u64 = i32_to_u64(load32(__novus_envp + i32_to_u64(index) * 4)) & 4294967295;
+        return address;
     }
 }
 #if(os == "windows") {

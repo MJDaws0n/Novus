@@ -107,6 +107,7 @@ try:
                 ("tests/selfhost/time_memory.nov", "time_memory"),
                 ("tests/selfhost/libraries.nov", "library_smoke"),
                 ("tests/selfhost/numeric_features.nov", "numeric_features"),
+                ("tests/selfhost/wide_values.nov", "wide_values"),
                 ("tests/selfhost/float_rounding.nov", "float_rounding"),
                 ("tests/selfhost/float_literals.nov", "float_literals"),
                 ("tests/selfhost/process_child.nov", "process_child"),

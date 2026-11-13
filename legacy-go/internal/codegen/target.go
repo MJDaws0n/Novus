@@ -255,7 +255,7 @@ func (t *Target) fillX86_64() {
 
 func (t *Target) fillX86() {
 	t.PtrSize = 4
-	t.StackArgSlotSize = 4
+	t.StackArgSlotSize = 8
 	t.Flavor = GAS
 	t.ReturnReg = "eax"
 	t.StackPointer = "esp"

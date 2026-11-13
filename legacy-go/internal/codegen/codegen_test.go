@@ -1021,8 +1021,8 @@ func TestEmitPhysicalRegisterMovesDoNotClobberPreparedRegisters(t *testing.T) {
 				},
 			}}}
 			asm := EmitX86(mod, target)
-			if !strings.Contains(asm, "movl -4(%ebp), %ecx") ||
-				!strings.Contains(asm, "movl -8(%ebp), %edx") {
+			if !strings.Contains(asm, "movl -8(%ebp), %ecx") ||
+				!strings.Contains(asm, "movl -16(%ebp), %edx") {
 				t.Fatalf("32-bit physical-register moves were not direct:\n%s", asm)
 			}
 		})
@@ -1848,8 +1848,8 @@ fn main() -> i32 {
 	if !strings.Contains(asm, "_g_counter:") {
 		t.Error("x86 output missing global variable label '_g_counter:'")
 	}
-	if !strings.Contains(asm, ".long 42") {
-		t.Error("x86 output missing '.long 42' for global initializer")
+	if !strings.Contains(asm, ".quad 42") {
+		t.Error("x86 output missing '.quad 42' for global initializer")
 	}
 }
 
@@ -2587,8 +2587,8 @@ fn main() -> i32 { return val; }`
 	if !strings.Contains(asm, "_g_val:") {
 		t.Error("x86 output missing global variable label")
 	}
-	if !strings.Contains(asm, ".long 99") {
-		t.Error("x86 output missing .long 99 for global init")
+	if !strings.Contains(asm, ".quad 99") {
+		t.Error("x86 output missing .quad 99 for global init")
 	}
 }
 

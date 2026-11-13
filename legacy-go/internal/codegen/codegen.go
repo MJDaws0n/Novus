@@ -147,9 +147,6 @@ func Generate(program *ast.Program, opts *Options) (*Result, error) {
 	case Arch_ARM64:
 		asmText = EmitARM64(irMod, target)
 	case Arch_x86:
-		if op := findFloatOp(irMod); op != "" {
-			return nil, fmt.Errorf("floating-point operations (%s) are not supported on 32-bit x86 targets", op)
-		}
 		asmText = EmitX86(irMod, target)
 	default:
 		return nil, fmt.Errorf("unsupported architecture for emission: %s", target.Arch)

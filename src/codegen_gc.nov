@@ -36,7 +36,7 @@ fn codegen_withCollector(mod: CodegenIRModule, target: CodegenTarget) -> Codegen
     let word: str = assigned_328;
     let load: str = assigned_329;
     if ((target.PtrSize == 4)) {
-        let assigned_330: str = "i32";
+        let assigned_330: str = "u32";
         let assigned_331: str = "load32";
         word = assigned_330;
         load = assigned_331;
@@ -207,9 +207,9 @@ fn codegen_x86Emitter_emitFastCollector(e: CodegenX86Emitter) -> void {
     let w: StringBuilder = e.b;
     w.append(codegen_collectorData(e.mod, e.target));
     w.append("_novus_gc_collect:\n    pushal\n    movl %esp, %eax\n");
-    w.append("    pushl $_novus_gc_queue\n    pushl $_novus_gc_freelist\n    pushl _novus_gc_stack_bottom\n    pushl %eax\n");
-    w.append(("    pushl $" + runtime_string_i32(len(e.mod.Globals)) + "\n"));
-    w.append("    pushl $_novus_gc_roots\n    pushl _novus_gc_count\n    pushl $_novus_gc_table\n    call _novus_gc_trace\n    addl $32, %esp\n");
+    w.append("    pushl $0\n    pushl $_novus_gc_queue\n    pushl $0\n    pushl $_novus_gc_freelist\n    pushl $0\n    pushl _novus_gc_stack_bottom\n    pushl $0\n    pushl %eax\n");
+    w.append(("    pushl $0\n    pushl $" + runtime_string_i32(len(e.mod.Globals)) + "\n"));
+    w.append("    pushl $0\n    pushl $_novus_gc_roots\n    pushl $0\n    pushl _novus_gc_count\n    pushl $0\n    pushl $_novus_gc_table\n    call _novus_gc_trace\n    addl $64, %esp\n");
     w.append("    movl %eax, _novus_gc_count\n    leal 256(,%eax,2), %eax\n    movl %eax, _novus_gc_threshold\n    popal\n    ret\n");
 }
 

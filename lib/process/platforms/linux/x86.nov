@@ -1,0 +1,165 @@
+// ---------------------------------------------------------------------------
+// process/linux_x86 - Process utilities for Linux i386
+// Linux syscall convention: eax=syscall#, ebx/ecx/edx/esi/edi/ebp=args
+// ---------------------------------------------------------------------------
+
+module process_linux_x86;
+
+
+// ---------------------------------------------------------------------------
+// Wait for child process - wait4(pid, &status, 0, NULL)
+// ---------------------------------------------------------------------------
+
+fn wait_pid(pid: i32) -> i32 {
+    let st: i32 = 0;
+    let sa: u64 = &st;
+    mov(eax, 114);      // SYS_wait4
+    mov(ebx, pid);
+    mov(ecx, sa);
+    mov(edx, 0);
+    mov(esi, 0);
+    int(128);
+    return st;
+}
+
+// ---------------------------------------------------------------------------
+// Subprocess with captured output
+// ---------------------------------------------------------------------------
+
+fn capture_output(exe: str, argv: []u64, max_len: i32) -> str {
+    let pfd: []i32 = [0, 0];
+    pipe_create(pfd);
+    let rfd: i32 = pfd[0];
+    let wfd: i32 = pfd[1];
+
+    let pid: i32 = fork();
+    if (pid == 0) {
+        file_close(rfd);
+        dup2(wfd, 1);
+        file_close(wfd);
+        execve_raw(exe, argv);
+        exit(1);
+        return "";
+    }
+
+    file_close(wfd);
+
+    let buf: str = make_buffer(max_len);
+
+    let nr: i32 = file_read(rfd, ptr(buf), max_len);
+    file_close(rfd);
+    wait_pid(pid);
+
+    if (nr <= 0) { return ""; }
+
+    let result: str = "";
+    let k: i32 = 0;
+    let stop: bool = false;
+    while (k < nr && !stop) {
+        if (buf[k] == '\n' || buf[k] == '\r') {
+            stop = true;
+        } else {
+            result = result + buf[k];
+            k = k + 1;
+        }
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Run a command synchronously and return the wait status (0 = success)
+// ---------------------------------------------------------------------------
+
+fn run_cmd(exe: str, argv: []u64) -> i32 {
+    let pid: i32 = spawn_execve(exe, argv);
+    if (pid < 0) {
+        return -1;
+    }
+    return wait_pid(pid);
+}
+
+// ---------------------------------------------------------------------------
+// Capture full output (preserves newlines, captures stderr too)
+// ---------------------------------------------------------------------------
+
+fn capture_output_full(exe: str, argv: []u64, max_len: i32) -> str {
+    let pfd: []i32 = [0, 0];
+    pipe_create(pfd);
+    let rfd: i32 = pfd[0];
+    let wfd: i32 = pfd[1];
+
+    let pid: i32 = fork();
+    if (pid == 0) {
+        file_close(rfd);
+        dup2(wfd, 1);
+        dup2(wfd, 2);
+        file_close(wfd);
+        execve_raw(exe, argv);
+        exit(1);
+        return "";
+    }
+
+    file_close(wfd);
+
+    let buf: str = make_buffer(max_len);
+    let nr: i32 = file_read(rfd, ptr(buf), max_len);
+    file_close(rfd);
+    wait_pid(pid);
+
+    if (nr <= 0) { return ""; }
+    return copy_bytes(ptr(buf), nr);
+}
+
+// ---------------------------------------------------------------------------
+// Linux file picker dialog (no osascript on Linux — returns empty)
+// ---------------------------------------------------------------------------
+
+fn pick_file_dialog(file_type: str) -> str {
+    return "";
+}
+
+// ---------------------------------------------------------------------------
+// Linux folder picker dialog (no osascript on Linux — returns empty)
+// ---------------------------------------------------------------------------
+
+fn pick_folder_dialog() -> str {
+    return "";
+}
+
+// ---------------------------------------------------------------------------
+// Run a shell command via /bin/sh -c and return exit status
+// ---------------------------------------------------------------------------
+
+fn shell_exec(cmd: str) -> i32 {
+    let sh: str = "/bin/sh";
+    let flag: str = "-c";
+    let av: []u64 = [ptr(sh), ptr(flag), ptr(cmd), 0];
+    return run_cmd(sh, av);
+}
+
+// ---------------------------------------------------------------------------
+// Run a shell command and capture its output
+// ---------------------------------------------------------------------------
+
+fn shell_output(cmd: str, max_len: i32) -> str {
+    let sh: str = "/bin/sh";
+    let flag: str = "-c";
+    let av: []u64 = [ptr(sh), ptr(flag), ptr(cmd), 0];
+    return capture_output(sh, av, max_len);
+}
+
+// ---------------------------------------------------------------------------
+// Non-blocking waitpid to reap zombie children
+// wait4(-1, &st, WNOHANG=1, NULL) on Linux i386
+// ---------------------------------------------------------------------------
+
+fn waitpid_nohang() -> void {
+    let st: i32 = 0;
+    let sa: u64 = &st;
+    mov(eax, 114);      // SYS_wait4
+    mov(ebx, -1);
+    mov(ecx, sa);
+    mov(edx, 1);       // WNOHANG
+    mov(esi, 0);       // rusage = NULL
+    int(128);
+}
