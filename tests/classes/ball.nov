@@ -1,5 +1,9 @@
 module ball;
 
+fn scaled(dx: i32, scale: i32) -> i32 {
+    return dx * scale;
+}
+
 class Ball {
     let x: i32;
     pub let radius: i32 = 50;
@@ -14,7 +18,7 @@ class Ball {
     }
 
     pub fn move(dx: i32) -> void {
-        self.x += dx * Ball.scale;
+        self.x += scaled(dx, Ball.scale);
     }
 
     pub fn move(other: Ball) -> void {

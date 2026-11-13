@@ -49,6 +49,7 @@ type Program struct {
 	Imports        []*ImportDecl
 	Globals        []*GlobalVar
 	Classes        []*ClassDecl
+	ClassHelpers   []*FnDecl                 // private implementation dependencies of imported classes
 	ClassScopes    map[string][]ClassBinding // class imports by source file
 	SourceFile     string
 	ClassGlobals   []*GlobalVar

@@ -190,6 +190,7 @@ func (a *Analyzer) analyzeClassBodies(prog *ast.Program) {
 	for _, decl := range prog.Classes {
 		class := a.classDecls[decl]
 		a.sourceFile, a.currentClass = decl.SourceFile, class
+		savedScope := a.useFileFunctions()
 		var instanceInits []ast.Stmt
 		for _, field := range decl.Fields {
 			info := class.fields[field.Name]
@@ -223,11 +224,13 @@ func (a *Analyzer) analyzeClassBodies(prog *ast.Program) {
 			}
 		}
 		class.decl.Initializers = instanceInits
+		a.scope = savedScope
 	}
 	for _, body := range a.classMethods {
 		class, method := body.class, body.method
 		decl := method.decl
 		a.sourceFile, a.currentClass = class.decl.SourceFile, class
+		savedScope := a.useFileFunctions()
 		fn := *decl.Fn
 		fn.Name = method.sym.MangledName
 		fn.MangledName = method.sym.MangledName
@@ -243,6 +246,7 @@ func (a *Analyzer) analyzeClassBodies(prog *ast.Program) {
 			fn.Body = &block
 		}
 		prog.ClassFunctions = append(prog.ClassFunctions, &fn)
+		a.scope = savedScope
 	}
 	a.currentClass, a.classInstance = nil, false
 }
@@ -385,5 +389,59 @@ func (a *Analyzer) checkClassConflict(alias, name string, pos ast.Position) {
 	}
 	if a.classType(name) != nil {
 		a.classError(pos, fmt.Sprintf("declaration %q conflicts with a class name", name))
+	}
+}
+
+func (a *Analyzer) useFileFunctions() *Scope {
+	previous := a.scope
+	if scope := a.fileFunctions[a.sourceFile]; scope != nil {
+		a.scope = scope
+	}
+	return previous
+}
+
+func (a *Analyzer) classHelperLabel(id int, fn *ast.FnDecl, params []string) string {
+	return funcMangle(fmt.Sprintf("_novus_file_%d_%s", id, fn.Name), params)
+}
+
+func (a *Analyzer) defineFileFunction(fn *ast.FnDecl, label string, params []*Type, defaults []ast.Expr, defaultCount int, ret *Type) {
+	scope := a.fileFunctions[fn.SourceFile]
+	if scope == nil {
+		scope = newScope(a.scope)
+		a.fileFunctions[fn.SourceFile] = scope
+	}
+	if scope.lookupLocal(label) != nil {
+		return
+	}
+	sym := &Symbol{Name: fn.Name, MangledName: label, Kind: SymFunc, Type: ret, Pos: fn.Pos,
+		Params: params, Defaults: defaults, DefaultCount: defaultCount, ReturnType: ret}
+	scope.defineFunc(sym)
+	scope.symbols[fn.Name] = sym
+}
+
+func (a *Analyzer) analyzeClassHelpers(prog *ast.Program) {
+	for _, fn := range prog.ClassHelpers {
+		a.sourceFile = fn.SourceFile
+		params := make([]*Type, len(fn.Params))
+		names := make([]string, len(fn.Params))
+		defaults := make([]ast.Expr, len(fn.Params))
+		defaultCount := 0
+		for i, param := range fn.Params {
+			params[i] = a.resolveType(param.Type)
+			names[i] = typeKey(params[i], param.Type.Name)
+			defaults[i] = param.Default
+			if param.Default != nil {
+				defaultCount++
+			}
+		}
+		fn.MangledName = a.classHelperLabel(a.classSourceIDs[fn.SourceFile], fn, names)
+		a.defineFileFunction(fn, fn.MangledName, params, defaults, defaultCount, a.resolveType(fn.ReturnType))
+	}
+	for _, fn := range prog.ClassHelpers {
+		a.sourceFile = fn.SourceFile
+		savedScope := a.useFileFunctions()
+		a.analyzeFunction(fn)
+		a.scope = savedScope
+		prog.ClassFunctions = append(prog.ClassFunctions, fn)
 	}
 }
