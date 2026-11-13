@@ -2999,8 +2999,13 @@ func TestDetectToolchainWithPaths(t *testing.T) {
 
 func TestDetectToolchainWithCommandNamesInPath(t *testing.T) {
 	dir := t.TempDir()
-	nasm := filepath.Join(dir, "nasm")
-	golink := filepath.Join(dir, "golink")
+	nasmName, golinkName := "nasm", "golink"
+	if runtime.GOOS == "windows" {
+		nasmName += ".exe"
+		golinkName += ".exe"
+	}
+	nasm := filepath.Join(dir, nasmName)
+	golink := filepath.Join(dir, golinkName)
 	stub := []byte("#!/bin/sh\nexit 0\n")
 	if err := os.WriteFile(nasm, stub, 0o755); err != nil {
 		t.Fatalf("write nasm stub: %v", err)
