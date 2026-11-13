@@ -46,11 +46,16 @@ report["source_sha256"] = source_digest()
 
 def run(command, name, timeout=600, expected=0, cwd=ROOT, env=None):
     started = time.perf_counter()
-    result = subprocess.run([str(x) for x in command], cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
-    (work / (name + ".log")).write_bytes(result.stdout)
+    log = work / (name + ".log")
+    with log.open("wb") as output_log:
+        try:
+            result = subprocess.run([str(x) for x in command], cwd=cwd, env=env, stdout=output_log, stderr=subprocess.STDOUT, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            print(log.read_bytes().decode(errors="replace")[-12000:], flush=True)
+            raise
     elapsed = time.perf_counter() - started
     if result.returncode != expected:
-        print(result.stdout.decode(errors="replace")[-12000:], flush=True)
+        print(log.read_bytes().decode(errors="replace")[-12000:], flush=True)
         raise RuntimeError(f"{name}: exit {result.returncode}, expected {expected}")
     return elapsed
 
@@ -86,6 +91,10 @@ try:
             report["stages"].append({"stage": stage, "seconds": elapsed, "assembly_sha256": digest})
             record()
             print(f"Stage {stage}: {elapsed:.3f}s", flush=True)
+            if stage == 1:
+                run([compiler, f"--target={target}", "--debug", "tests/classes/main.nov"], "stage1-smoke-build", timeout=120)
+                run([output / ("classes" + extension)], "stage1-smoke-run", timeout=60)
+                print("PASS first-generation compiler smoke test", flush=True)
             if stage == 3 and assembly != previous_assembly:
                 raise RuntimeError("Stage 2 and stage 3 produced different assembly")
             previous_assembly = assembly
