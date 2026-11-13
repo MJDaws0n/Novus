@@ -202,8 +202,8 @@ Artifacts go to `build/<target>/<name>[.exe]`.
 
 Run `novus` without arguments to display usage. Supported targets are
 `darwin/arm64`, `darwin/amd64`, `linux/amd64`, `linux/arm64`, `linux/386`,
-`windows/amd64`, and `windows/arm64`. The inherited 32-bit backend does not support
-floating-point operations and stores integer values in 32-bit slots; see the
+`windows/amd64`, and `windows/arm64`. The 32-bit Linux backend supports full-width
+`i64`/`u64` values and floating-point operations, and can compile the compiler itself; see the
 [verification matrix](testing-matrix.md) for the distinction between compiler
 hosts and compilation targets.
 

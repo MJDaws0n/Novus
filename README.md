@@ -115,8 +115,12 @@ python3 scripts/bootstrap.py --bootstrap /absolute/path/to/novus
 
 For a verified release binary in `dist/`, use `./build-release.sh` (or
 `python scripts/bootstrap.py --package` on Windows). CI builds on native runners
-for macOS ARM64/Intel, Linux ARM64/x64, and Windows ARM64/x64. The 32-bit Linux
-backend is retained; its self-hosting coverage is tracked in the test matrix.
+for macOS ARM64/Intel, Linux ARM64/x64/x86 (32-bit), and Windows ARM64/x64.
+Every host runs the same self-compilation and runtime verification suite.
+
+See the [migration and benchmark report](docs/self-hosting.md) and
+[verification matrix](docs/testing-matrix.md) for measured results and platform
+limitations.
 
 ### Cross-compilation toolchain notes
 

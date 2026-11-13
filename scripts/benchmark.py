@@ -25,6 +25,11 @@ report = {"recorded_at": datetime.now(timezone.utc).isoformat(), "host": platfor
           "includes": "fresh process, parsing, imports, semantic analysis, assembly generation, assembly and linking",
           "compiler_sha256": {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in compilers.items()},
           "applications": {}}
+dependencies = hashlib.sha256()
+for path in sorted((ROOT / "lib").rglob("*.nov")):
+    dependencies.update(str(path.relative_to(ROOT)).encode())
+    dependencies.update(path.read_bytes())
+report["bundled_libraries_sha256"] = dependencies.hexdigest()
 for size, source in sources.items():
     samples = {"go": [], "novus": []}
     for iteration in range(args.runs + 1):

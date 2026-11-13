@@ -1,0 +1,66 @@
+{
+  "recorded_at": "2026-11-13T19:12:56.463924+00:00",
+  "host": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "includes": "fresh process, parsing, imports, semantic analysis, assembly generation, assembly and linking",
+  "compiler_sha256": {
+    "go": "13a2e5578aa4a0c7d9517668a16d475ee3b78c7f2c7d3ac0efa7ce11b10493cb",
+    "novus": "72f34be19293ef89bf7195e5d83a8757c70eb05f3ff4b75b77a798d6bd2af85c"
+  },
+  "applications": {
+    "small": {
+      "source": "tests/classes/main.nov",
+      "source_sha256": "5c70811db7a4f2905d271f44119014cbcfd6bfe5790623ec91df8ba757406e5f",
+      "seconds": {
+        "go": [
+          0.15194562499891617,
+          0.15091004200075986,
+          0.15552029200080142,
+          0.14972099999977218,
+          0.14963608300058695,
+          0.14838408299874573
+        ],
+        "novus": [
+          0.6707182500013005,
+          0.6762657920007769,
+          0.6755752919998486,
+          0.6678366659998574,
+          0.6651712080001744,
+          0.6702298750005866
+        ]
+      },
+      "median_seconds": {
+        "go": 0.15031552100026602,
+        "novus": 0.6704740625009435
+      }
+    },
+    "large": {
+      "source": "Nox/main.nov (af635107c6e8d81d1059062fecdbb96e408fc43f)",
+      "source_sha256": "72be3d71c46b714bc1f0f9d3dade1b6d3139b2ba6c73b701c66f8f1bb882b219",
+      "seconds": {
+        "go": [
+          1.891196750000745,
+          1.9165264169987495,
+          1.888512500001525,
+          3.1577512499989098,
+          1.925594500000443,
+          1.8697000830015895
+        ],
+        "novus": [
+          13.531478083001275,
+          13.629896042000837,
+          13.440868540999872,
+          14.04257541700099,
+          13.908447916999648,
+          14.239737666999645
+        ]
+      },
+      "median_seconds": {
+        "go": 1.9038615834997472,
+        "novus": 13.769171979500243
+      }
+    }
+  },
+  "bundled_libraries_sha256": "4721370628a8d497bcab5afa8971e5d20fe0cdb88cb630a058664e37ae336c3e",
+  "compiler_source_commit": "79f98fca7be9c073bbec0b5dc33e6596947d386d",
+  "compiler_source_sha256": "d4b141e8beb1d47bd710fb9232410f0d4a8860292611dc52433521d2615ed041"
+}

@@ -1,0 +1,748 @@
+{
+  "verified_commit": "79f98fca7be9c073bbec0b5dc33e6596947d386d",
+  "workflow_run": "https://github.com/MJDaws0n/Novus/actions/runs/43489144967",
+  "targets": [
+    {
+      "target": "darwin/arm64",
+      "stages": [
+        {
+          "stage": 1,
+          "seconds": 17.48518662500001,
+          "assembly_sha256": "add64ac38d06d15c72b802314a21b0c0104360189e006549fc8d9c480993d534"
+        },
+        {
+          "stage": 2,
+          "seconds": 133.01501000000002,
+          "assembly_sha256": "812afe93f9e0e7086dfd00a5a469e7c4873425157db562d034ff3469a7780cf3"
+        },
+        {
+          "stage": 3,
+          "seconds": 148.529147458,
+          "assembly_sha256": "812afe93f9e0e7086dfd00a5a469e7c4873425157db562d034ff3469a7780cf3"
+        }
+      ],
+      "tests": [
+        {
+          "name": "classes",
+          "passed": true,
+          "seconds": 0.03734900000000607
+        },
+        {
+          "name": "compiler_regressions",
+          "passed": true,
+          "seconds": 0.02177425000002131
+        },
+        {
+          "name": "register_arguments",
+          "passed": true,
+          "seconds": 0.03131033400001115
+        },
+        {
+          "name": "flags",
+          "passed": true,
+          "seconds": 0.00863179099997069
+        },
+        {
+          "name": "gc_graph",
+          "passed": true,
+          "seconds": 0.0352504169999861
+        },
+        {
+          "name": "time_memory",
+          "passed": true,
+          "seconds": 0.020977167000012287
+        },
+        {
+          "name": "library_smoke",
+          "passed": true,
+          "seconds": 0.020705958999997165
+        },
+        {
+          "name": "numeric_features",
+          "passed": true,
+          "seconds": 0.012892834000012954
+        },
+        {
+          "name": "wide_values",
+          "passed": true,
+          "seconds": 0.030051709000019855
+        },
+        {
+          "name": "float_rounding",
+          "passed": true,
+          "seconds": 0.1269279170000459
+        },
+        {
+          "name": "float_literals",
+          "passed": true,
+          "seconds": 0.01609287499996981
+        },
+        {
+          "name": "platform_libraries",
+          "passed": true,
+          "seconds": 0.06808075000003555
+        },
+        {
+          "name": "unicode-source-imports",
+          "passed": true
+        },
+        {
+          "name": "executable-permissions",
+          "passed": true
+        },
+        {
+          "name": "gc-small-table",
+          "passed": true
+        },
+        {
+          "name": "download-archive",
+          "passed": true
+        }
+      ],
+      "source_sha256": "d4b141e8beb1d47bd710fb9232410f0d4a8860292611dc52433521d2615ed041",
+      "comparisons": {
+        "passed": 109,
+        "failed": 0
+      },
+      "passed": true,
+      "artifact": "dist/novus-darwin-arm64",
+      "report_artifact": "selfhost-0/darwin_arm64/results.json",
+      "binary_sha256": "9621a3b84c89a6adb9804496112833cacefd8e8d0ea53a8b4672cff2979a1025"
+    },
+    {
+      "target": "darwin/amd64",
+      "stages": [
+        {
+          "stage": 1,
+          "seconds": 35.054257036999985,
+          "assembly_sha256": "460aa8da5adb8906e79e906b8da21a25b96f753bffb9d3cfaa8b23389213abf0"
+        },
+        {
+          "stage": 2,
+          "seconds": 88.514952779,
+          "assembly_sha256": "abc0b474ab7314cf6af6c699b79d9aaadbfbf0852a3324f50afdd10887d17351"
+        },
+        {
+          "stage": 3,
+          "seconds": 80.19976701500002,
+          "assembly_sha256": "abc0b474ab7314cf6af6c699b79d9aaadbfbf0852a3324f50afdd10887d17351"
+        }
+      ],
+      "tests": [
+        {
+          "name": "classes",
+          "passed": true,
+          "seconds": 0.010990178999975342
+        },
+        {
+          "name": "compiler_regressions",
+          "passed": true,
+          "seconds": 0.009916962999966472
+        },
+        {
+          "name": "register_arguments",
+          "passed": true,
+          "seconds": 0.007839918999991369
+        },
+        {
+          "name": "flags",
+          "passed": true,
+          "seconds": 0.01049936700002263
+        },
+        {
+          "name": "gc_graph",
+          "passed": true,
+          "seconds": 0.20761289600000055
+        },
+        {
+          "name": "time_memory",
+          "passed": true,
+          "seconds": 0.012262265000003936
+        },
+        {
+          "name": "library_smoke",
+          "passed": true,
+          "seconds": 0.058160934
+        },
+        {
+          "name": "numeric_features",
+          "passed": true,
+          "seconds": 0.01339833899999121
+        },
+        {
+          "name": "wide_values",
+          "passed": true,
+          "seconds": 0.02358281499999748
+        },
+        {
+          "name": "float_rounding",
+          "passed": true,
+          "seconds": 0.30434555900001214
+        },
+        {
+          "name": "float_literals",
+          "passed": true,
+          "seconds": 0.010299052999982905
+        },
+        {
+          "name": "platform_libraries",
+          "passed": true,
+          "seconds": 0.12517674800000123
+        },
+        {
+          "name": "unicode-source-imports",
+          "passed": true
+        },
+        {
+          "name": "executable-permissions",
+          "passed": true
+        },
+        {
+          "name": "gc-small-table",
+          "passed": true
+        },
+        {
+          "name": "download-archive",
+          "passed": true
+        }
+      ],
+      "source_sha256": "d4b141e8beb1d47bd710fb9232410f0d4a8860292611dc52433521d2615ed041",
+      "comparisons": {
+        "passed": 109,
+        "failed": 0
+      },
+      "passed": true,
+      "artifact": "dist/novus-darwin-amd64",
+      "report_artifact": "selfhost-1/darwin_x86_64/results.json",
+      "binary_sha256": "1342ad69d45a47e361cbd772b9aa84b054710341fc870b230fe47fb4383eb035"
+    },
+    {
+      "target": "linux/amd64",
+      "stages": [
+        {
+          "stage": 1,
+          "seconds": 18.560810892000006,
+          "assembly_sha256": "e6aceaabf38ec02411072bf2fc7dc2385eb3678363dfdaf89bbd79c64589b880"
+        },
+        {
+          "stage": 2,
+          "seconds": 20.516460999000003,
+          "assembly_sha256": "c9c16594d50356b311a657557764c572a7eec8dd69df8224605fb927c0efdd25"
+        },
+        {
+          "stage": 3,
+          "seconds": 20.316812575,
+          "assembly_sha256": "c9c16594d50356b311a657557764c572a7eec8dd69df8224605fb927c0efdd25"
+        }
+      ],
+      "tests": [
+        {
+          "name": "classes",
+          "passed": true,
+          "seconds": 0.003531683999995039
+        },
+        {
+          "name": "compiler_regressions",
+          "passed": true,
+          "seconds": 0.0016217570000094383
+        },
+        {
+          "name": "register_arguments",
+          "passed": true,
+          "seconds": 0.0015295800000103554
+        },
+        {
+          "name": "flags",
+          "passed": true,
+          "seconds": 0.00031902300000297146
+        },
+        {
+          "name": "gc_graph",
+          "passed": true,
+          "seconds": 0.007661490000003823
+        },
+        {
+          "name": "time_memory",
+          "passed": true,
+          "seconds": 0.0014755889999946703
+        },
+        {
+          "name": "library_smoke",
+          "passed": true,
+          "seconds": 0.0016507420000095863
+        },
+        {
+          "name": "numeric_features",
+          "passed": true,
+          "seconds": 0.0016962580000097205
+        },
+        {
+          "name": "wide_values",
+          "passed": true,
+          "seconds": 0.003550625000002583
+        },
+        {
+          "name": "float_rounding",
+          "passed": true,
+          "seconds": 0.11411846500001843
+        },
+        {
+          "name": "float_literals",
+          "passed": true,
+          "seconds": 0.0014652989999888177
+        },
+        {
+          "name": "platform_libraries",
+          "passed": true,
+          "seconds": 0.03188938899998561
+        },
+        {
+          "name": "unicode-source-imports",
+          "passed": true
+        },
+        {
+          "name": "executable-permissions",
+          "passed": true
+        },
+        {
+          "name": "gc-small-table",
+          "passed": true
+        },
+        {
+          "name": "download-archive",
+          "passed": true
+        }
+      ],
+      "source_sha256": "d4b141e8beb1d47bd710fb9232410f0d4a8860292611dc52433521d2615ed041",
+      "comparisons": {
+        "passed": 109,
+        "failed": 0
+      },
+      "passed": true,
+      "artifact": "dist/novus-linux-amd64",
+      "report_artifact": "selfhost-2/linux_x86_64/results.json",
+      "binary_sha256": "4c7b28e414c20e34cc781063fc183721c5017c9ff68b0193af73fe1572f3d388"
+    },
+    {
+      "target": "linux/arm64",
+      "stages": [
+        {
+          "stage": 1,
+          "seconds": 8.707564413,
+          "assembly_sha256": "50a0f5e434ef2b23e7231de190d2c478ad028d9bce7161e17e4757ca2008fb2c"
+        },
+        {
+          "stage": 2,
+          "seconds": 160.91840930799998,
+          "assembly_sha256": "69335ff96ba6f5cad6e633523b8fa74841fc71975f44330a89d6a7107998f5c6"
+        },
+        {
+          "stage": 3,
+          "seconds": 161.20570758399998,
+          "assembly_sha256": "69335ff96ba6f5cad6e633523b8fa74841fc71975f44330a89d6a7107998f5c6"
+        }
+      ],
+      "tests": [
+        {
+          "name": "classes",
+          "passed": true,
+          "seconds": 0.007876072000044587
+        },
+        {
+          "name": "compiler_regressions",
+          "passed": true,
+          "seconds": 0.0018115889999990031
+        },
+        {
+          "name": "register_arguments",
+          "passed": true,
+          "seconds": 0.0016261839999742733
+        },
+        {
+          "name": "flags",
+          "passed": true,
+          "seconds": 0.0017459389999885389
+        },
+        {
+          "name": "gc_graph",
+          "passed": true,
+          "seconds": 0.015971778999983144
+        },
+        {
+          "name": "time_memory",
+          "passed": true,
+          "seconds": 0.0016994260000160466
+        },
+        {
+          "name": "library_smoke",
+          "passed": true,
+          "seconds": 0.0017108419999658508
+        },
+        {
+          "name": "numeric_features",
+          "passed": true,
+          "seconds": 0.0018802959999675295
+        },
+        {
+          "name": "wide_values",
+          "passed": true,
+          "seconds": 0.007679995000046347
+        },
+        {
+          "name": "float_rounding",
+          "passed": true,
+          "seconds": 0.21453289700002642
+        },
+        {
+          "name": "float_literals",
+          "passed": true,
+          "seconds": 0.0017565560000321057
+        },
+        {
+          "name": "platform_libraries",
+          "passed": true,
+          "seconds": 0.0640547409999499
+        },
+        {
+          "name": "unicode-source-imports",
+          "passed": true
+        },
+        {
+          "name": "executable-permissions",
+          "passed": true
+        },
+        {
+          "name": "gc-small-table",
+          "passed": true
+        },
+        {
+          "name": "download-archive",
+          "passed": true
+        }
+      ],
+      "source_sha256": "d4b141e8beb1d47bd710fb9232410f0d4a8860292611dc52433521d2615ed041",
+      "comparisons": {
+        "passed": 109,
+        "failed": 0
+      },
+      "passed": true,
+      "artifact": "dist/novus-linux-arm64",
+      "report_artifact": "selfhost-3/linux_arm64/results.json",
+      "binary_sha256": "1ce5c407066ce072dce6e2c2cea9acc1c6a6fac99a9528d4062e31b76ac042cf"
+    },
+    {
+      "target": "windows/amd64",
+      "stages": [
+        {
+          "stage": 1,
+          "seconds": 12.254847900000016,
+          "assembly_sha256": "306a39ccd356666c813e22d2865cbf0ad39971f69e188bb2ba304d20669c71c0"
+        },
+        {
+          "stage": 2,
+          "seconds": 24.386466600000006,
+          "assembly_sha256": "306a39ccd356666c813e22d2865cbf0ad39971f69e188bb2ba304d20669c71c0"
+        },
+        {
+          "stage": 3,
+          "seconds": 24.814621899999963,
+          "assembly_sha256": "306a39ccd356666c813e22d2865cbf0ad39971f69e188bb2ba304d20669c71c0"
+        }
+      ],
+      "tests": [
+        {
+          "name": "classes",
+          "passed": true,
+          "seconds": 0.008778899999981604
+        },
+        {
+          "name": "compiler_regressions",
+          "passed": true,
+          "seconds": 0.007477800000003754
+        },
+        {
+          "name": "register_arguments",
+          "passed": true,
+          "seconds": 0.00643209999998362
+        },
+        {
+          "name": "flags",
+          "passed": true,
+          "seconds": 0.00650490000003856
+        },
+        {
+          "name": "gc_graph",
+          "passed": true,
+          "seconds": 0.014426800000023832
+        },
+        {
+          "name": "time_memory",
+          "passed": true,
+          "seconds": 0.008746000000030563
+        },
+        {
+          "name": "library_smoke",
+          "passed": true,
+          "seconds": 0.007928899999967598
+        },
+        {
+          "name": "numeric_features",
+          "passed": true,
+          "seconds": 0.007655300000010357
+        },
+        {
+          "name": "wide_values",
+          "passed": true,
+          "seconds": 0.010025499999983367
+        },
+        {
+          "name": "float_rounding",
+          "passed": true,
+          "seconds": 0.07014200000003257
+        },
+        {
+          "name": "float_literals",
+          "passed": true,
+          "seconds": 0.007080300000041007
+        },
+        {
+          "name": "platform_libraries",
+          "passed": true,
+          "seconds": 0.06259180000000697
+        },
+        {
+          "name": "unicode-source-imports",
+          "passed": true
+        },
+        {
+          "name": "gc-small-table",
+          "passed": true
+        },
+        {
+          "name": "download-archive",
+          "passed": true
+        }
+      ],
+      "source_sha256": "68e58b2dbd55df8249714aaf5059c65f825cc79b5e4809cc6a8de00b6ba32201",
+      "comparisons": {
+        "passed": 109,
+        "failed": 0
+      },
+      "passed": true,
+      "artifact": "dist\\novus-windows-amd64.exe",
+      "report_artifact": "selfhost-4/windows_x86_64/results.json",
+      "binary_sha256": "b126556614f15b5e1242d7afe4df471b4c0e3b74ac22d1eb66ed246ebd92b907"
+    },
+    {
+      "target": "windows/arm64",
+      "stages": [
+        {
+          "stage": 1,
+          "seconds": 22.06182689999997,
+          "assembly_sha256": "112f64e59e2e2f3963a951cf775665dfe62dff7cb44a8e966caa332df8ddbdc3"
+        },
+        {
+          "stage": 2,
+          "seconds": 172.9783913,
+          "assembly_sha256": "3b841ed9e1db186cd57b8e915a2c449aa7a9d7d549ea18aa1d073979e52b3712"
+        },
+        {
+          "stage": 3,
+          "seconds": 169.31906979999997,
+          "assembly_sha256": "3b841ed9e1db186cd57b8e915a2c449aa7a9d7d549ea18aa1d073979e52b3712"
+        }
+      ],
+      "tests": [
+        {
+          "name": "classes",
+          "passed": true,
+          "seconds": 0.026289899999937916
+        },
+        {
+          "name": "compiler_regressions",
+          "passed": true,
+          "seconds": 0.02715190000003531
+        },
+        {
+          "name": "register_arguments",
+          "passed": true,
+          "seconds": 0.032148000000006505
+        },
+        {
+          "name": "flags",
+          "passed": true,
+          "seconds": 0.02140940000003866
+        },
+        {
+          "name": "gc_graph",
+          "passed": true,
+          "seconds": 0.0432348000000502
+        },
+        {
+          "name": "time_memory",
+          "passed": true,
+          "seconds": 0.0254383000000189
+        },
+        {
+          "name": "library_smoke",
+          "passed": true,
+          "seconds": 0.02565340000001015
+        },
+        {
+          "name": "numeric_features",
+          "passed": true,
+          "seconds": 0.03471869999998489
+        },
+        {
+          "name": "wide_values",
+          "passed": true,
+          "seconds": 0.027903899999955684
+        },
+        {
+          "name": "float_rounding",
+          "passed": true,
+          "seconds": 0.208146499999998
+        },
+        {
+          "name": "float_literals",
+          "passed": true,
+          "seconds": 0.023512100000061764
+        },
+        {
+          "name": "platform_libraries",
+          "passed": true,
+          "seconds": 0.13695259999997234
+        },
+        {
+          "name": "unicode-source-imports",
+          "passed": true
+        },
+        {
+          "name": "gc-small-table",
+          "passed": true
+        },
+        {
+          "name": "download-archive",
+          "passed": true
+        }
+      ],
+      "source_sha256": "68e58b2dbd55df8249714aaf5059c65f825cc79b5e4809cc6a8de00b6ba32201",
+      "comparisons": {
+        "passed": 109,
+        "failed": 0
+      },
+      "passed": true,
+      "artifact": "dist\\novus-windows-arm64.exe",
+      "report_artifact": "selfhost-5/windows_arm64/results.json",
+      "binary_sha256": "e2f0529cbdf1d8bc8164d2befef5ff0bd82db903696ce2ef9d6a5cd01cde892f"
+    },
+    {
+      "target": "linux/386",
+      "stages": [
+        {
+          "stage": 1,
+          "seconds": 13.457307122000003,
+          "assembly_sha256": "b920c72161521c981a30e1e1349e3bc7b3c7e1438f3e4e5dd3271d223284a107"
+        },
+        {
+          "stage": 2,
+          "seconds": 192.92516555600002,
+          "assembly_sha256": "b02a57a5a3504e745dd05cbd0efbc81d7c46978bef6d5519fb8ef0e36a470a14"
+        },
+        {
+          "stage": 3,
+          "seconds": 192.82113007099997,
+          "assembly_sha256": "b02a57a5a3504e745dd05cbd0efbc81d7c46978bef6d5519fb8ef0e36a470a14"
+        }
+      ],
+      "tests": [
+        {
+          "name": "classes",
+          "passed": true,
+          "seconds": 0.0077649160000419215
+        },
+        {
+          "name": "compiler_regressions",
+          "passed": true,
+          "seconds": 0.001567731999955413
+        },
+        {
+          "name": "register_arguments",
+          "passed": true,
+          "seconds": 0.0017353160000084245
+        },
+        {
+          "name": "flags",
+          "passed": true,
+          "seconds": 0.0015980799999510964
+        },
+        {
+          "name": "gc_graph",
+          "passed": true,
+          "seconds": 0.06400730699999713
+        },
+        {
+          "name": "time_memory",
+          "passed": true,
+          "seconds": 0.0016200389999880827
+        },
+        {
+          "name": "library_smoke",
+          "passed": true,
+          "seconds": 0.00168070400002307
+        },
+        {
+          "name": "numeric_features",
+          "passed": true,
+          "seconds": 0.0016901620000453477
+        },
+        {
+          "name": "wide_values",
+          "passed": true,
+          "seconds": 0.007762454000044272
+        },
+        {
+          "name": "float_rounding",
+          "passed": true,
+          "seconds": 0.7662768720000486
+        },
+        {
+          "name": "float_literals",
+          "passed": true,
+          "seconds": 0.0017916699999886987
+        },
+        {
+          "name": "platform_libraries",
+          "passed": true,
+          "seconds": 0.2647501479999619
+        },
+        {
+          "name": "unicode-source-imports",
+          "passed": true
+        },
+        {
+          "name": "executable-permissions",
+          "passed": true
+        },
+        {
+          "name": "gc-small-table",
+          "passed": true
+        },
+        {
+          "name": "download-archive",
+          "passed": true
+        }
+      ],
+      "source_sha256": "d4b141e8beb1d47bd710fb9232410f0d4a8860292611dc52433521d2615ed041",
+      "comparisons": {
+        "passed": 109,
+        "failed": 0
+      },
+      "passed": true,
+      "artifact": "dist/novus-linux-386",
+      "report_artifact": "selfhost-6/linux_x86/results.json",
+      "binary_sha256": "0e8c030b3ed09be91e505be6eec368be26721639b2a4b332472471e25b79b956"
+    }
+  ],
+  "source_digest_note": "The digest includes relative path names and working-tree bytes. Windows checks out CRLF line endings and uses backslash paths. Both platform digests match this commit after applying those checkout conventions."
+}
