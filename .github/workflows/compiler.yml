@@ -56,6 +56,9 @@ jobs:
           "$env:ProgramFiles\NASM" >> $env:GITHUB_PATH
       - name: Bootstrap, reproduce, and test
         run: python scripts/bootstrap.py --package --target=${{ matrix.target }}
+      - name: Exercise retained 32-bit Linux backend
+        if: matrix.target == 'linux/amd64'
+        run: python scripts/test-x86.py --compiler dist/novus-linux-amd64
       - name: Save verified release binary
         uses: actions/upload-artifact@v4
         with:
