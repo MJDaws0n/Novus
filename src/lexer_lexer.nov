@@ -273,8 +273,7 @@ fn lexer_lexIdentifier(input: str, inputLength: i32, start: i32, line: i32, col:
     let tokType: str = "IDENT";
     {
         let kw: str = MapStrStr_get(CompilerState.lexer_keywords, word);
-        let ok: bool = MapStrStr_has(CompilerState.lexer_keywords, word);
-        if (ok) {
+        if (kw != "") {
             tokType = kw;
         }
     }

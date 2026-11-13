@@ -180,16 +180,9 @@ fn codegen_arm64Emitter_computeFrameSize(e: CodegenArm64Emitter, fn_value: Codeg
         let count_169: i32 = len(items_167);
         for (let index_168: i32 = 0; index_168 < count_169; index_168++) {
             let instr: CodegenIRInstr = items_167[index_168];
-            {
-                let items_170: []CodegenOperand = [instr.Dst, instr.Src1, instr.Src2];
-                let count_172: i32 = len(items_170);
-                for (let index_171: i32 = 0; index_171 < count_172; index_171++) {
-                    let op: CodegenOperand = items_170[index_171];
-                    if (((op.Kind == 1) && ((op.Reg + 1) > maxVReg))) {
-                        maxVReg = (op.Reg + 1);
-                    }
-                }
-            }
+            if (instr.Dst.Kind == 1 && instr.Dst.Reg + 1 > maxVReg) { maxVReg = instr.Dst.Reg + 1; }
+            if (instr.Src1.Kind == 1 && instr.Src1.Reg + 1 > maxVReg) { maxVReg = instr.Src1.Reg + 1; }
+            if (instr.Src2.Kind == 1 && instr.Src2.Reg + 1 > maxVReg) { maxVReg = instr.Src2.Reg + 1; }
             {
                 let items_173: []CodegenOperand = instr.Args;
                 let count_175: i32 = len(items_173);

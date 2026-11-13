@@ -111,6 +111,14 @@ fn _novus_gc_index(table: WORD, size: WORD, pages: WORD) -> void {
     }
 }
 fn _novus_gc_mark(table: WORD, size: WORD, queue: WORD, candidate: WORD) -> void {
+    // Repeated pointers (shared empty lists, positions, and graph edges) need
+    // only one lookup per collection. Collisions replace a cache entry; they
+    // never imply that a different pointer has already been traced.
+    let cache: WORD = queue + CACHEOFFSET;
+    let bucket: WORD = ((candidate >> 3) ^ (candidate >> 12)) & LOAD(cache);
+    let cached: WORD = cache + (bucket + 1) * WORDSIZE;
+    if (LOAD(cached) == candidate) { return; }
+    store_word(cached, candidate);
     let low: WORD = 0;
     let high: WORD = size;
     let pages: WORD = queue + PAGEOFFSET;
@@ -145,6 +153,13 @@ fn _novus_gc_trace(table: WORD, size: WORD, roots: WORD, root_count: WORD, stack
     _novus_gc_sort(table, size, queue, queue + PAGEOFFSET);
     _novus_gc_index(table, size, queue + PAGEOFFSET);
     store_word(queue, 0);
+    // The radix scratch space is no longer needed. The mark queue occupies
+    // at most N+1 words, leaving 2N words for this bounded pointer cache.
+    let cache_capacity: WORD = 1;
+    while (cache_capacity < size && cache_capacity < 4096) { cache_capacity *= 2; }
+    let cache: WORD = queue + CACHEOFFSET;
+    store_word(cache, cache_capacity - 1);
+    for (let i: WORD = 0; i < cache_capacity; i++) { store_word(cache + (i + 1) * WORDSIZE, 0); }
     let heap_low: WORD = LOAD(table);
     let last: WORD = table + (size - 1) * ENTRYSIZE;
     let heap_high: WORD = LOAD(last) + LOAD(last + WORDSIZE);
@@ -214,6 +229,7 @@ func withCollector(mod *IRModule, target *Target) *IRModule {
 	source := strings.ReplaceAll(collectorSource, "WORDSIZE", fmt.Sprintf("%d", target.PtrSize))
 	source = strings.ReplaceAll(source, "ENTRYSIZE", fmt.Sprintf("%d", target.PtrSize*3))
 	source = strings.ReplaceAll(source, "MARKOFFSET", fmt.Sprintf("%d", target.PtrSize*2))
+	source = strings.ReplaceAll(source, "CACHEOFFSET", fmt.Sprintf("%d", (target.GCEntries+1)*target.PtrSize))
 	source = strings.ReplaceAll(source, "PAGEOFFSET", fmt.Sprintf("%d", (target.GCEntries*3+1)*target.PtrSize))
 	source = strings.ReplaceAll(source, "WORD", word)
 	source = strings.ReplaceAll(source, "LOAD", load)

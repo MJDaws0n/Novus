@@ -151,6 +151,10 @@ try:
     run([compiler, f"--target={target}", "--gc-entries=1024", "tests/selfhost/gc_graph.nov"], "gc-small-table-build")
     run([output / ("gc_graph" + extension)], "gc-small-table-run", timeout=60)
     report["tests"].append({"name": "gc-small-table", "passed": True})
+    run([compiler, f"--target={target}", "--gc-entries=31", "tests/selfhost/gc_cache.nov"], "gc-pointer-cache-build")
+    run([output / ("gc_cache" + extension)], "gc-pointer-cache-run", timeout=60)
+    report["tests"].append({"name": "gc-pointer-cache", "passed": True})
+    print("PASS bounded GC pointer cache and interior roots", flush=True)
     run([compiler, f"--target={target}", "tests/selfhost/download_archive.nov"], "download-archive-build")
     downloads = work / "download-fixtures"
     downloads.mkdir(exist_ok=True)

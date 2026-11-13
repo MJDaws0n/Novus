@@ -181,16 +181,9 @@ fn codegen_checkRegisterWarnings(mod: CodegenIRModule, target: CodegenTarget) ->
                 let count_140: i32 = len(items_138);
                 for (let index_139: i32 = 0; index_139 < count_140; index_139++) {
                     let instr: CodegenIRInstr = items_138[index_139];
-                    {
-                        let items_141: []CodegenOperand = [instr.Dst, instr.Src1, instr.Src2];
-                        let count_143: i32 = len(items_141);
-                        for (let index_142: i32 = 0; index_142 < count_143; index_142++) {
-                            let op: CodegenOperand = items_141[index_142];
-                            if ((op.Kind == 2)) {
-                                MapStrBool_put(usedRegs, op.PhysReg, true);
-                            }
-                        }
-                    }
+                    if (instr.Dst.Kind == 2) { MapStrBool_put(usedRegs, instr.Dst.PhysReg, true); }
+                    if (instr.Src1.Kind == 2) { MapStrBool_put(usedRegs, instr.Src1.PhysReg, true); }
+                    if (instr.Src2.Kind == 2) { MapStrBool_put(usedRegs, instr.Src2.PhysReg, true); }
                     {
                         let items_144: []CodegenOperand = instr.Args;
                         let count_146: i32 = len(items_144);

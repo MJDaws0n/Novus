@@ -1,0 +1,39 @@
+module gc_cache;
+import ../../lib/std;
+
+class CacheNode {
+    pub let value: i32 = 0;
+    pub let interior: u64 = 0;
+    pub let next: CacheNode = null;
+    pub static let root: CacheNode = null;
+}
+
+fn interior_buffer(value: i32) -> u64 {
+    let buffer: str = alloc_string(1024);
+    let interior: u64 = ptr(buffer) + 24;
+    store_byte(interior, value);
+    return interior;
+}
+
+fn churn(value: i32) -> bool {
+    let temporary: CacheNode = new CacheNode();
+    temporary.value = value;
+    temporary.interior = interior_buffer(value);
+    temporary.next = CacheNode.root;
+    gc_collect();
+    return temporary.value == value && load8(temporary.interior) == value
+        && temporary.next.next == CacheNode.root && load8(CacheNode.root.interior) == 91;
+}
+
+fn main() -> i32 {
+    gc_collect();
+    CacheNode.root = new CacheNode();
+    CacheNode.root.next = CacheNode.root;
+    CacheNode.root.interior = interior_buffer(91);
+    // A non-power-of-two allocation limit exercises the shared scratch-space
+    // bounds; repeated collections must discard the previous pointer cache.
+    for (let i: i32 = 0; i < 200; i++) {
+        if (!churn(i)) { return 1; }
+    }
+    return 0;
+}

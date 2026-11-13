@@ -32,16 +32,9 @@ fn codegen_x86_64Emitter_computeFrameSize(e: CodegenX86_64Emitter, fn_value: Cod
         let count_245: i32 = len(items_243);
         for (let index_244: i32 = 0; index_244 < count_245; index_244++) {
             let instr: CodegenIRInstr = items_243[index_244];
-            {
-                let items_246: []CodegenOperand = [instr.Dst, instr.Src1, instr.Src2];
-                let count_248: i32 = len(items_246);
-                for (let index_247: i32 = 0; index_247 < count_248; index_247++) {
-                    let op: CodegenOperand = items_246[index_247];
-                    if (((op.Kind == 1) && ((op.Reg + 1) > maxVReg))) {
-                        maxVReg = (op.Reg + 1);
-                    }
-                }
-            }
+            if (instr.Dst.Kind == 1 && instr.Dst.Reg + 1 > maxVReg) { maxVReg = instr.Dst.Reg + 1; }
+            if (instr.Src1.Kind == 1 && instr.Src1.Reg + 1 > maxVReg) { maxVReg = instr.Src1.Reg + 1; }
+            if (instr.Src2.Kind == 1 && instr.Src2.Reg + 1 > maxVReg) { maxVReg = instr.Src2.Reg + 1; }
             {
                 let items_249: []CodegenOperand = instr.Args;
                 let count_251: i32 = len(items_249);

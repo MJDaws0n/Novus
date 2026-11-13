@@ -54,18 +54,11 @@ fn parser_Parser_check(p: ParserParser, typ: str) -> bool {
     return (parser_Parser_peek(p).Type == typ);
 }
 
-// match consumes the current token if it matches any of the given types.
-fn parser_Parser_match(p: ParserParser, types: []str) -> bool {
-    {
-        let items_646: []str = types;
-        let count_648: i32 = len(items_646);
-        for (let index_647: i32 = 0; index_647 < count_648; index_647++) {
-            let t: str = items_646[index_647];
-            if (parser_Parser_check(p, t)) {
-                parser_Parser_advance(p);
-                return true;
-            }
-        }
+// match consumes the current token if it has the requested type.
+fn parser_Parser_match(p: ParserParser, typ: str) -> bool {
+    if (parser_Parser_check(p, typ)) {
+        parser_Parser_advance(p);
+        return true;
     }
     return false;
 }
@@ -235,7 +228,7 @@ fn parser_Parser_parseImportDecl(p: ParserParser) -> AstNode {
             let fn_value: LexerToken = parser_Parser_expect(p, "IDENT", "expected function or class name in import selector");
             selectFns = append_Str(selectFns, fn_value.Value);
             {
-                for (; parser_Parser_match(p, ["COMMA"]); ) {
+                for (; parser_Parser_match(p, "COMMA"); ) {
                     fn_value = parser_Parser_expect(p, "IDENT", "expected function or class name in import selector");
                     selectFns = append_Str(selectFns, fn_value.Value);
                 }
@@ -332,18 +325,18 @@ fn parser_Parser_parseClass(p: ParserParser) -> AstNode {
     let class_value: AstNode = make_AstNode_50(name.Value, parser_Parser_position(p, tok));
     {
         for (; (!(parser_Parser_check(p, "RBRACE")) && !(parser_Parser_check(p, "EOF"))); ) {
-            let public: bool = parser_Parser_match(p, ["PUB"]);
+            let public: bool = parser_Parser_match(p, "PUB");
             if (!(public)) {
-                parser_Parser_match(p, ["PRIV"]);
+                parser_Parser_match(p, "PRIV");
             }
-            let static_value: bool = parser_Parser_match(p, ["STATIC"]);
+            let static_value: bool = parser_Parser_match(p, "STATIC");
             let member: LexerToken = parser_Parser_peek(p);
             {
-                if ((parser_Parser_match(p, ["LET"]))) {
+                if ((parser_Parser_match(p, "LET"))) {
                     let name: LexerToken = parser_Parser_expect(p, "IDENT", "expected field name");
                     parser_Parser_expect(p, "COLON", "expected ':' after field name");
                     let field: AstClassField = make_AstClassField_51(name.Value, parser_Parser_parseType(p), public, static_value, parser_Parser_position(p, member));
-                    if (parser_Parser_match(p, ["ASSIGN"])) {
+                    if (parser_Parser_match(p, "ASSIGN")) {
                         field.Value = parser_Parser_parseExpression(p);
                     }
                     parser_Parser_expect(p, "SEMICOLON", "expected ';' after class field");
@@ -374,7 +367,7 @@ fn parser_Parser_parseClass(p: ParserParser) -> AstNode {
 
 fn parser_Parser_qualifiedName(p: ParserParser) -> str {
     let name: str = parser_Parser_expect(p, "IDENT", "expected name").Value;
-    if (parser_Parser_match(p, ["DOT"])) {
+    if (parser_Parser_match(p, "DOT")) {
         name = (name + ("." + parser_Parser_expect(p, "IDENT", "expected name after '.'").Value));
     }
     return name;
@@ -399,7 +392,7 @@ fn parser_Parser_parseParamList(p: ParserParser) -> []AstParam {
     }
     params = append_Astparam(params, parser_Parser_parseParam(p));
     {
-        for (; parser_Parser_match(p, ["COMMA"]); ) {
+        for (; parser_Parser_match(p, "COMMA"); ) {
             params = append_Astparam(params, parser_Parser_parseParam(p));
         }
     }
@@ -411,7 +404,7 @@ fn parser_Parser_parseParam(p: ParserParser) -> AstParam {
     parser_Parser_expect(p, "COLON", "expected ':' after parameter name");
     let typ: AstTypeExpr = parser_Parser_parseType(p);
     let defaultVal: AstNode = null;
-    if (parser_Parser_match(p, ["ASSIGN"])) {
+    if (parser_Parser_match(p, "ASSIGN")) {
         defaultVal = parser_Parser_parseExpression(p);
     }
     return make_AstParam_56(name.Value, typ, defaultVal, parser_Parser_position(p, name));
@@ -522,7 +515,7 @@ fn parser_Parser_parseIfStmt(p: ParserParser) -> AstNode {
     parser_Parser_expect(p, "RPAREN", "expected ')' after if condition");
     let body: AstNode = parser_Parser_parseBlock(p);
     let elseStmt: AstNode = null;
-    if (parser_Parser_match(p, ["ELSE"])) {
+    if (parser_Parser_match(p, "ELSE")) {
         if (parser_Parser_check(p, "IF")) {
             elseStmt = parser_Parser_parseIfStmt(p);
         } else {
@@ -837,7 +830,7 @@ fn parser_Parser_parseArguments(p: ParserParser) -> []AstNode {
     if (!(parser_Parser_check(p, "RPAREN"))) {
         args = append_Astnode(args, parser_Parser_parseExpression(p));
         {
-            for (; parser_Parser_match(p, ["COMMA"]); ) {
+            for (; parser_Parser_match(p, "COMMA"); ) {
                 args = append_Astnode(args, parser_Parser_parseExpression(p));
             }
         }
