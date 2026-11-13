@@ -27,13 +27,14 @@ module std_environment;
 }
 #if(os == "windows") {
     fn environment_value(name: str) -> str {
-        win_call("GetEnvironmentVariableA", ptr(name), 0, 0);
+        let wide_name: str = windows_wide_string(name);
+        win_call("GetEnvironmentVariableW", wide_name, 0, 0);
         let size: i32 = u64_to_i32(getreg(rax));
         if (size <= 0) { return ""; }
-        let buffer: str = make_buffer(size);
-        win_call("GetEnvironmentVariableA", ptr(name), ptr(buffer), size);
+        let buffer: str = make_buffer(size * 2);
+        win_call("GetEnvironmentVariableW", wide_name, buffer, size);
         let copied: i32 = u64_to_i32(getreg(rax));
         if (copied <= 0 || copied >= size) { return ""; }
-        return copy_bytes(ptr(buffer), copied);
+        return windows_utf8_string(ptr(buffer), copied);
     }
 }

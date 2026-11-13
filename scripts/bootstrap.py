@@ -119,7 +119,7 @@ try:
         environment = os.environ.copy()
         if name == "platform_libraries":
             command.append(output / ("process_child" + extension))
-            environment["NOVUS_TEST_ENV"] = "inherited environment"
+            environment["NOVUS_TEST_ENV"] = "inherited café 東京 😀 environment"
         elapsed = run(command, name + "-run", timeout=60, env=environment)
         report["tests"].append({"name": name, "passed": True, "seconds": elapsed})
         record()

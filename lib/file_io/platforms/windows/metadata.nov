@@ -3,7 +3,7 @@ module file_metadata_windows;
 import ../../support;
 
 fn metadata_handle(path: str) -> u64 {
-    win_call("CreateFileA", path, 0, 7, 0, 3, 33554432, 0);
+    win_call("CreateFileW", windows_wide_string(path), 0, 7, 0, 3, 33554432, 0);
     return getreg(rax);
 }
 
@@ -35,12 +35,12 @@ fn canonical_path(path: str) -> PathResult {
     let result: PathResult = new PathResult();
     let handle: u64 = metadata_handle(path);
     if (handle == 18446744073709551615) { result.error = "cannot resolve path: " + path; return result; }
-    let buffer: str = make_buffer(32768);
-    win_call("GetFinalPathNameByHandleA", handle, buffer, 32768, 0);
+    let buffer: str = make_buffer(65536);
+    win_call("GetFinalPathNameByHandleW", handle, buffer, 32768, 0);
     let size: i32 = u64_to_i32(getreg(rax));
     win_call("CloseHandle", handle);
     if (size <= 0 || size >= 32768) { result.error = "cannot resolve path: " + path; return result; }
-    result.path = copy_bytes(ptr(buffer), size);
+    result.path = windows_utf8_string(ptr(buffer), size);
     if (starts_with(result.path, "\\\\?\\UNC\\")) { result.path = "\\\\" + substr(result.path, 8); }
     else if (starts_with(result.path, "\\\\?\\")) { result.path = substr(result.path, 4); }
     return result;
@@ -48,23 +48,23 @@ fn canonical_path(path: str) -> PathResult {
 
 fn working_directory() -> PathResult {
     let result: PathResult = new PathResult();
-    let buffer: str = make_buffer(32768);
-    win_call("GetCurrentDirectoryA", 32768, buffer);
+    let buffer: str = make_buffer(65536);
+    win_call("GetCurrentDirectoryW", 32768, buffer);
     let size: i32 = u64_to_i32(getreg(rax));
     if (size <= 0 || size >= 32768) { result.error = "cannot read working directory"; return result; }
-    result.path = copy_bytes(ptr(buffer), size);
+    result.path = windows_utf8_string(ptr(buffer), size);
     return result;
 }
 
 fn path_absolute(path: str) -> PathResult {
     let result: PathResult = new PathResult();
-    let buffer: str = make_buffer(32768);
+    let buffer: str = make_buffer(65536);
     let input: str = path;
     if (input == "") { input = "."; }
-    win_call("GetFullPathNameA", input, 32768, buffer, 0);
+    win_call("GetFullPathNameW", windows_wide_string(input), 32768, buffer, 0);
     let size: i32 = u64_to_i32(getreg(rax));
     if (size <= 0 || size >= 32768) { result.error = "cannot resolve absolute path: " + path; return result; }
-    result.path = copy_bytes(ptr(buffer), size);
+    result.path = windows_utf8_string(ptr(buffer), size);
     return result;
 }
 
@@ -72,15 +72,15 @@ fn windows_subdirectories(directory: str) -> []str {
     let result: []str = [];
     let buffer: str = make_buffer(592);
     let pattern: str = path_join_all([directory, "*"]);
-    win_call("FindFirstFileA", pattern, buffer);
+    win_call("FindFirstFileW", windows_wide_string(pattern), buffer);
     let handle: u64 = getreg(rax);
     if (handle == 18446744073709551615) { return result; }
     while (true) {
         if ((load32(ptr(buffer)) & 16) != 0) {
-            let name: str = cstr_to_str(ptr(buffer) + 44);
+            let name: str = windows_utf8_string(ptr(buffer) + 44, -1);
             if (name != "." && name != "..") { array_append(result, name); }
         }
-        win_call("FindNextFileA", handle, buffer);
+        win_call("FindNextFileW", handle, buffer);
         let next: u64 = getreg(rax);
         if (next == 0) { break; }
     }

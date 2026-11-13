@@ -47,7 +47,7 @@ fn file_open(path: str, flags: i32, mode: i32) -> i32 {
         }
     }
 
-    win_call("CreateFileA", path, access, 3, 0, create_disp, 128, 0);
+    win_call("CreateFileW", windows_wide_string(path), access, 3, 0, create_disp, 128, 0);
     let h: u64 = getreg(rax);
     // INVALID_HANDLE_VALUE = -1 (0xFFFFFFFFFFFFFFFF)
     let invalid: u64 = 18446744073709551615;
@@ -74,6 +74,8 @@ fn file_read(fd: i32, buf_addr: u64, count: i32) -> i32 {
     let bytes_read: i32 = 0;
     let br_addr: u64 = &bytes_read;
     win_call("ReadFile", h, buf_addr, count, br_addr, 0);
+    let ok: u64 = getreg(rax);
+    if (ok == 0) { return -1; }
     return bytes_read;
 }
 
@@ -82,6 +84,8 @@ fn file_write(fd: i32, buf_addr: u64, count: i32) -> i32 {
     let bytes_written: i32 = 0;
     let bw_addr: u64 = &bytes_written;
     win_call("WriteFile", h, buf_addr, count, bw_addr, 0);
+    let ok: u64 = getreg(rax);
+    if (ok == 0) { return -1; }
     return bytes_written;
 }
 
@@ -91,17 +95,20 @@ fn file_write_str(fd: i32, s: str) -> i32 {
 
 fn file_seek(fd: i32, offset: u64, whence: i32) -> i64 {
     let h: u64 = i32_to_u64(fd);
-    // SetFilePointer: whence mapping: 0=BEGIN, 1=CURRENT, 2=END
-    let off_low: i32 = u64_to_i32(offset);
-    win_call("SetFilePointer", h, off_low, 0, whence);
-    let pos: u64 = getreg(rax);
-    return u64_to_i64(pos);
+    let position: i64 = 0;
+    win_call("SetFilePointerEx", h, offset, &position, whence);
+    let ok: u64 = getreg(rax);
+    if (ok == 0) { return -1; }
+    return position;
 }
 
 fn file_size(fd: i32) -> u64 {
     let h: u64 = i32_to_u64(fd);
-    win_call("GetFileSize", h, 0);
-    return getreg(rax);
+    let size: u64 = 0;
+    win_call("GetFileSizeEx", h, &size);
+    let ok: u64 = getreg(rax);
+    if (ok == 0) { return 18446744073709551615; }
+    return size;
 }
 
 // ---------------------------------------------------------------------------
@@ -198,7 +205,7 @@ fn path_basename(path: str) -> str {
 // ---------------------------------------------------------------------------
 
 fn sys_mkdir(path: str, mode: i32) -> i32 {
-    win_call("CreateDirectoryA", path, 0);
+    win_call("CreateDirectoryW", windows_wide_string(path), 0);
     let ok: u64 = getreg(rax);
     if (ok == 0) { return -1; }
     return 0;
@@ -206,12 +213,12 @@ fn sys_mkdir(path: str, mode: i32) -> i32 {
 
 fn sys_chmod(path: str, mode: i32) -> i32 {
     // Windows doesn't have POSIX chmod; use SetFileAttributesA
-    win_call("SetFileAttributesA", path, 128);  // FILE_ATTRIBUTE_NORMAL
+    win_call("SetFileAttributesW", windows_wide_string(path), 128);  // FILE_ATTRIBUTE_NORMAL
     return 0;
 }
 
 fn file_exists(path: str) -> bool {
-    win_call("GetFileAttributesA", path);
+    win_call("GetFileAttributesW", windows_wide_string(path));
     let attr: u64 = getreg(rax);
     // INVALID_FILE_ATTRIBUTES = 0xFFFFFFFF
     if (attr == 4294967295) { return false; }
@@ -219,7 +226,7 @@ fn file_exists(path: str) -> bool {
 }
 
 fn file_delete(path: str) -> i32 {
-    win_call("DeleteFileA", path);
+    win_call("DeleteFileW", windows_wide_string(path));
     let ok: u64 = getreg(rax);
     if (ok == 0) { return -1; }
     return 0;
@@ -277,7 +284,7 @@ fn file_append(path: str, content: str) -> i32 {
 // ---------------------------------------------------------------------------
 
 fn file_chdir(path: str) -> i32 {
-    win_call("SetCurrentDirectoryA", path);
+    win_call("SetCurrentDirectoryW", windows_wide_string(path));
     let ok: u64 = getreg(rax);
     if (ok == 0) { return -1; }
     return 0;
@@ -288,7 +295,7 @@ fn file_chdir(path: str) -> i32 {
 // ---------------------------------------------------------------------------
 
 fn file_rename(old_path: str, new_path: str) -> i32 {
-    win_call("MoveFileA", old_path, new_path);
+    win_call("MoveFileW", windows_wide_string(old_path), windows_wide_string(new_path));
     let ok: u64 = getreg(rax);
     if (ok == 0) { return -1; }
     return 0;
@@ -299,7 +306,7 @@ fn file_rename(old_path: str, new_path: str) -> i32 {
 // ---------------------------------------------------------------------------
 
 fn dir_exists(path: str) -> bool {
-    win_call("GetFileAttributesA", path);
+    win_call("GetFileAttributesW", windows_wide_string(path));
     let attr: u64 = getreg(rax);
     if (attr == 4294967295) { return false; }
     // FILE_ATTRIBUTE_DIRECTORY = 0x10
@@ -330,7 +337,7 @@ fn mkdirp(path: str) -> i32 {
 // ---------------------------------------------------------------------------
 
 fn file_copy(src_path: str, dst_path: str) -> i32 {
-    win_call("CopyFileA", src_path, dst_path, 0);
+    win_call("CopyFileW", windows_wide_string(src_path), windows_wide_string(dst_path), 0);
     let ok: u64 = getreg(rax);
     if (ok == 0) { return -1; }
     return 0;

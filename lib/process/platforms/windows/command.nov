@@ -59,7 +59,7 @@ fn process_run(executable: str, arguments: []str, capture_stdout: bool, capture_
         if (capture_stderr) { error_handle = write_handle; }
         store64(ptr(startup) + 96, error_handle);
     }
-    win_call("CreateProcessA", executable, line, 0, 0, capture, 0, 0, 0, startup, process);
+    win_call("CreateProcessW", windows_wide_string(executable), windows_wide_string(line), 0, 0, capture, 0, 0, 0, startup, process);
     let created: u64 = getreg(rax);
     if (capture) { win_call("CloseHandle", write_handle); }
     if (created == 0) {

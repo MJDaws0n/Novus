@@ -1,5 +1,6 @@
 // std/platforms/windows/common - Windows platform dispatcher
 module std_windows;
+import unicode;
 
 #if(arch == "amd64") {
     import amd64;
