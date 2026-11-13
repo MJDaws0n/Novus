@@ -2,6 +2,8 @@
 """Build three compiler generations and verify the native runtime suite."""
 import argparse
 import hashlib
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from functools import partial
 import json
 import os
 from pathlib import Path
@@ -10,6 +12,8 @@ import shutil
 import subprocess
 import sys
 import time
+import threading
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
@@ -29,6 +33,16 @@ work = ROOT / "build" / "selfhost" / f"{target_os}_{artifact_arch}"
 work.mkdir(parents=True, exist_ok=True)
 report = {"target": target, "stages": [], "tests": []}
 flags = [f"--target={target}", "--heap-size=1g", "--gc-entries=8388608"]
+
+def source_digest():
+    digest = hashlib.sha256()
+    paths = [ROOT / "main.nov", *sorted((ROOT / "src").glob("*.nov")), *sorted((ROOT / "lib").rglob("*.nov"))]
+    for path in paths:
+        digest.update(str(path.relative_to(ROOT)).encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+report["source_sha256"] = source_digest()
 
 def run(command, name, timeout=600, expected=0, cwd=ROOT, env=None):
     started = time.perf_counter()
@@ -55,6 +69,8 @@ try:
         previous_assembly = None
         for stage in range(1, 4):
             elapsed = run([compiler, *flags, "main.nov"], f"stage{stage}", timeout=1200)
+            if source_digest() != report["source_sha256"]:
+                raise RuntimeError("Compiler sources changed during verification; restart with a stable source tree")
             produced = output / ("novus" + extension)
             if not produced.is_file():
                 raise RuntimeError(f"stage {stage} did not produce an executable")
@@ -81,6 +97,8 @@ try:
                 ("tests/selfhost/time_memory.nov", "time_memory"),
                 ("tests/selfhost/libraries.nov", "library_smoke"),
                 ("tests/selfhost/numeric_features.nov", "numeric_features"),
+                ("tests/selfhost/float_rounding.nov", "float_rounding"),
+                ("tests/selfhost/float_literals.nov", "float_literals"),
                 ("tests/selfhost/process_child.nov", "process_child"),
                 ("tests/selfhost/platform_libraries.nov", "platform_libraries")]
     for source, name in fixtures:
@@ -99,6 +117,25 @@ try:
     run([compiler, f"--target={target}", "--gc-entries=1024", "tests/selfhost/gc_graph.nov"], "gc-small-table-build")
     run([output / ("gc_graph" + extension)], "gc-small-table-run", timeout=60)
     report["tests"].append({"name": "gc-small-table", "passed": True})
+    run([compiler, f"--target={target}", "tests/selfhost/download_archive.nov"], "download-archive-build")
+    downloads = work / "download-fixtures"
+    downloads.mkdir(exist_ok=True)
+    with zipfile.ZipFile(downloads / "fixture.zip", "w") as archive:
+        archive.writestr("nested/message.txt", "download and archive passed\n")
+    class QuietHandler(SimpleHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(QuietHandler, directory=str(downloads)))
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    try:
+        run([output / ("download_archive" + extension), f"http://127.0.0.1:{server.server_port}", downloads], "download-archive-run", timeout=60)
+    finally:
+        server.shutdown()
+        server.server_close()
+        server_thread.join()
+    report["tests"].append({"name": "download-archive", "passed": True})
+    print("PASS download and archive libraries", flush=True)
     if not args.test_only and not args.bootstrap:
         run([sys.executable, ROOT / "scripts" / "differential.py", "--reference", work / ("bootstrap-go" + extension),
              "--compiler", compiler, "--target", target], "differential", timeout=600)

@@ -111,22 +111,98 @@ fn format_signed(value: i64, base: i32 = 10) -> str {
     return format_unsigned(magnitude, base);
 }
 
+// Little-endian base-2^32 integers used for correctly rounded decimal input.
+// Limbs are kept in u64 slots so multiply-by-ten and subtraction cannot overflow.
+fn decimal_trim(value: []u64) -> void {
+    while (len(value) > 1 && value[len(value) - 1] == 0) { array_pop(value); }
+}
+fn decimal_multiply(value: []u64, multiplier: u64, carried_bits: u64 = 0) -> void {
+    for (let i: i32 = 0; i < len(value); i++) {
+        let product: u64 = value[i] * multiplier + carried_bits;
+        value[i] = product & 4294967295;
+        carried_bits = product >> 32;
+    }
+    if (carried_bits != 0) { array_append(value, carried_bits); }
+}
+fn decimal_shift(value: []u64, count: i32) -> []u64 {
+    let result: []u64 = [];
+    for (let i: i32 = 0; i < count / 32; i++) { array_append(result, 0); }
+    let bits: u64 = i32_to_u64(count % 32);
+    let carried_bits: u64 = 0;
+    for (let i: i32 = 0; i < len(value); i++) {
+        let shifted: u64 = (value[i] << bits) | carried_bits;
+        array_append(result, shifted & 4294967295);
+        carried_bits = shifted >> 32;
+    }
+    if (carried_bits != 0) { array_append(result, carried_bits); }
+    decimal_trim(result);
+    return result;
+}
+fn decimal_compare(a: []u64, b: []u64) -> i32 {
+    if (len(a) < len(b)) { return -1; }
+    if (len(a) > len(b)) { return 1; }
+    for (let i: i32 = len(a) - 1; i >= 0; i--) {
+        if (a[i] < b[i]) { return -1; }
+        if (a[i] > b[i]) { return 1; }
+    }
+    return 0;
+}
+fn decimal_subtract(a: []u64, b: []u64) -> void {
+    let borrow: u64 = 0;
+    for (let i: i32 = 0; i < len(a); i++) {
+        let part: u64 = borrow;
+        if (i < len(b)) { part += b[i]; }
+        borrow = 0;
+        if (a[i] < part) { borrow = 1; }
+        a[i] = (a[i] - part) & 4294967295;
+    }
+    decimal_trim(a);
+}
+fn decimal_bit_length(value: []u64) -> i32 {
+    let result: i32 = (len(value) - 1) * 32;
+    let high: u64 = value[len(value) - 1];
+    while (high != 0) { high = high >> 1; result++; }
+    return result;
+}
+fn decimal_rounded_quotient(numerator: []u64, denominator: []u64) -> u64 {
+    let quotient: u64 = 0;
+    let one: u64 = 1;
+    let remainder: []u64 = decimal_shift(numerator, 0);
+    let bits: i32 = decimal_bit_length(numerator) - decimal_bit_length(denominator);
+    for (let i: i32 = bits; i >= 0; i--) {
+        let shifted: []u64 = decimal_shift(denominator, i);
+        if (decimal_compare(remainder, shifted) >= 0) {
+            decimal_subtract(remainder, shifted);
+            quotient = quotient | (one << i32_to_u64(i));
+        }
+    }
+    let rounding: i32 = decimal_compare(decimal_shift(remainder, 1), denominator);
+    if (rounding > 0 || (rounding == 0 && (quotient & 1) != 0)) { quotient++; }
+    return quotient;
+}
+
 fn parse_float(text: str) -> ParsedFloat {
     let result: ParsedFloat = new ParsedFloat();
     let index: i32 = 0;
     let size: i32 = len(text);
-    let negative: bool = false;
+    let sign: u64 = 0;
     if (size > 0 && (byte_at(text, 0) == 43 || byte_at(text, 0) == 45)) {
-        negative = byte_at(text, 0) == 45; index++;
+        if (byte_at(text, 0) == 45) { sign = 9223372036854775808; }
+        index++;
     }
     let any: bool = false;
     let decimal: bool = false;
+    let nonzero: bool = false;
+    let significant: i32 = 0;
     let exponent: i32 = 0;
+    let numerator: []u64 = [0];
     for (; index < size; index++) {
         let ch: i32 = byte_at(text, index);
         if (ch == 46 && !decimal) { decimal = true; }
         else if (ch >= 48 && ch <= 57) {
-            result.value = result.value * 10.0 + i64_to_f64(to_i64(ch - 48));
+            decimal_multiply(numerator, 10, i32_to_u64(ch - 48));
+            if (ch != 48) { nonzero = true; }
+            if (nonzero) { significant++; }
             if (decimal) { exponent--; }
             any = true;
         } else if (ch == 95 && index > 0 && index + 1 < size && is_digit(byte_at(text, index - 1)) && is_digit(byte_at(text, index + 1))) {
@@ -134,19 +210,61 @@ fn parse_float(text: str) -> ParsedFloat {
         } else { break; }
     }
     if (index < size && (byte_at(text, index) == 101 || byte_at(text, index) == 69)) {
-        let parsed: ParsedInteger = parse_integer(substr(text, index + 1), 10, 32);
-        if (parsed.error != "") { result.error = parsed.error; return result; }
-        exponent += to_i32(parsed.value);
-        index = size;
+        index++;
+        let negative_exponent: bool = false;
+        if (index < size && (byte_at(text, index) == 43 || byte_at(text, index) == 45)) {
+            negative_exponent = byte_at(text, index) == 45;
+            index++;
+        }
+        let exponent_digits: bool = false;
+        let adjustment: i32 = 0;
+        for (; index < size; index++) {
+            let ch: i32 = byte_at(text, index);
+            if (ch >= 48 && ch <= 57) {
+                if (adjustment < 1000000) { adjustment = adjustment * 10 + ch - 48; }
+                exponent_digits = true;
+            } else if (ch == 95 && index > 0 && index + 1 < size && is_digit(byte_at(text, index - 1)) && is_digit(byte_at(text, index + 1))) {
+                continue;
+            } else { break; }
+        }
+        if (!exponent_digits) { result.error = "invalid floating-point syntax"; return result; }
+        if (negative_exponent) { adjustment = 0 - adjustment; }
+        exponent += adjustment;
     }
     if (!any || index != size) { result.error = "invalid floating-point syntax"; return result; }
-    if (exponent > 308 || exponent < -400) {
-        if (exponent > 308) { result.error = "floating-point value out of range"; }
-        else { result.value = 0.0; }
+    if (!nonzero || significant + exponent < -324) {
+        result.value = f64_from_bits(u64_to_i64(sign));
         return result;
     }
-    while (exponent > 0) { result.value *= 10.0; exponent--; }
-    while (exponent < 0) { result.value /= 10.0; exponent++; }
-    if (negative) { result.value = 0.0 - result.value; }
+    if (significant + exponent > 309) {
+        result.value = f64_from_bits(u64_to_i64(sign | 9218868437227405312));
+        result.error = "floating-point value out of range";
+        return result;
+    }
+    let denominator: []u64 = [1];
+    while (exponent > 0) { decimal_multiply(numerator, 10); exponent--; }
+    while (exponent < 0) { decimal_multiply(denominator, 10); exponent++; }
+    let binary_exponent: i32 = decimal_bit_length(numerator) - decimal_bit_length(denominator);
+    if (binary_exponent >= 0) {
+        if (decimal_compare(numerator, decimal_shift(denominator, binary_exponent)) < 0) { binary_exponent--; }
+    } else {
+        if (decimal_compare(decimal_shift(numerator, 0 - binary_exponent), denominator) < 0) { binary_exponent--; }
+    }
+    let shift: i32 = 52 - binary_exponent;
+    if (binary_exponent < -1022) { shift = 1074; }
+    if (shift >= 0) { numerator = decimal_shift(numerator, shift); }
+    else { denominator = decimal_shift(denominator, 0 - shift); }
+    let mantissa: u64 = decimal_rounded_quotient(numerator, denominator);
+    let bits: u64 = mantissa;
+    if (binary_exponent >= -1022) {
+        if (mantissa == 9007199254740992) { mantissa = mantissa >> 1; binary_exponent++; }
+        if (binary_exponent > 1023) {
+            result.value = f64_from_bits(u64_to_i64(sign | 9218868437227405312));
+            result.error = "floating-point value out of range";
+            return result;
+        }
+        bits = (i32_to_u64(binary_exponent + 1023) << 52) | (mantissa - 4503599627370496);
+    }
+    result.value = f64_from_bits(u64_to_i64(sign | bits));
     return result;
 }

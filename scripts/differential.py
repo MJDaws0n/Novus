@@ -26,6 +26,8 @@ for source in sorted((ROOT / "legacy-go" / "internal").rglob("*_test.go")):
         program = match.group(1)
         if len(program) < 15000 and not re.search(r"\bimport\s", program):
             fixtures.setdefault(program, str(source.relative_to(ROOT)))
+for source in (ROOT / "tests" / "selfhost" / "float_literals.nov",):
+    fixtures[source.read_text()] = str(source.relative_to(ROOT))
 
 results = []
 for index, (program, origin) in enumerate(fixtures.items()):
