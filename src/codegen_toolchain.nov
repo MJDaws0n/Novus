@@ -114,7 +114,8 @@ fn codegen_Toolchain_assembleNASM(tc: CodegenToolchain) -> str {
     if ((tc.NASMPath != "")) {
         nasmBin = tc.NASMPath;
     }
-    let cmd: ProcessCommand = runtime_os_exec_Command(nasmBin, ["-f", fmtArg, "-o", tc.ObjFile, tc.AsmFile]);
+    // Keep generated branches long so large modules need no relaxation loop.
+    let cmd: ProcessCommand = runtime_os_exec_Command(nasmBin, ["-O1", "-f", fmtArg, "-o", tc.ObjFile, tc.AsmFile]);
     return codegen_Toolchain_runCmd(tc, cmd, "assemble (nasm)");
 }
 

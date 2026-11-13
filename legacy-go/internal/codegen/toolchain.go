@@ -135,7 +135,10 @@ func (tc *Toolchain) assembleNASM() error {
 		nasmBin = tc.NASMPath
 	}
 
-	cmd := exec.Command(nasmBin, "-f", fmtArg, "-o", tc.ObjFile, tc.AsmFile)
+	// Bound assembler work for large generated modules. NASM's default -Ox
+	// repeatedly relaxes branches; -O1 keeps long branches and still shortens
+	// immediate operands, without the costly convergence loop.
+	cmd := exec.Command(nasmBin, "-O1", "-f", fmtArg, "-o", tc.ObjFile, tc.AsmFile)
 	return tc.runCmd(cmd, "assemble (nasm)")
 }
 
