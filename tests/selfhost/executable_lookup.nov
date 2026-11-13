@@ -1,0 +1,11 @@
+module executable_lookup;
+import ../../lib/std;
+import ../../lib/file_io;
+import ../../lib/process;
+fn main(argc: i32, argv: u64) -> i32 {
+    if (argc != 4) { return 1; }
+    if (find_executable("novus-path-probe") != argv_get(argv, 1)) { return 2; }
+    if (find_executable(argv_get(argv, 2)) != "") { return 3; }
+    if (find_executable(argv_get(argv, 3)) != "") { return 4; }
+    return 0;
+}

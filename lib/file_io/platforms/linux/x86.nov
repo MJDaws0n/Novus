@@ -355,3 +355,14 @@ fn path_join(a: str, b: str) -> str {
     }
     return a + "/" + b;
 }
+
+
+fn file_execute_access(path: str) -> bool {
+    mov(eax, 33);      // SYS_access
+    mov(ebx, path);
+    mov(ecx, 1);       // X_OK
+    int(128);
+    let result: i32 = u64_to_i32(getreg(eax));
+    if (result == 0) { return true; }
+    return false;
+}

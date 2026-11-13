@@ -17,7 +17,7 @@ class ProcessCommand {
 
 fn find_executable(name: str) -> str {
     if (str_contains(name, "/") || str_contains(name, "\\")) {
-        if (file_info(name).exists) { return name; }
+        if (executable_file(name)) { return name; }
         return "";
     }
     let search: str = environment_value("PATH");
@@ -26,15 +26,13 @@ fn find_executable(name: str) -> str {
     let directories: []str = string_split(search, separator);
     for (let i: i32 = 0; i < len(directories); i++) {
         let candidate: str = path_join_all([directories[i], name]);
-        let info: FileInfo = file_info(candidate);
-        if (info.exists && !info.directory) { return candidate; }
+        if (executable_file(candidate)) { return candidate; }
         if (path_separator() == "\\") {
             let extensions: []str = string_split(environment_value("PATHEXT"), ";");
             if (len(extensions) == 0 || extensions[0] == "") { extensions = [".COM", ".EXE", ".BAT", ".CMD"]; }
             for (let j: i32 = 0; j < len(extensions); j++) {
                 candidate = path_join_all([directories[i], name + extensions[j]]);
-                info = file_info(candidate);
-                if (info.exists && !info.directory) { return candidate; }
+                if (executable_file(candidate)) { return candidate; }
             }
         }
     }
@@ -58,4 +56,17 @@ fn command_run(command: ProcessCommand, capture: bool) -> ProcessResult {
     let result: ProcessResult = process_run(executable, command.Args, capture || command.Stdout != null, command.Stderr != null);
     if (command.Stdout != null) { command.Stdout.append(result.output); }
     return result;
+}
+
+#if(os != "windows") {
+    fn executable_file(path: str) -> bool {
+        let info: FileInfo = file_info(path);
+        return info.exists && !info.directory && file_execute_access(path);
+    }
+}
+#if(os == "windows") {
+    fn executable_file(path: str) -> bool {
+        let info: FileInfo = file_info(path);
+        return info.exists && !info.directory;
+    }
 }

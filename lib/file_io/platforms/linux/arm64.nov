@@ -381,3 +381,16 @@ fn path_join(a: str, b: str) -> str {
     }
     return a + "/" + b;
 }
+
+
+fn file_execute_access(path: str) -> bool {
+    mov(x0, at_fdcwd());  // AT_FDCWD
+    mov(x1, path);
+    mov(x2, 1);        // X_OK
+    mov(x3, 0);        // flags
+    mov(x8, 48);       // SYS_faccessat
+    syscall();
+    let result: i32 = u64_to_i32(getreg(x0));
+    if (result == 0) { return true; }
+    return false;
+}

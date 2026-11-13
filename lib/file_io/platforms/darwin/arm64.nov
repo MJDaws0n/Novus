@@ -397,3 +397,14 @@ fn canonical_path(path: str) -> PathResult {
 }
 
 fn working_directory() -> PathResult { return canonical_path("."); }
+
+
+fn file_execute_access(path: str) -> bool {
+    mov(x0, path);
+    mov(x1, 1);
+    mov(x16, 0x2000021);
+    syscall();
+    let result: i32 = u64_to_i32(getreg(x0));
+    if (result == 0) { return true; }
+    return false;
+}

@@ -15,7 +15,7 @@ fn download_file(url: str, destination: str) -> str {
 
 #if(os == "windows") {
     fn download_to_file(url: str, destination: str) -> str {
-        win_call("URLDownloadToFileA", 0, url, destination, 0, 0);
+        win_call("URLDownloadToFileW", 0, windows_wide_string(url), windows_wide_string(destination), 0, 0);
         let status: i32 = u64_to_i32(getreg(rax));
         if (status != 0) { return "download failed: " + url; }
         return "";

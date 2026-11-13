@@ -295,7 +295,7 @@ fn file_chdir(path: str) -> i32 {
 // ---------------------------------------------------------------------------
 
 fn file_rename(old_path: str, new_path: str) -> i32 {
-    win_call("MoveFileW", windows_wide_string(old_path), windows_wide_string(new_path));
+    win_call("MoveFileExW", windows_wide_string(old_path), windows_wide_string(new_path), 1);
     let ok: u64 = getreg(rax);
     if (ok == 0) { return -1; }
     return 0;

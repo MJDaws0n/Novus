@@ -125,6 +125,25 @@ try:
         report["tests"].append({"name": name, "passed": True, "seconds": elapsed})
         record()
         print(f"PASS {name}", flush=True)
+    unicode_source = work / "source café 東京 😀"
+    shutil.copytree(ROOT / "tests" / "classes", unicode_source, dirs_exist_ok=True)
+    run([compiler, f"--target={target}", unicode_source / "main.nov"], "unicode-source-build")
+    run([output / ("classes" + extension)], "unicode-source-run", timeout=60)
+    report["tests"].append({"name": "unicode-source-imports", "passed": True})
+    print("PASS Unicode source paths and imports", flush=True)
+    if target_os != "windows":
+        run([compiler, f"--target={target}", "tests/selfhost/executable_lookup.nov"], "executable-lookup-build")
+        blocked, ready = work / "path-blocked", work / "path-ready"
+        for folder in (blocked, ready):
+            folder.mkdir(exist_ok=True)
+            (folder / "novus-path-probe").write_text("#!/bin/sh\nexit 0\n")
+        (blocked / "novus-path-probe").chmod(0o644)
+        (ready / "novus-path-probe").chmod(0o755)
+        lookup_env = os.environ.copy()
+        lookup_env["PATH"] = os.pathsep.join((str(blocked), str(ready), lookup_env.get("PATH", "")))
+        run([output / "executable_lookup", ready / "novus-path-probe", blocked, blocked / "novus-path-probe"], "executable-lookup-run", env=lookup_env)
+        report["tests"].append({"name": "executable-permissions", "passed": True})
+        print("PASS executable lookup permissions", flush=True)
     run([compiler, f"--target={target}", "--gc-entries=1024", "tests/selfhost/gc_graph.nov"], "gc-small-table-build")
     run([output / ("gc_graph" + extension)], "gc-small-table-run", timeout=60)
     report["tests"].append({"name": "gc-small-table", "passed": True})
