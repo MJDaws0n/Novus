@@ -1,0 +1,46 @@
+module compiler_collections;
+import ../../src/model;
+
+fn main() -> i32 {
+    initialize_compiler();
+    let names: MapStrI32 = new MapStrI32();
+    let numbers: MapI32Bool = new MapI32Bool();
+    for (let i: i32 = 0; i < 400; i++) {
+        MapStrI32_put(names, "identifier_" + i32_to_str(i), i * 7);
+        // These keys deliberately collide in every small bucket table.
+        MapI32Bool_put(numbers, i * 1024, i % 2 == 0);
+    }
+    MapStrI32_put(names, "identifier_0", 0);
+    if (!MapStrI32_has(names, "identifier_0") || MapStrI32_has(names, "missing")) { return 1; }
+    if (MapStrI32_length(names) != 400 || MapI32Bool_length(numbers) != 400) { return 2; }
+    for (let i: i32 = 0; i < 400; i++) {
+        if (MapStrI32_get(names, "identifier_" + i32_to_str(i)) != i * 7) { return 3; }
+        if (!MapI32Bool_has(numbers, i * 1024) || MapI32Bool_get(numbers, i * 1024) != (i % 2 == 0)) { return 4; }
+        if (names.keys[i] != "identifier_" + i32_to_str(i)) { return 5; }
+    }
+    for (let i: i32 = 0; i < 400; i += 3) {
+        MapStrI32_delete(names, "identifier_" + i32_to_str(i));
+        MapI32Bool_delete(numbers, i * 1024);
+    }
+    gc_collect();
+    for (let i: i32 = 0; i < 400; i++) {
+        if (MapStrI32_has(names, "identifier_" + i32_to_str(i)) != (i % 3 != 0)) { return 6; }
+        if (MapI32Bool_has(numbers, i * 1024) != (i % 3 != 0)) { return 7; }
+    }
+    for (let i: i32 = 0; i < 400; i++) {
+        MapStrI32_delete(names, "identifier_" + i32_to_str(i));
+        MapI32Bool_delete(numbers, i * 1024);
+    }
+    if (MapStrI32_length(names) != 0 || MapI32Bool_length(numbers) != 0) { return 8; }
+    MapStrI32_put(names, "again", 91);
+    MapI32Bool_put(numbers, -1, false);
+    if (MapStrI32_get(names, "again") != 91 || !MapI32Bool_has(numbers, -1)) { return 9; }
+    let first: AstNode = new AstNode();
+    let second: AstNode = new AstNode();
+    first.Args = append_Astnode(first.Args, second);
+    second.Stmts = extend_Astnode(second.Stmts, [first]);
+    if (len(second.Args) != 0 || len(first.Stmts) != 0) { return 10; }
+    if (len(first.Args) != 1 || first.Args[0] != second || second.Stmts[0] != first) { return 11; }
+    print("compiler collections passed");
+    return 0;
+}

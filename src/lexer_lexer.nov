@@ -72,7 +72,7 @@ fn lexer_Lex(input: str) -> ResultArraylexertokenArraylexerlexerror {
                 col = assigned_631;
                 errors = extend_Lexerlexerror(errors, errs);
                 if ((tok != null)) {
-                    tokens = append_Lexertoken(tokens, copy_LexerToken(tok));
+                    tokens = append_Lexertoken(tokens, tok);
                 }
                 continue;
             }
@@ -81,7 +81,7 @@ fn lexer_Lex(input: str) -> ResultArraylexertokenArraylexerlexerror {
                 let tok: LexerToken = result_632.value0;
                 let newI: i32 = result_632.value1;
                 let newCol: i32 = result_632.value2;
-                tokens = append_Lexertoken(tokens, copy_LexerToken(tok));
+                tokens = append_Lexertoken(tokens, tok);
                 let assigned_633: i32 = newI;
                 let assigned_634: i32 = newCol;
                 i = assigned_633;
@@ -93,7 +93,7 @@ fn lexer_Lex(input: str) -> ResultArraylexertokenArraylexerlexerror {
                 let tok: LexerToken = result_635.value0;
                 let newI: i32 = result_635.value1;
                 let newCol: i32 = result_635.value2;
-                tokens = append_Lexertoken(tokens, copy_LexerToken(tok));
+                tokens = append_Lexertoken(tokens, tok);
                 let assigned_636: i32 = newI;
                 let assigned_637: i32 = newCol;
                 i = assigned_636;
@@ -105,7 +105,7 @@ fn lexer_Lex(input: str) -> ResultArraylexertokenArraylexerlexerror {
                 let tok: LexerToken = result_638.value0;
                 let width: i32 = result_638.value1;
                 if ((width > 0)) {
-                    tokens = append_Lexertoken(tokens, copy_LexerToken(tok));
+                    tokens = append_Lexertoken(tokens, tok);
                     i = (i + width);
                     col = (col + width);
                     continue;

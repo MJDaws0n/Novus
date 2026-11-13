@@ -55,7 +55,7 @@ fn codegen_Generate(program: AstNode, opts: CodegenOptions) -> ResultCodegenresu
         runtime_print(("[codegen] Lowering AST to IR..."));
     }
     let irMod: CodegenIRModule = codegen_Lower(program, target);
-    result.IRDump = codegen_IRModule_DebugDump(irMod);
+    if (!opts.SkipIRDump) { result.IRDump = codegen_IRModule_DebugDump(irMod); }
     if (opts.Verbose) {
         runtime_print((result.IRDump));
     }

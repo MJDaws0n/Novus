@@ -218,6 +218,7 @@ fn driver_run() -> i32 {
     driver_printDebug("Starting code generation...");
     let codegenOpts: CodegenOptions = codegen_DefaultOptions();
     codegenOpts.Verbose = CompilerState.driver_debugMode;
+    codegenOpts.SkipIRDump = !CompilerState.driver_debugMode;
     {
         let items_41: []str = slice_Str(CompilerState.arguments, 1, len(CompilerState.arguments));
         let count_43: i32 = len(items_41);
@@ -384,7 +385,7 @@ fn driver_printTokens(tokens: []LexerToken) -> void {
         let items_68: []LexerToken = tokens;
         let count_70: i32 = len(items_68);
         for (let index_69: i32 = 0; index_69 < count_70; index_69++) {
-            let token: LexerToken = copy_LexerToken(items_68[index_69]);
+            let token: LexerToken = items_68[index_69];
             runtime_print_raw(("[DEBUG] Token: " + token.Type + ", Value: " + token.Value + ", Line: " + runtime_string_i32(token.Line) + ", Column: " + runtime_string_i32(token.Column) + "\n"));
         }
     }
@@ -412,13 +413,13 @@ fn driver_fileExists(filePath: str) -> bool {
 * @return The content of the file as a string, or an error if the file cannot be read.
  */
 fn driver_getFileContent(filePath: str) -> ResultStrStr {
-    let result_72: ResultArrayi32Str = runtime_os_ReadFile(filePath);
-    let content: []i32 = result_72.value0;
+    let result_72: ResultStrStr = runtime_os_ReadText(filePath);
+    let content: str = result_72.value0;
     let err: str = result_72.value1;
     if ((err != "")) {
         return make_ResultStrStr("", err);
     }
-    return make_ResultStrStr(runtime_bytes_to_string(content), "");
+    return make_ResultStrStr(content, "");
 }
 
 // parseSize parses a size string like "64m", "128M", "1g", "67108864" into bytes.

@@ -10,7 +10,7 @@ fn codegen_NewToolchain(target: CodegenTarget, buildDir: str, baseName: str) -> 
 
 // WriteAssembly writes the assembly string to the .s/.asm file.
 fn codegen_Toolchain_WriteAssembly(tc: CodegenToolchain, asm: str) -> str {
-    return runtime_os_WriteFile(tc.AsmFile, runtime_string_to_bytes(asm), 420);
+    return write_all_text(tc.AsmFile, asm);
 }
 
 // Assemble invokes the assembler to produce an object file from the assembly.

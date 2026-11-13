@@ -4,7 +4,7 @@ import model;
 import runtime;
 
 fn semantic_Analyzer_classError(a: SemanticAnalyzer, pos: AstPosition, message: str) -> void {
-    semantic_Analyzer_error(a, copy_AstPosition(pos), message);
+    semantic_Analyzer_error(a, pos, message);
     a.diagnostics[(len(a.diagnostics) - 1)].classRelated = true;
 }
 
@@ -18,7 +18,7 @@ fn semantic_Analyzer_collectClasses(a: SemanticAnalyzer, prog: AstNode) -> void 
             let class_value: SemanticClassInfo = make_SemanticClassInfo_83(decl, new MapStrSemanticfieldinfo(), new MapStrArraysemanticmethodinfo());
             class_value.typ = make_SemanticType_84(decl.Name, class_value, ("_novus_type_" + runtime_string_i32(i)));
             MapAstnodeSemanticclassinfo_put(a.classDecls, decl, class_value);
-            semantic_Analyzer_bindClass(a, decl.SourceFile, decl.Name, class_value, copy_AstPosition(decl.Pos));
+            semantic_Analyzer_bindClass(a, decl.SourceFile, decl.Name, class_value, decl.Pos);
         }
     }
     {
@@ -32,7 +32,7 @@ fn semantic_Analyzer_collectClasses(a: SemanticAnalyzer, prog: AstNode) -> void 
                 let count_665: i32 = len(items_663);
                 for (let index_664: i32 = 0; index_664 < count_665; index_664++) {
                     let binding: AstClassBinding = copy_AstClassBinding(items_663[index_664]);
-                    semantic_Analyzer_bindClass(a, file, binding.Name, MapAstnodeSemanticclassinfo_get(a.classDecls, binding.Class), copy_AstPosition(binding.Pos));
+                    semantic_Analyzer_bindClass(a, file, binding.Name, MapAstnodeSemanticclassinfo_get(a.classDecls, binding.Class), binding.Pos);
                 }
             }
         }
@@ -47,7 +47,7 @@ fn semantic_Analyzer_bindClass(a: SemanticAnalyzer, file: str, name: str, class_
         let existing: SemanticClassInfo = MapStrSemanticclassinfo_get(MapStrMapstrsemanticclassinfo_get(a.classes, file), name);
         if ((existing != null)) {
             if ((existing != class_value)) {
-                semantic_Analyzer_classError(a, copy_AstPosition(pos), ("class name " + runtime_quote(name) + " is ambiguous or already declared"));
+                semantic_Analyzer_classError(a, pos, ("class name " + runtime_quote(name) + " is ambiguous or already declared"));
             }
             return;
         }
@@ -55,7 +55,7 @@ fn semantic_Analyzer_bindClass(a: SemanticAnalyzer, file: str, name: str, class_
     {
         let sym: SemanticSymbol = semantic_Scope_lookup(a.scope, name);
         if (((sym != null) && (((sym.Kind == 2) || (sym.Kind == 3))))) {
-            semantic_Analyzer_classError(a, copy_AstPosition(pos), ("cannot use reserved name " + runtime_quote(name) + " as a class name"));
+            semantic_Analyzer_classError(a, pos, ("cannot use reserved name " + runtime_quote(name) + " as a class name"));
         }
     }
     MapStrSemanticclassinfo_put(MapStrMapstrsemanticclassinfo_get(a.classes, file), name, class_value);
@@ -98,18 +98,18 @@ fn semantic_Analyzer_collectClassMembers(a: SemanticAnalyzer, prog: AstNode) -> 
                     let i: i32 = index_670;
                     let field: AstClassField = items_669[index_670];
                     if ((((MapStrSemanticfieldinfo_get(class_value.fields, field.Name) != null) || (field.Name == "init")) || (field.Name == "self"))) {
-                        semantic_Analyzer_classError(a, copy_AstPosition(field.Pos), ("invalid or duplicate member " + runtime_quote(field.Name) + " in class " + decl.Name));
+                        semantic_Analyzer_classError(a, field.Pos, ("invalid or duplicate member " + runtime_quote(field.Name) + " in class " + decl.Name));
                         continue;
                     }
                     let typ: SemanticType = semantic_Analyzer_resolveType(a, field.Type);
                     if ((typ == CompilerState.semantic_TypeVoid)) {
-                        semantic_Analyzer_classError(a, copy_AstPosition(field.Pos), ("field " + runtime_quote(field.Name) + " cannot have type void"));
+                        semantic_Analyzer_classError(a, field.Pos, ("field " + runtime_quote(field.Name) + " cannot have type void"));
                     }
                     let info: SemanticFieldInfo = make_SemanticFieldInfo_86(field, typ, make_AstResolvedField_85(field.Type.Name));
                     MapStrSemanticfieldinfo_put(class_value.fields, field.Name, info);
                     if (field.Static) {
                         info.storage.Global = (prefix + "_field_" + runtime_string_i32(i));
-                        prog.ClassGlobals = append_Astnode(prog.ClassGlobals, make_AstNode_87(info.storage.Global, field.Type, copy_AstPosition(field.Pos)));
+                        prog.ClassGlobals = append_Astnode(prog.ClassGlobals, make_AstNode_87(info.storage.Global, field.Type, field.Pos));
                     } else {
                         info.storage.Slot = class_value.slots;
                         class_value.slots++;
@@ -118,8 +118,8 @@ fn semantic_Analyzer_collectClassMembers(a: SemanticAnalyzer, prog: AstNode) -> 
             }
             let methods: []AstClassMethod = decl.Methods;
             if (!(semantic_hasConstructor(methods))) {
-                let pos: AstPosition = copy_AstPosition(decl.Pos);
-                methods = append_Astclassmethod(extend_Astclassmethod([], methods), make_AstClassMethod_55(make_AstNode_88("init", make_AstTypeExpr_53("void", copy_AstPosition(pos)), make_AstNode_58(copy_AstPosition(pos)), copy_AstPosition(pos), decl.SourceFile), true, true));
+                let pos: AstPosition = decl.Pos;
+                methods = append_Astclassmethod(extend_Astclassmethod([], methods), make_AstClassMethod_55(make_AstNode_88("init", make_AstTypeExpr_53("void", pos), make_AstNode_58(pos), pos, decl.SourceFile), true, true));
             }
             {
                 let items_672: []AstClassMethod = methods;
@@ -129,7 +129,7 @@ fn semantic_Analyzer_collectClassMembers(a: SemanticAnalyzer, prog: AstNode) -> 
                     let method: AstClassMethod = items_672[index_673];
                     let fn_value: AstNode = method.Fn;
                     if ((!(method.Constructor) && ((((fn_value.Name == "init") || (fn_value.Name == "self")) || (MapStrSemanticfieldinfo_get(class_value.fields, fn_value.Name) != null))))) {
-                        semantic_Analyzer_classError(a, copy_AstPosition(fn_value.Pos), ("invalid or duplicate member " + runtime_quote(fn_value.Name) + " in class " + decl.Name));
+                        semantic_Analyzer_classError(a, fn_value.Pos, ("invalid or duplicate member " + runtime_quote(fn_value.Name) + " in class " + decl.Name));
                         continue;
                     }
                     let params: []SemanticType = array_Semantictype(len(fn_value.Params));
@@ -147,7 +147,7 @@ fn semantic_Analyzer_collectClassMembers(a: SemanticAnalyzer, prog: AstNode) -> 
                                 defaultCount++;
                             } else {
                                 if ((defaultCount != 0)) {
-                                    semantic_Analyzer_classError(a, copy_AstPosition(param.Pos), "required parameter follows a default parameter");
+                                    semantic_Analyzer_classError(a, param.Pos, "required parameter follows a default parameter");
                                 }
                             }
                         }
@@ -164,7 +164,7 @@ fn semantic_Analyzer_collectClassMembers(a: SemanticAnalyzer, prog: AstNode) -> 
                         for (let index_679: i32 = 0; index_679 < count_680; index_679++) {
                             let other: SemanticMethodInfo = items_678[index_679];
                             if (((other.decl.Static != method.Static) || semantic_sameParams(other.sym.Params, params))) {
-                                semantic_Analyzer_classError(a, copy_AstPosition(fn_value.Pos), ("conflicting declarations of " + decl.Name + "." + fn_value.Name));
+                                semantic_Analyzer_classError(a, fn_value.Pos, ("conflicting declarations of " + decl.Name + "." + fn_value.Name));
                                 break;
                             }
                         }
@@ -239,21 +239,21 @@ fn semantic_Analyzer_analyzeClassBodies(a: SemanticAnalyzer, prog: AstNode) -> v
                     if ((value == null)) {
                         {
                             if (((info.typ == CompilerState.semantic_TypeStr))) {
-                                value = make_AstNode_75("\"\"", copy_AstPosition(field.Pos));
+                                value = make_AstNode_75("\"\"", field.Pos);
                             } else if ((((info.typ != null) && info.typ.IsArray))) {
-                                value = make_AstNode_92(copy_AstPosition(field.Pos));
+                                value = make_AstNode_92(field.Pos);
                             } else {
                                 continue;
                             }
                         }
                     }
                     semantic_Analyzer_pushScope(a);
-                    let object: AstNode = make_AstNode_72(decl.Name, copy_AstPosition(field.Pos));
+                    let object: AstNode = make_AstNode_72(decl.Name, field.Pos);
                     if (!(field.Static)) {
-                        semantic_Scope_define(a.scope, make_SemanticSymbol_93("self", 0, class_value.typ, copy_AstPosition(field.Pos)));
-                        object = make_AstNode_72("self", copy_AstPosition(field.Pos));
+                        semantic_Scope_define(a.scope, make_SemanticSymbol_93("self", 0, class_value.typ, field.Pos));
+                        object = make_AstNode_72("self", field.Pos);
                     }
-                    let stmt: AstNode = make_AstNode_68(make_AstNode_82(object, field.Name, copy_AstPosition(field.Pos)), value, copy_AstPosition(field.Pos));
+                    let stmt: AstNode = make_AstNode_68(make_AstNode_82(object, field.Name, field.Pos), value, field.Pos);
                     semantic_Analyzer_analyzeAssignStmt(a, stmt);
                     semantic_Analyzer_popScope(a);
                     if (field.Static) {
@@ -286,7 +286,7 @@ fn semantic_Analyzer_analyzeClassBodies(a: SemanticAnalyzer, prog: AstNode) -> v
             fn_value.Name = method.sym.MangledName;
             fn_value.MangledName = method.sym.MangledName;
             if (!(decl.Static)) {
-                let self_value: AstParam = make_AstParam_94("self", make_AstTypeExpr_53(class_value.decl.Name, copy_AstPosition(fn_value.Pos)), copy_AstPosition(fn_value.Pos));
+                let self_value: AstParam = make_AstParam_94("self", make_AstTypeExpr_53(class_value.decl.Name, fn_value.Pos), fn_value.Pos);
                 fn_value.Params = extend_Astparam([self_value], fn_value.Params);
             }
             a.classInstance = !(decl.Static);
@@ -353,15 +353,15 @@ fn semantic_Analyzer_classReceiver(a: SemanticAnalyzer, expr: AstNode) -> Result
 fn semantic_Analyzer_analyzeClassField(a: SemanticAnalyzer, e: AstNode, class_value: SemanticClassInfo, static_value: bool) -> SemanticType {
     let field: SemanticFieldInfo = MapStrSemanticfieldinfo_get(class_value.fields, e.Field);
     if ((field == null)) {
-        semantic_Analyzer_classError(a, copy_AstPosition(e.Pos), ("class " + class_value.decl.Name + " has no field " + runtime_quote(e.Field)));
+        semantic_Analyzer_classError(a, e.Pos, ("class " + class_value.decl.Name + " has no field " + runtime_quote(e.Field)));
         return null;
     }
     if ((field.decl.Static != static_value)) {
-        semantic_Analyzer_classError(a, copy_AstPosition(e.Pos), ("field " + class_value.decl.Name + "." + e.Field + " requires " + semantic_memberAccess(field.decl.Static) + " access"));
+        semantic_Analyzer_classError(a, e.Pos, ("field " + class_value.decl.Name + "." + e.Field + " requires " + semantic_memberAccess(field.decl.Static) + " access"));
         return null;
     }
     if ((!(field.decl.Public) && (a.currentClass != class_value))) {
-        semantic_Analyzer_classError(a, copy_AstPosition(e.Pos), ("field " + class_value.decl.Name + "." + e.Field + " is private"));
+        semantic_Analyzer_classError(a, e.Pos, ("field " + class_value.decl.Name + "." + e.Field + " is private"));
         return null;
     }
     e.ResolvedField = field.storage;
@@ -379,14 +379,14 @@ fn semantic_Analyzer_analyzeClassCall(a: SemanticAnalyzer, e: AstNode, callee: A
     let methods: []SemanticMethodInfo = MapStrArraysemanticmethodinfo_get(class_value.methods, callee.Field);
     let name: str = ((class_value.decl.Name + ".") + callee.Field);
     if ((len(methods) == 0)) {
-        semantic_Analyzer_classError(a, copy_AstPosition(e.Pos), ("class " + class_value.decl.Name + " has no method " + runtime_quote(callee.Field)));
+        semantic_Analyzer_classError(a, e.Pos, ("class " + class_value.decl.Name + " has no method " + runtime_quote(callee.Field)));
         return null;
     }
     if ((methods[0].decl.Static != static_value)) {
-        semantic_Analyzer_classError(a, copy_AstPosition(e.Pos), ("method " + name + " requires " + semantic_memberAccess(methods[0].decl.Static) + " access"));
+        semantic_Analyzer_classError(a, e.Pos, ("method " + name + " requires " + semantic_memberAccess(methods[0].decl.Static) + " access"));
         return null;
     }
-    let result_707: ResultSemanticmethodinfoArrayastnode = semantic_Analyzer_resolveClassCall(a, copy_AstPosition(e.Pos), name, e.Args, methods, class_value);
+    let result_707: ResultSemanticmethodinfoArrayastnode = semantic_Analyzer_resolveClassCall(a, e.Pos, name, e.Args, methods, class_value);
     let method: SemanticMethodInfo = result_707.value0;
     let args: []AstNode = result_707.value1;
     if ((method == null)) {
@@ -405,10 +405,10 @@ fn semantic_Analyzer_analyzeClassCall(a: SemanticAnalyzer, e: AstNode, callee: A
 fn semantic_Analyzer_analyzeNewExpr(a: SemanticAnalyzer, e: AstNode) -> SemanticType {
     let class_value: SemanticClassInfo = semantic_Analyzer_classType(a, e.ClassName);
     if ((class_value == null)) {
-        semantic_Analyzer_classError(a, copy_AstPosition(e.Pos), ("unknown class " + runtime_quote(e.ClassName)));
+        semantic_Analyzer_classError(a, e.Pos, ("unknown class " + runtime_quote(e.ClassName)));
         return null;
     }
-    let result_710: ResultSemanticmethodinfoArrayastnode = semantic_Analyzer_resolveClassCall(a, copy_AstPosition(e.Pos), (class_value.decl.Name + ".init"), e.Args, class_value.constructor, class_value);
+    let result_710: ResultSemanticmethodinfoArrayastnode = semantic_Analyzer_resolveClassCall(a, e.Pos, (class_value.decl.Name + ".init"), e.Args, class_value.constructor, class_value);
     let method: SemanticMethodInfo = result_710.value0;
     let args: []AstNode = result_710.value1;
     if ((method != null)) {
@@ -465,7 +465,7 @@ fn semantic_Analyzer_resolveClassCall(a: SemanticAnalyzer, pos: AstPosition, nam
                 continue;
             }
             if ((match != null)) {
-                semantic_Analyzer_classError(a, copy_AstPosition(pos), ("ambiguous overload for " + name));
+                semantic_Analyzer_classError(a, pos, ("ambiguous overload for " + name));
                 return make_ResultSemanticmethodinfoArrayastnode(null, args);
             }
             match = method;
@@ -473,9 +473,9 @@ fn semantic_Analyzer_resolveClassCall(a: SemanticAnalyzer, pos: AstPosition, nam
     }
     if ((match == null)) {
         if (private) {
-            semantic_Analyzer_classError(a, copy_AstPosition(pos), (name + " is private"));
+            semantic_Analyzer_classError(a, pos, (name + " is private"));
         } else {
-            semantic_Analyzer_classError(a, copy_AstPosition(pos), ("no matching overload for " + name));
+            semantic_Analyzer_classError(a, pos, ("no matching overload for " + name));
         }
         return make_ResultSemanticmethodinfoArrayastnode(null, args);
     }
@@ -495,7 +495,7 @@ fn semantic_Analyzer_checkClassConflict(a: SemanticAnalyzer, alias: str, name: s
         name = ((alias + ".") + name);
     }
     if ((semantic_Analyzer_classType(a, name) != null)) {
-        semantic_Analyzer_classError(a, copy_AstPosition(pos), ("declaration " + runtime_quote(name) + " conflicts with a class name"));
+        semantic_Analyzer_classError(a, pos, ("declaration " + runtime_quote(name) + " conflicts with a class name"));
     }
 }
 
@@ -523,7 +523,7 @@ fn semantic_Analyzer_defineFileFunction(a: SemanticAnalyzer, fn_value: AstNode, 
     if ((semantic_Scope_lookupLocal(scope, label) != null)) {
         return;
     }
-    let sym: SemanticSymbol = make_SemanticSymbol_95(fn_value.Name, label, 1, ret_value, copy_AstPosition(fn_value.Pos), params, defaults, defaultCount, ret_value);
+    let sym: SemanticSymbol = make_SemanticSymbol_95(fn_value.Name, label, 1, ret_value, fn_value.Pos, params, defaults, defaultCount, ret_value);
     semantic_Scope_defineFunc(scope, sym);
     MapStrSemanticsymbol_put(scope.symbols, fn_value.Name, sym);
 }

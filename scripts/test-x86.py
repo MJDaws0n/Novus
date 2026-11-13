@@ -18,6 +18,7 @@ for source, name in (("tests/classes/main.nov", "classes"),
                      ("tests/selfhost/flags.nov", "flags"),
                      ("tests/selfhost/x86_compat.nov", "x86_compat"),
                      ("tests/selfhost/wide_values.nov", "wide_values"),
+                     ("tests/selfhost/performance_runtime.nov", "performance_runtime"),
                      ("tests/selfhost/numeric_features.nov", "numeric_features")):
     for phase, command in (("build", [compiler, "--target=linux/386", "--gc-entries=1024", source]),
                            ("run", [root / "build" / "linux_x86" / name])):

@@ -1,0 +1,85 @@
+module performance_runtime;
+import ../../lib/std;
+import ../../lib/file_io;
+
+class Cell {
+    pub let value: i32 = 0;
+    pub let next: Cell = null;
+    pub let text: str = "";
+    pub static let root: Cell = null;
+}
+
+fn churn(round: i32) -> void {
+    for (let i: i32 = 0; i < 600; i++) {
+        let cell: Cell = new Cell();
+        cell.value = round * 1000 + i;
+        cell.text = "cell_" + i32_to_str(cell.value);
+        if (i % 30 == 0) { cell.next = Cell.root; Cell.root = cell; }
+    }
+}
+
+fn check_large_allocation() -> bool {
+    // More occupied pages than the small page index can hold: tracing must
+    // fall back to binary search without losing this large live allocation.
+    let block: str = make_buffer(1048576);
+    string_set_byte(block, 1048575, 90);
+    gc_collect();
+    return len(block) == 1048576 && byte_at(block, 1048575) == 90;
+}
+
+fn main() -> i32 {
+    let source: str = make_buffer(160);
+    let target: str = make_buffer(180);
+    for (let i: i32 = 0; i < 160; i++) { string_set_byte(source, i, i); }
+    for (let offset: i32 = 0; offset < 8; offset++) {
+        for (let count: i32 = 0; count < 130; count++) {
+            memory_copy(ptr(target) + i32_to_u64(offset), ptr(source) + 1, count);
+            for (let i: i32 = 0; i < count; i++) {
+                if (byte_at(target, offset + i) != i + 1) { return 1; }
+            }
+        }
+    }
+    if (make_buffer(0) != "" || make_buffer(-1) != "") { return 2; }
+    if (!check_large_allocation()) { return 12; }
+    let builder: StringBuilder = new StringBuilder();
+    builder.append("first");
+    let snapshot: str = builder.text();
+    builder.append_byte(0);
+    builder.append(" second");
+    if (snapshot != "first" || builder.text() != "first second") { return 3; }
+    builder.clear();
+    for (let i: i32 = 0; i < 5000; i++) { builder.append("café\n"); }
+    let text: str = builder.text();
+    let path: str = "build/performance-text-café.txt";
+    if (write_all_text(path, text) != "") { return 4; }
+    let loaded: FileTextResult = read_all_text(path);
+    if (loaded.error != "" || loaded.data != text) { return 5; }
+    if (write_all_text(path, "") != "" || read_all_text(path).data != "") { return 6; }
+    file_delete(path);
+    if (read_all_text(path).error == "") { return 7; }
+    builder.clear();
+    builder.append_bytes(ptr(source), 160);
+    let binary: str = builder.text();
+    for (let i: i32 = 0; i < 160; i++) { if (byte_at(binary, i) != i) { return 13; } }
+    let bytes: ByteBuffer = new ByteBuffer();
+    for (let i: i32 = 0; i < 160; i++) { bytes.append(i); }
+    if (write_all_bytes(path, bytes) != "") { return 14; }
+    loaded = read_all_text(path);
+    if (loaded.error != "") { return 15; }
+    for (let i: i32 = 0; i < 160; i++) { if (byte_at(loaded.data, i) != i) { return 16; } }
+    file_delete(path);
+    // Force reuse, unordered allocation addresses, graph traversal and cycles.
+    for (let round: i32 = 0; round < 12; round++) { churn(round); gc_collect(); }
+    let cursor: Cell = Cell.root;
+    let count: i32 = 0;
+    while (cursor != null) {
+        if (cursor.text != "cell_" + i32_to_str(cursor.value)) { return 8; }
+        cursor = cursor.next; count++;
+    }
+    if (count != 240) { return 9; }
+    Cell.root.next = Cell.root;
+    gc_collect();
+    if (Cell.root.next != Cell.root || Cell.root.value != 11570) { return 10; }
+    print("performance runtime passed");
+    return 0;
+}

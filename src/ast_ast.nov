@@ -8,131 +8,131 @@ fn ast_Position_String(p: AstPosition) -> str {
 }
 
 fn ast_Program_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_GlobalVar_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_ModuleDecl_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_ImportDecl_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_CompTimeIf_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_ClassDecl_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_FnDecl_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_BlockStmt_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_LetStmt_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_ReturnStmt_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_BreakStmt_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_ContinueStmt_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_IfStmt_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_WhileStmt_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_ForStmt_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_ExprStmt_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_AssignStmt_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_IdentExpr_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_IntLitExpr_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_FloatLitExpr_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_StringLitExpr_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_BoolLitExpr_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_NullLitExpr_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_UnaryExpr_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_BinaryExpr_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_CallExpr_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_MemberExpr_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_NewExpr_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_IndexExpr_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_GroupExpr_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_AddressOfExpr_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 fn ast_ArrayLitExpr_GetPos(n: AstNode) -> AstPosition {
-    return copy_AstPosition(n.Pos);
+    return n.Pos;
 }
 
 // ResolveCompTimeBlocks evaluates all #if blocks in the program and merges

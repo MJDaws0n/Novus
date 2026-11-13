@@ -70,7 +70,9 @@ try:
             compiler = Path(args.bootstrap).resolve()
         else:
             compiler = work / ("bootstrap-go" + extension)
-            run(["go", "build", "-o", compiler, "./cmd/novus"], "bootstrap-go", cwd=ROOT / "legacy-go")
+            bootstrap_env = os.environ.copy()
+            bootstrap_env.update(GOOS=target_os, GOARCH={"x86": "386", "x86_64": "amd64"}.get(target_arch, target_arch))
+            run(["go", "build", "-o", compiler, "./cmd/novus"], "bootstrap-go", cwd=ROOT / "legacy-go", env=bootstrap_env)
         previous_assembly = None
         for stage in range(1, 4):
             elapsed = run([compiler, *flags, "main.nov"], f"stage{stage}", timeout=1200)
@@ -104,6 +106,8 @@ try:
                 ("tests/selfhost/register_arguments.nov", "register_arguments"),
                 ("tests/selfhost/flags.nov", "flags"),
                 ("tests/selfhost/gc_graph.nov", "gc_graph"),
+                ("tests/selfhost/compiler_collections.nov", "compiler_collections"),
+                ("tests/selfhost/performance_runtime.nov", "performance_runtime"),
                 ("tests/selfhost/time_memory.nov", "time_memory"),
                 ("tests/selfhost/libraries.nov", "library_smoke"),
                 ("tests/selfhost/numeric_features.nov", "numeric_features"),

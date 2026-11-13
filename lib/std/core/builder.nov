@@ -1,32 +1,48 @@
 module std_builder;
 
 class StringBuilder {
-    priv let chunks: []str = [];
+    priv let buffer: str = "";
     priv let size: i32 = 0;
+    priv let capacity: i32 = 0;
+
+    priv fn reserve(required: i32) -> void {
+        if (required <= self.capacity) { return; }
+        let capacity: i32 = self.capacity;
+        if (capacity == 0) { capacity = 64; }
+        while (capacity < required) {
+            if (capacity > 1073741823) { capacity = required; }
+            else { capacity *= 2; }
+        }
+        let buffer: str = alloc_string(capacity);
+        memory_copy(ptr(buffer), ptr(self.buffer), self.size);
+        string_set_byte(buffer, self.size, 0);
+        self.buffer = buffer;
+        self.capacity = capacity;
+    }
 
     pub fn append(value: str) -> void {
-        if (len(value) == 0) { return; }
-        array_append(self.chunks, value);
-        self.size += len(value);
+        self.append_bytes(ptr(value), len(value));
     }
 
-    pub fn append_byte(value: i32) -> void { self.append(byte_char(value)); }
+    pub fn append_bytes(source: u64, count: i32) -> void {
+        if (count <= 0) { return; }
+        self.reserve(self.size + count);
+        memory_copy(ptr(self.buffer) + i32_to_u64(self.size), source, count);
+        self.size += count;
+        string_set_byte(self.buffer, self.size, 0);
+    }
+
+    pub fn append_byte(value: i32) -> void {
+        value = value & 255;
+        if (value == 0) { return; }
+        self.reserve(self.size + 1);
+        string_set_byte(self.buffer, self.size, value);
+        self.size++;
+        string_set_byte(self.buffer, self.size, 0);
+    }
     pub fn length() -> i32 { return self.size; }
-    pub fn clear() -> void { self.chunks = []; self.size = 0; }
-
-    pub fn text() -> str {
-        let result: str = make_buffer(self.size);
-        let offset: i32 = 0;
-        for (let i: i32 = 0; i < len(self.chunks); i++) {
-            let chunk: str = self.chunks[i];
-            let size: i32 = len(chunk);
-            for (let j: i32 = 0; j < size; j++) {
-                string_set_byte(result, offset, byte_at(chunk, j));
-                offset++;
-            }
-        }
-        return result;
-    }
+    pub fn clear() -> void { self.buffer = ""; self.size = 0; self.capacity = 0; }
+    pub fn text() -> str { return copy_bytes(ptr(self.buffer), self.size); }
 }
 
 // Binary data keeps an explicit length, including embedded zero bytes.

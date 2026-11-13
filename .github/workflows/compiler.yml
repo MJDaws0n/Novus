@@ -23,7 +23,7 @@ jobs:
 
   selfhost:
     name: Self-host and run ${{ matrix.target }}
-    timeout-minutes: 40
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -60,6 +60,22 @@ jobs:
       - name: Exercise 32-bit cross compilation
         if: matrix.target == 'linux/amd64'
         run: python scripts/test-x86.py --compiler dist/novus-linux-amd64
+      - name: Check out the pinned large application
+        uses: actions/checkout@v4
+        with:
+          repository: MJDaws0n/Nox
+          ref: af635107c6e8d81d1059062fecdbb96e408fc43f
+          path: build/nox-reference
+      - name: Enforce large-program compilation performance
+        run: python scripts/benchmark-ci.py --target=${{ matrix.target }}
+      - name: Save benchmark records
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-${{ strategy.job-index }}
+          path: |
+            build/benchmarks/results.json
+            build/benchmarks/*.log
       - name: Save verified release binary
         uses: actions/upload-artifact@v4
         with:

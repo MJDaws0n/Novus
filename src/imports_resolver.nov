@@ -57,7 +57,7 @@ fn imports_Resolver_Resolve(r: ImportsResolver, prog: AstNode, sourceFile: str) 
         return make_ResultAstnodeArrayimportsresolveerror(prog, r.errors);
     }
     imports_Resolver_deduplicateModules(r);
-    let merged: AstNode = make_AstNode_31(prog.Module, prog.Imports, r.classScopes, absSource, copy_AstPosition(prog.Pos));
+    let merged: AstNode = make_AstNode_31(prog.Module, prog.Imports, r.classScopes, absSource, prog.Pos);
     let seenPrograms: MapStrBool = new MapStrBool();
     let exported: MapAstnodeBool = new MapAstnodeBool();
     {
@@ -134,7 +134,7 @@ fn imports_Resolver_resolveImport(r: ImportsResolver, imp: AstNode, baseDir: str
     let absPath: str = result_535.value0;
     let err: str = result_535.value1;
     if ((err != "")) {
-        imports_Resolver_addError(r, copy_AstPosition(imp.Pos), importerFile, ("cannot resolve import path " + runtime_quote(imp.Path) + ": " + err));
+        imports_Resolver_addError(r, imp.Pos, importerFile, ("cannot resolve import path " + runtime_quote(imp.Path) + ": " + err));
         return;
     }
     {
@@ -168,7 +168,7 @@ fn imports_Resolver_resolveImport(r: ImportsResolver, imp: AstNode, baseDir: str
                         }
                     }
                 } else {
-                    imports_Resolver_addError(r, copy_AstPosition(imp.Pos), importerFile, ("imported file not found: " + absPath + " (resolved from " + runtime_quote(imp.Path) + ")"));
+                    imports_Resolver_addError(r, imp.Pos, importerFile, ("imported file not found: " + absPath + " (resolved from " + runtime_quote(imp.Path) + ")"));
                     return;
                 }
             }
@@ -189,7 +189,7 @@ fn imports_Resolver_resolveImport(r: ImportsResolver, imp: AstNode, baseDir: str
                             }
                         }
                     } else {
-                        imports_Resolver_addError(r, copy_AstPosition(imp.Pos), importerFile, ("imported directory " + absPath + " has no main.nov (resolved from " + runtime_quote(imp.Path) + ")"));
+                        imports_Resolver_addError(r, imp.Pos, importerFile, ("imported directory " + absPath + " has no main.nov (resolved from " + runtime_quote(imp.Path) + ")"));
                         return;
                     }
                 }
@@ -203,13 +203,13 @@ fn imports_Resolver_resolveImport(r: ImportsResolver, imp: AstNode, baseDir: str
             let stackPath: str = items_543[index_544];
             if ((stackPath == absPath)) {
                 let chain: []str = append_Str(r.importStack, absPath);
-                imports_Resolver_addError(r, copy_AstPosition(imp.Pos), importerFile, ("circular import detected: " + runtime_strings_Join(chain, " → ")));
+                imports_Resolver_addError(r, imp.Pos, importerFile, ("circular import detected: " + runtime_strings_Join(chain, " → ")));
                 return;
             }
         }
     }
     if ((len(r.importStack) >= 64)) {
-        imports_Resolver_addError(r, copy_AstPosition(imp.Pos), importerFile, ("import depth limit (" + runtime_string_i32(64) + ") exceeded — possible diamond or recursive import"));
+        imports_Resolver_addError(r, imp.Pos, importerFile, ("import depth limit (" + runtime_string_i32(64) + ") exceeded — possible diamond or recursive import"));
         return;
     }
     {
@@ -251,14 +251,14 @@ fn imports_Resolver_resolveImport(r: ImportsResolver, imp: AstNode, baseDir: str
             return;
         }
     }
-    let result_552: ResultArrayi32Str = runtime_os_ReadFile(absPath);
-    let content: []i32 = result_552.value0;
+    let result_552: ResultStrStr = runtime_os_ReadText(absPath);
+    let content: str = result_552.value0;
     err = result_552.value1;
     if ((err != "")) {
-        imports_Resolver_addError(r, copy_AstPosition(imp.Pos), importerFile, ("cannot read imported file " + absPath + ": " + err));
+        imports_Resolver_addError(r, imp.Pos, importerFile, ("cannot read imported file " + absPath + ": " + err));
         return;
     }
-    let result_553: ResultArraylexertokenArraylexerlexerror = lexer_Lex(runtime_bytes_to_string(content));
+    let result_553: ResultArraylexertokenArraylexerlexerror = lexer_Lex(content);
     let tokens: []LexerToken = result_553.value0;
     let lexErrors: []LexerLexError = result_553.value1;
     if ((len(lexErrors) > 0)) {
@@ -267,7 +267,7 @@ fn imports_Resolver_resolveImport(r: ImportsResolver, imp: AstNode, baseDir: str
             let count_556: i32 = len(items_554);
             for (let index_555: i32 = 0; index_555 < count_556; index_555++) {
                 let e: LexerLexError = copy_LexerLexError(items_554[index_555]);
-                imports_Resolver_addError(r, copy_AstPosition(imp.Pos), absPath, ("lex error in imported file: " + lexer_LexError_Error(e)));
+                imports_Resolver_addError(r, imp.Pos, absPath, ("lex error in imported file: " + lexer_LexError_Error(e)));
             }
         }
         return;
@@ -281,7 +281,7 @@ fn imports_Resolver_resolveImport(r: ImportsResolver, imp: AstNode, baseDir: str
             let count_560: i32 = len(items_558);
             for (let index_559: i32 = 0; index_559 < count_560; index_559++) {
                 let e: ParserParseError = copy_ParserParseError(items_558[index_559]);
-                imports_Resolver_addError(r, copy_AstPosition(imp.Pos), absPath, ("parse error in imported file: " + parser_ParseError_Error(e)));
+                imports_Resolver_addError(r, imp.Pos, absPath, ("parse error in imported file: " + parser_ParseError_Error(e)));
             }
         }
         return;
@@ -467,7 +467,7 @@ fn imports_Resolver_importDeclarations(r: ImportsResolver, prog: AstNode, imp: A
             if ((imp.Alias != "")) {
                 name = ((imp.Alias + ".") + name);
             }
-            MapStrArrayastclassbinding_put(r.classScopes, importer, append_Astclassbinding(MapStrArrayastclassbinding_get(r.classScopes, importer), make_AstClassBinding_35(name, binding.Class, copy_AstPosition(imp.Pos))));
+            MapStrArrayastclassbinding_put(r.classScopes, importer, append_Astclassbinding(MapStrArrayastclassbinding_get(r.classScopes, importer), make_AstClassBinding_35(name, binding.Class, imp.Pos)));
         }
     }
     let result: []AstNode = [];
@@ -510,7 +510,7 @@ fn imports_Resolver_importDeclarations(r: ImportsResolver, prog: AstNode, imp: A
         for (let index_611: i32 = 0; index_611 < count_612; index_611++) {
             let name: str = items_610[index_611];
             if (!(MapStrBool_get(found, name))) {
-                imports_Resolver_addError(r, copy_AstPosition(imp.Pos), absPath, ("function or class " + runtime_quote(name) + " not found in imported module " + runtime_quote(imp.Path)));
+                imports_Resolver_addError(r, imp.Pos, absPath, ("function or class " + runtime_quote(name) + " not found in imported module " + runtime_quote(imp.Path)));
             }
         }
     }
@@ -519,7 +519,7 @@ fn imports_Resolver_importDeclarations(r: ImportsResolver, prog: AstNode, imp: A
 
 // addError records a resolution error.
 fn imports_Resolver_addError(r: ImportsResolver, pos: AstPosition, file: str, msg: str) -> void {
-    r.errors = append_Importsresolveerror(r.errors, make_ImportsResolveError_36(msg, copy_AstPosition(pos), file));
+    r.errors = append_Importsresolveerror(r.errors, make_ImportsResolveError_36(msg, pos, file));
 }
 
 // GetModules returns all resolved imported modules in order.

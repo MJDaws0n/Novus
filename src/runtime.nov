@@ -107,6 +107,10 @@ fn runtime_os_ReadFile(path: str) -> ResultArrayi32Str {
     let result: FileReadResult = read_all_bytes(path);
     return make_ResultArrayi32Str(result.data.bytes, result.error);
 }
+fn runtime_os_ReadText(path: str) -> ResultStrStr {
+    let result: FileTextResult = read_all_text(path);
+    return make_ResultStrStr(result.data, result.error);
+}
 fn runtime_os_WriteFile(path: str, data: []i32, mode: i32) -> str {
     let bytes: ByteBuffer = new ByteBuffer();
     bytes.bytes = data;

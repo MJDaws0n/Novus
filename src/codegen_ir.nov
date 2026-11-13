@@ -55,7 +55,7 @@ fn codegen_Mem(base: str, off: i64) -> CodegenOperand {
 }
 
 fn codegen_None() -> CodegenOperand {
-    return make_CodegenOperand_17(0);
+    return CompilerState.codegen_noneOperand;
 }
 
 fn codegen_IROp_String(op: i32) -> str {
@@ -84,7 +84,7 @@ fn codegen_IRInstr_String(i: CodegenIRInstr) -> str {
         let items_354: []CodegenOperand = i.Args;
         let count_356: i32 = len(items_354);
         for (let index_355: i32 = 0; index_355 < count_356; index_355++) {
-            let a: CodegenOperand = copy_CodegenOperand(items_354[index_355]);
+            let a: CodegenOperand = items_354[index_355];
             s = (s + (", " + codegen_Operand_String(a)));
         }
     }

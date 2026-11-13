@@ -7,14 +7,14 @@ import ../lib/process;
 class AstClassBinding {
     pub let Name: str = "";
     pub let Class: AstNode = null;
-    pub let Pos: AstPosition = new AstPosition();
+    pub let Pos: AstPosition = CompilerState.zeroPosition;
 }
 
 fn copy_AstClassBinding(value: AstClassBinding) -> AstClassBinding {
     let result: AstClassBinding = new AstClassBinding();
     result.Name = value.Name;
     result.Class = value.Class;
-    result.Pos = copy_AstPosition(value.Pos);
+    result.Pos = value.Pos;
     return result;
 }
 
@@ -24,7 +24,7 @@ class AstClassField {
     pub let Value: AstNode = null;
     pub let Public: bool = false;
     pub let Static: bool = false;
-    pub let Pos: AstPosition = new AstPosition();
+    pub let Pos: AstPosition = CompilerState.zeroPosition;
 }
 
 fn copy_AstClassField(value: AstClassField) -> AstClassField {
@@ -34,7 +34,7 @@ fn copy_AstClassField(value: AstClassField) -> AstClassField {
     result.Value = value.Value;
     result.Public = value.Public;
     result.Static = value.Static;
-    result.Pos = copy_AstPosition(value.Pos);
+    result.Pos = value.Pos;
     return result;
 }
 
@@ -58,7 +58,7 @@ class AstParam {
     pub let Name: str = "";
     pub let Type: AstTypeExpr = null;
     pub let Default: AstNode = null;
-    pub let Pos: AstPosition = new AstPosition();
+    pub let Pos: AstPosition = CompilerState.zeroPosition;
 }
 
 fn copy_AstParam(value: AstParam) -> AstParam {
@@ -66,20 +66,13 @@ fn copy_AstParam(value: AstParam) -> AstParam {
     result.Name = value.Name;
     result.Type = value.Type;
     result.Default = value.Default;
-    result.Pos = copy_AstPosition(value.Pos);
+    result.Pos = value.Pos;
     return result;
 }
 
 class AstPosition {
     pub let Line: i32 = 0;
     pub let Column: i32 = 0;
-}
-
-fn copy_AstPosition(value: AstPosition) -> AstPosition {
-    let result: AstPosition = new AstPosition();
-    result.Line = value.Line;
-    result.Column = value.Column;
-    return result;
 }
 
 class AstResolvedField {
@@ -100,7 +93,7 @@ class AstTypeExpr {
     pub let Name: str = "";
     pub let IsArray: bool = false;
     pub let ElemName: str = "";
-    pub let Pos: AstPosition = new AstPosition();
+    pub let Pos: AstPosition = CompilerState.zeroPosition;
 }
 
 fn copy_AstTypeExpr(value: AstTypeExpr) -> AstTypeExpr {
@@ -108,7 +101,7 @@ fn copy_AstTypeExpr(value: AstTypeExpr) -> AstTypeExpr {
     result.Name = value.Name;
     result.IsArray = value.IsArray;
     result.ElemName = value.ElemName;
-    result.Pos = copy_AstPosition(value.Pos);
+    result.Pos = value.Pos;
     return result;
 }
 
@@ -152,18 +145,18 @@ fn copy_CodegenIRGlobal(value: CodegenIRGlobal) -> CodegenIRGlobal {
 
 class CodegenIRInstr {
     pub let Op: i32 = 0;
-    pub let Dst: CodegenOperand = new CodegenOperand();
-    pub let Src1: CodegenOperand = new CodegenOperand();
-    pub let Src2: CodegenOperand = new CodegenOperand();
-    pub let Args: []CodegenOperand = [];
+    pub let Dst: CodegenOperand = CompilerState.codegen_noneOperand;
+    pub let Src1: CodegenOperand = CompilerState.codegen_noneOperand;
+    pub let Src2: CodegenOperand = CompilerState.codegen_noneOperand;
+    pub let Args: []CodegenOperand = CompilerState.codegen_emptyOperands;
 }
 
 fn copy_CodegenIRInstr(value: CodegenIRInstr) -> CodegenIRInstr {
     let result: CodegenIRInstr = new CodegenIRInstr();
     result.Op = value.Op;
-    result.Dst = copy_CodegenOperand(value.Dst);
-    result.Src1 = copy_CodegenOperand(value.Src1);
-    result.Src2 = copy_CodegenOperand(value.Src2);
+    result.Dst = value.Dst;
+    result.Src1 = value.Src1;
+    result.Src2 = value.Src2;
     result.Args = value.Args;
     return result;
 }
@@ -246,6 +239,7 @@ fn copy_CodegenLowerer(value: CodegenLowerer) -> CodegenLowerer {
     return result;
 }
 
+// Operands are immutable after construction and may be shared by instructions.
 class CodegenOperand {
     pub let Kind: i32 = 0;
     pub let Reg: i32 = 0;
@@ -256,23 +250,12 @@ class CodegenOperand {
     pub let MemOffset: i64 = 0;
 }
 
-fn copy_CodegenOperand(value: CodegenOperand) -> CodegenOperand {
-    let result: CodegenOperand = new CodegenOperand();
-    result.Kind = value.Kind;
-    result.Reg = value.Reg;
-    result.PhysReg = value.PhysReg;
-    result.Imm = value.Imm;
-    result.Label = value.Label;
-    result.MemBase = value.MemBase;
-    result.MemOffset = value.MemOffset;
-    return result;
-}
-
 class CodegenOptions {
     pub let Target: CodegenTarget = null;
     pub let BuildDir: str = "";
     pub let OutputName: str = "";
     pub let Verbose: bool = false;
+    pub let SkipIRDump: bool = false;
     pub let AsmOnly: bool = false;
     pub let SkipLink: bool = false;
     pub let HeapSize: i64 = 0;
@@ -285,6 +268,7 @@ fn copy_CodegenOptions(value: CodegenOptions) -> CodegenOptions {
     result.BuildDir = value.BuildDir;
     result.OutputName = value.OutputName;
     result.Verbose = value.Verbose;
+    result.SkipIRDump = value.SkipIRDump;
     result.AsmOnly = value.AsmOnly;
     result.SkipLink = value.SkipLink;
     result.HeapSize = value.HeapSize;
@@ -464,14 +448,14 @@ fn copy_ImportsImportedModule(value: ImportsImportedModule) -> ImportsImportedMo
 
 class ImportsResolveError {
     pub let Message: str = "";
-    pub let Pos: AstPosition = new AstPosition();
+    pub let Pos: AstPosition = CompilerState.zeroPosition;
     pub let File: str = "";
 }
 
 fn copy_ImportsResolveError(value: ImportsResolveError) -> ImportsResolveError {
     let result: ImportsResolveError = new ImportsResolveError();
     result.Message = value.Message;
-    result.Pos = copy_AstPosition(value.Pos);
+    result.Pos = value.Pos;
     result.File = value.File;
     return result;
 }
@@ -549,15 +533,6 @@ class LexerToken {
     pub let Column: i32 = 0;
 }
 
-fn copy_LexerToken(value: LexerToken) -> LexerToken {
-    let result: LexerToken = new LexerToken();
-    result.Type = value.Type;
-    result.Value = value.Value;
-    result.Line = value.Line;
-    result.Column = value.Column;
-    return result;
-}
-
 class ParserParseError {
     pub let Message: str = "";
     pub let Line: i32 = 0;
@@ -629,7 +604,7 @@ fn copy_SemanticAnalyzer(value: SemanticAnalyzer) -> SemanticAnalyzer {
 class SemanticDiagnostic {
     pub let Message: str = "";
     pub let File: str = "";
-    pub let Pos: AstPosition = new AstPosition();
+    pub let Pos: AstPosition = CompilerState.zeroPosition;
     pub let Severity: i32 = 0;
     pub let classRelated: bool = false;
 }
@@ -638,7 +613,7 @@ fn copy_SemanticDiagnostic(value: SemanticDiagnostic) -> SemanticDiagnostic {
     let result: SemanticDiagnostic = new SemanticDiagnostic();
     result.Message = value.Message;
     result.File = value.File;
-    result.Pos = copy_AstPosition(value.Pos);
+    result.Pos = value.Pos;
     result.Severity = value.Severity;
     result.classRelated = value.classRelated;
     return result;
@@ -675,7 +650,7 @@ class SemanticSymbol {
     pub let MangledName: str = "";
     pub let Kind: i32 = 0;
     pub let Type: SemanticType = null;
-    pub let Pos: AstPosition = new AstPosition();
+    pub let Pos: AstPosition = CompilerState.zeroPosition;
     pub let Params: []SemanticType = [];
     pub let Variadic: bool = false;
     pub let Defaults: []AstNode = [];
@@ -689,7 +664,7 @@ fn copy_SemanticSymbol(value: SemanticSymbol) -> SemanticSymbol {
     result.MangledName = value.MangledName;
     result.Kind = value.Kind;
     result.Type = value.Type;
-    result.Pos = copy_AstPosition(value.Pos);
+    result.Pos = value.Pos;
     result.Params = value.Params;
     result.Variadic = value.Variadic;
     result.Defaults = value.Defaults;
@@ -786,37 +761,39 @@ fn copy_SemanticMethodInfo(value: SemanticMethodInfo) -> SemanticMethodInfo {
     return result;
 }
 
+// Empty list fields are shared read-only; append/extend helpers materialize
+// a private list on first use. Tokens and source positions are immutable.
 class AstNode {
     pub let Kind: str;
     pub let Operand: AstNode = null;
-    pub let Pos: AstPosition = new AstPosition();
-    pub let Elems: []AstNode = [];
+    pub let Pos: AstPosition = CompilerState.zeroPosition;
+    pub let Elems: []AstNode = CompilerState.empty_AstNode;
     pub let Target: AstNode = null;
     pub let Value: AstNode = null;
     pub let Op: str = "";
     pub let Left: AstNode = null;
     pub let Right: AstNode = null;
-    pub let Stmts: []AstNode = [];
+    pub let Stmts: []AstNode = CompilerState.empty_AstNode;
     pub let BoolValue: bool = false;
     pub let Callee: AstNode = null;
-    pub let Args: []AstNode = [];
+    pub let Args: []AstNode = CompilerState.empty_AstNode;
     pub let Receiver: AstNode = null;
     pub let ResolvedCallee: str = "";
     pub let Name: str = "";
-    pub let Fields: []AstClassField = [];
-    pub let Initializers: []AstNode = [];
-    pub let Methods: []AstClassMethod = [];
+    pub let Fields: []AstClassField = CompilerState.empty_AstClassField;
+    pub let Initializers: []AstNode = CompilerState.empty_AstNode;
+    pub let Methods: []AstClassMethod = CompilerState.empty_AstClassMethod;
     pub let SourceFile: str = "";
     pub let Variable: str = "";
     pub let Operator: str = "";
     pub let TextValue: str = "";
-    pub let Imports: []AstNode = [];
-    pub let Functions: []AstNode = [];
-    pub let Globals: []AstNode = [];
-    pub let Classes: []AstNode = [];
+    pub let Imports: []AstNode = CompilerState.empty_AstNode;
+    pub let Functions: []AstNode = CompilerState.empty_AstNode;
+    pub let Globals: []AstNode = CompilerState.empty_AstNode;
+    pub let Classes: []AstNode = CompilerState.empty_AstNode;
     pub let Expression: AstNode = null;
     pub let MangledName: str = "";
-    pub let Params: []AstParam = [];
+    pub let Params: []AstParam = CompilerState.empty_AstParam;
     pub let ReturnType: AstTypeExpr = null;
     pub let Body: AstNode = null;
     pub let Imported: bool = false;
@@ -829,7 +806,7 @@ class AstNode {
     pub let Else: AstNode = null;
     pub let Path: str = "";
     pub let Alias: str = "";
-    pub let SelectFns: []str = [];
+    pub let SelectFns: []str = CompilerState.empty_str;
     pub let Object: AstNode = null;
     pub let Index: AstNode = null;
     pub let ArrayType: str = "";
@@ -839,19 +816,19 @@ class AstNode {
     pub let Constructor: str = "";
     pub let Slots: i32 = 0;
     pub let Module: AstNode = null;
-    pub let ClassHelpers: []AstNode = [];
+    pub let ClassHelpers: []AstNode = CompilerState.empty_AstNode;
     pub let ClassScopes: MapStrArrayastclassbinding = null;
-    pub let ClassGlobals: []AstNode = [];
-    pub let ClassFunctions: []AstNode = [];
-    pub let Startup: []AstNode = [];
-    pub let CompTimeBlocks: []AstNode = [];
+    pub let ClassGlobals: []AstNode = CompilerState.empty_AstNode;
+    pub let ClassFunctions: []AstNode = CompilerState.empty_AstNode;
+    pub let Startup: []AstNode = CompilerState.empty_AstNode;
+    pub let CompTimeBlocks: []AstNode = CompilerState.empty_AstNode;
 }
 
 fn copy_AstNode(value: AstNode) -> AstNode {
     let result: AstNode = new AstNode();
     result.Kind = value.Kind;
     result.Operand = value.Operand;
-    result.Pos = copy_AstPosition(value.Pos);
+    result.Pos = value.Pos;
     result.Elems = value.Elems;
     result.Target = value.Target;
     result.Value = value.Value;
@@ -911,6 +888,15 @@ fn copy_AstNode(value: AstNode) -> AstNode {
 }
 
 class CompilerState {
+    pub static let zeroPosition: AstPosition = null;
+    pub static let empty_AstClassField: []AstClassField = [];
+    pub static let empty_AstClassMethod: []AstClassMethod = [];
+    pub static let empty_AstNode: []AstNode = [];
+    pub static let empty_AstParam: []AstParam = [];
+    pub static let empty_str: []str = [];
+
+    pub static let codegen_noneOperand: CodegenOperand = null;
+    pub static let codegen_emptyOperands: []CodegenOperand = [];
     pub static let arguments: []str = [];
     pub static let driver_debugMode: bool = false;
     pub static let codegen_x86Registers: MapStrBool = null;
@@ -940,6 +926,8 @@ class CompilerState {
 }
 
 fn initialize_compiler() -> void {
+    CompilerState.zeroPosition = new AstPosition();
+    CompilerState.codegen_noneOperand = new CodegenOperand();
     CompilerState.driver_debugMode = false;
     let map_132: MapStrBool = new MapStrBool();
     MapStrBool_put(map_132, "eax", true);
@@ -1236,6 +1224,7 @@ fn initialize_compiler() -> void {
     MapStrSemanticbuiltininfo_put(map_751, "getflag", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeBool));
     MapStrSemanticbuiltininfo_put(map_751, "load8", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeI32));
     MapStrSemanticbuiltininfo_put(map_751, "store_byte", make_SemanticBuiltinInfo_99(2, CompilerState.semantic_TypeVoid));
+    MapStrSemanticbuiltininfo_put(map_751, "alloc_string", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeStr));
     MapStrSemanticbuiltininfo_put(map_751, "store_word", make_SemanticBuiltinInfo_99(2, CompilerState.semantic_TypeVoid));
     MapStrSemanticbuiltininfo_put(map_751, "load32", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeI32));
     MapStrSemanticbuiltininfo_put(map_751, "load64", make_SemanticBuiltinInfo_99(1, CompilerState.semantic_TypeI64));
@@ -2375,17 +2364,48 @@ fn make_ResultSemanticmethodinfoArrayastnode(value0: SemanticMethodInfo, value1:
     return result;
 }
 
+// Stable, insertion-ordered maps keep their public key/value arrays. Hash
+// buckets only accelerate lookup; resizing and deletion preserve iteration order.
+fn compiler_hash_string(key: str) -> i32 {
+    let hash: i32 = 5381;
+    let address: u64 = ptr(key);
+    let count: i32 = len(key);
+    for (let i: i32 = 0; i < count; i++) { hash = (hash * 33) ^ load8(address + i32_to_u64(i)); }
+    return hash & 2147483647;
+}
+
 class MapStrStr {
     pub let keys: []str = [];
+    pub let buckets: []i32 = [];
     pub let values: []str = [];
 }
 
 fn MapStrStr_index(map: MapStrStr, key: str) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapStrStr_rehash(map: MapStrStr, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapStrStr_has(map: MapStrStr, key: str) -> bool {
@@ -2403,6 +2423,17 @@ fn MapStrStr_put(map: MapStrStr, key: str, value: str) -> void {
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrStr_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapStrStr_length(map: MapStrStr) -> i32 {
@@ -2419,19 +2450,41 @@ fn MapStrStr_delete(map: MapStrStr, key: str) -> void {
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrStr_rehash(map, len(map.buckets)); }
 }
 
 class MapStrArraystr {
     pub let keys: []str = [];
+    pub let buckets: []i32 = [];
     pub let values: [][]str = [];
 }
 
 fn MapStrArraystr_index(map: MapStrArraystr, key: str) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapStrArraystr_rehash(map: MapStrArraystr, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapStrArraystr_has(map: MapStrArraystr, key: str) -> bool {
@@ -2449,6 +2502,17 @@ fn MapStrArraystr_put(map: MapStrArraystr, key: str, value: []str) -> void {
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrArraystr_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapStrArraystr_length(map: MapStrArraystr) -> i32 {
@@ -2465,19 +2529,41 @@ fn MapStrArraystr_delete(map: MapStrArraystr, key: str) -> void {
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrArraystr_rehash(map, len(map.buckets)); }
 }
 
 class MapI32Bool {
     pub let keys: []i32 = [];
+    pub let buckets: []i32 = [];
     pub let values: []bool = [];
 }
 
 fn MapI32Bool_index(map: MapI32Bool, key: i32) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = (key & 2147483647) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapI32Bool_rehash(map: MapI32Bool, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = (map.keys[i] & 2147483647) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapI32Bool_has(map: MapI32Bool, key: i32) -> bool {
@@ -2495,6 +2581,17 @@ fn MapI32Bool_put(map: MapI32Bool, key: i32, value: bool) -> void {
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapI32Bool_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = (key & 2147483647) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapI32Bool_length(map: MapI32Bool) -> i32 {
@@ -2511,19 +2608,41 @@ fn MapI32Bool_delete(map: MapI32Bool, key: i32) -> void {
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapI32Bool_rehash(map, len(map.buckets)); }
 }
 
 class MapStrBool {
     pub let keys: []str = [];
+    pub let buckets: []i32 = [];
     pub let values: []bool = [];
 }
 
 fn MapStrBool_index(map: MapStrBool, key: str) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapStrBool_rehash(map: MapStrBool, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapStrBool_has(map: MapStrBool, key: str) -> bool {
@@ -2541,6 +2660,17 @@ fn MapStrBool_put(map: MapStrBool, key: str, value: bool) -> void {
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrBool_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapStrBool_length(map: MapStrBool) -> i32 {
@@ -2557,19 +2687,41 @@ fn MapStrBool_delete(map: MapStrBool, key: str) -> void {
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrBool_rehash(map, len(map.buckets)); }
 }
 
 class MapI32I32 {
     pub let keys: []i32 = [];
+    pub let buckets: []i32 = [];
     pub let values: []i32 = [];
 }
 
 fn MapI32I32_index(map: MapI32I32, key: i32) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = (key & 2147483647) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapI32I32_rehash(map: MapI32I32, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = (map.keys[i] & 2147483647) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapI32I32_has(map: MapI32I32, key: i32) -> bool {
@@ -2587,6 +2739,17 @@ fn MapI32I32_put(map: MapI32I32, key: i32, value: i32) -> void {
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapI32I32_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = (key & 2147483647) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapI32I32_length(map: MapI32I32) -> i32 {
@@ -2603,19 +2766,41 @@ fn MapI32I32_delete(map: MapI32I32, key: i32) -> void {
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapI32I32_rehash(map, len(map.buckets)); }
 }
 
 class MapI32Str {
     pub let keys: []i32 = [];
+    pub let buckets: []i32 = [];
     pub let values: []str = [];
 }
 
 fn MapI32Str_index(map: MapI32Str, key: i32) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = (key & 2147483647) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapI32Str_rehash(map: MapI32Str, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = (map.keys[i] & 2147483647) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapI32Str_has(map: MapI32Str, key: i32) -> bool {
@@ -2633,6 +2818,17 @@ fn MapI32Str_put(map: MapI32Str, key: i32, value: str) -> void {
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapI32Str_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = (key & 2147483647) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapI32Str_length(map: MapI32Str) -> i32 {
@@ -2649,19 +2845,41 @@ fn MapI32Str_delete(map: MapI32Str, key: i32) -> void {
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapI32Str_rehash(map, len(map.buckets)); }
 }
 
 class MapStrArraycodegenfuncoverloadentry {
     pub let keys: []str = [];
+    pub let buckets: []i32 = [];
     pub let values: [][]CodegenFuncOverloadEntry = [];
 }
 
 fn MapStrArraycodegenfuncoverloadentry_index(map: MapStrArraycodegenfuncoverloadentry, key: str) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapStrArraycodegenfuncoverloadentry_rehash(map: MapStrArraycodegenfuncoverloadentry, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapStrArraycodegenfuncoverloadentry_has(map: MapStrArraycodegenfuncoverloadentry, key: str) -> bool {
@@ -2679,6 +2897,17 @@ fn MapStrArraycodegenfuncoverloadentry_put(map: MapStrArraycodegenfuncoverloaden
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrArraycodegenfuncoverloadentry_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapStrArraycodegenfuncoverloadentry_length(map: MapStrArraycodegenfuncoverloadentry) -> i32 {
@@ -2695,19 +2924,41 @@ fn MapStrArraycodegenfuncoverloadentry_delete(map: MapStrArraycodegenfuncoverloa
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrArraycodegenfuncoverloadentry_rehash(map, len(map.buckets)); }
 }
 
 class MapStrI32 {
     pub let keys: []str = [];
+    pub let buckets: []i32 = [];
     pub let values: []i32 = [];
 }
 
 fn MapStrI32_index(map: MapStrI32, key: str) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapStrI32_rehash(map: MapStrI32, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapStrI32_has(map: MapStrI32, key: str) -> bool {
@@ -2725,6 +2976,17 @@ fn MapStrI32_put(map: MapStrI32, key: str, value: i32) -> void {
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrI32_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapStrI32_length(map: MapStrI32) -> i32 {
@@ -2741,19 +3003,41 @@ fn MapStrI32_delete(map: MapStrI32, key: str) -> void {
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrI32_rehash(map, len(map.buckets)); }
 }
 
 class MapStrImportsimportedmodule {
     pub let keys: []str = [];
+    pub let buckets: []i32 = [];
     pub let values: []ImportsImportedModule = [];
 }
 
 fn MapStrImportsimportedmodule_index(map: MapStrImportsimportedmodule, key: str) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapStrImportsimportedmodule_rehash(map: MapStrImportsimportedmodule, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapStrImportsimportedmodule_has(map: MapStrImportsimportedmodule, key: str) -> bool {
@@ -2771,6 +3055,17 @@ fn MapStrImportsimportedmodule_put(map: MapStrImportsimportedmodule, key: str, v
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrImportsimportedmodule_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapStrImportsimportedmodule_length(map: MapStrImportsimportedmodule) -> i32 {
@@ -2787,19 +3082,41 @@ fn MapStrImportsimportedmodule_delete(map: MapStrImportsimportedmodule, key: str
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrImportsimportedmodule_rehash(map, len(map.buckets)); }
 }
 
 class MapStrArrayastclassbinding {
     pub let keys: []str = [];
+    pub let buckets: []i32 = [];
     pub let values: [][]AstClassBinding = [];
 }
 
 fn MapStrArrayastclassbinding_index(map: MapStrArrayastclassbinding, key: str) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapStrArrayastclassbinding_rehash(map: MapStrArrayastclassbinding, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapStrArrayastclassbinding_has(map: MapStrArrayastclassbinding, key: str) -> bool {
@@ -2817,6 +3134,17 @@ fn MapStrArrayastclassbinding_put(map: MapStrArrayastclassbinding, key: str, val
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrArrayastclassbinding_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapStrArrayastclassbinding_length(map: MapStrArrayastclassbinding) -> i32 {
@@ -2833,6 +3161,7 @@ fn MapStrArrayastclassbinding_delete(map: MapStrArrayastclassbinding, key: str) 
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrArrayastclassbinding_rehash(map, len(map.buckets)); }
 }
 
 class MapAstnodeBool {
@@ -2883,15 +3212,36 @@ fn MapAstnodeBool_delete(map: MapAstnodeBool, key: AstNode) -> void {
 
 class MapImportsfnkeyBool {
     pub let keys: []ImportsFnKey = [];
+    pub let buckets: []i32 = [];
     pub let values: []bool = [];
 }
 
 fn MapImportsfnkeyBool_index(map: MapImportsfnkeyBool, key: ImportsFnKey) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i].alias == key.alias && map.keys[i].sig == key.sig) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = ((compiler_hash_string(key.alias) * 33 ^ compiler_hash_string(key.sig)) & 2147483647) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i].alias == key.alias && map.keys[i].sig == key.sig) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapImportsfnkeyBool_rehash(map: MapImportsfnkeyBool, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = ((compiler_hash_string(map.keys[i].alias) * 33 ^ compiler_hash_string(map.keys[i].sig)) & 2147483647) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapImportsfnkeyBool_has(map: MapImportsfnkeyBool, key: ImportsFnKey) -> bool {
@@ -2909,6 +3259,17 @@ fn MapImportsfnkeyBool_put(map: MapImportsfnkeyBool, key: ImportsFnKey, value: b
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapImportsfnkeyBool_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = ((compiler_hash_string(key.alias) * 33 ^ compiler_hash_string(key.sig)) & 2147483647) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapImportsfnkeyBool_length(map: MapImportsfnkeyBool) -> i32 {
@@ -2925,19 +3286,41 @@ fn MapImportsfnkeyBool_delete(map: MapImportsfnkeyBool, key: ImportsFnKey) -> vo
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapImportsfnkeyBool_rehash(map, len(map.buckets)); }
 }
 
 class MapStrArrayimportssigorigin {
     pub let keys: []str = [];
+    pub let buckets: []i32 = [];
     pub let values: [][]ImportsSigOrigin = [];
 }
 
 fn MapStrArrayimportssigorigin_index(map: MapStrArrayimportssigorigin, key: str) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapStrArrayimportssigorigin_rehash(map: MapStrArrayimportssigorigin, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapStrArrayimportssigorigin_has(map: MapStrArrayimportssigorigin, key: str) -> bool {
@@ -2955,6 +3338,17 @@ fn MapStrArrayimportssigorigin_put(map: MapStrArrayimportssigorigin, key: str, v
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrArrayimportssigorigin_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapStrArrayimportssigorigin_length(map: MapStrArrayimportssigorigin) -> i32 {
@@ -2971,19 +3365,41 @@ fn MapStrArrayimportssigorigin_delete(map: MapStrArrayimportssigorigin, key: str
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrArrayimportssigorigin_rehash(map, len(map.buckets)); }
 }
 
 class MapStrMapstrarrayimportssigorigin {
     pub let keys: []str = [];
+    pub let buckets: []i32 = [];
     pub let values: []MapStrArrayimportssigorigin = [];
 }
 
 fn MapStrMapstrarrayimportssigorigin_index(map: MapStrMapstrarrayimportssigorigin, key: str) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapStrMapstrarrayimportssigorigin_rehash(map: MapStrMapstrarrayimportssigorigin, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapStrMapstrarrayimportssigorigin_has(map: MapStrMapstrarrayimportssigorigin, key: str) -> bool {
@@ -3001,6 +3417,17 @@ fn MapStrMapstrarrayimportssigorigin_put(map: MapStrMapstrarrayimportssigorigin,
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrMapstrarrayimportssigorigin_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapStrMapstrarrayimportssigorigin_length(map: MapStrMapstrarrayimportssigorigin) -> i32 {
@@ -3017,19 +3444,41 @@ fn MapStrMapstrarrayimportssigorigin_delete(map: MapStrMapstrarrayimportssigorig
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrMapstrarrayimportssigorigin_rehash(map, len(map.buckets)); }
 }
 
 class MapStrSemanticfieldinfo {
     pub let keys: []str = [];
+    pub let buckets: []i32 = [];
     pub let values: []SemanticFieldInfo = [];
 }
 
 fn MapStrSemanticfieldinfo_index(map: MapStrSemanticfieldinfo, key: str) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapStrSemanticfieldinfo_rehash(map: MapStrSemanticfieldinfo, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapStrSemanticfieldinfo_has(map: MapStrSemanticfieldinfo, key: str) -> bool {
@@ -3047,6 +3496,17 @@ fn MapStrSemanticfieldinfo_put(map: MapStrSemanticfieldinfo, key: str, value: Se
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrSemanticfieldinfo_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapStrSemanticfieldinfo_length(map: MapStrSemanticfieldinfo) -> i32 {
@@ -3063,19 +3523,41 @@ fn MapStrSemanticfieldinfo_delete(map: MapStrSemanticfieldinfo, key: str) -> voi
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrSemanticfieldinfo_rehash(map, len(map.buckets)); }
 }
 
 class MapStrArraysemanticmethodinfo {
     pub let keys: []str = [];
+    pub let buckets: []i32 = [];
     pub let values: [][]SemanticMethodInfo = [];
 }
 
 fn MapStrArraysemanticmethodinfo_index(map: MapStrArraysemanticmethodinfo, key: str) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapStrArraysemanticmethodinfo_rehash(map: MapStrArraysemanticmethodinfo, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapStrArraysemanticmethodinfo_has(map: MapStrArraysemanticmethodinfo, key: str) -> bool {
@@ -3093,6 +3575,17 @@ fn MapStrArraysemanticmethodinfo_put(map: MapStrArraysemanticmethodinfo, key: st
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrArraysemanticmethodinfo_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapStrArraysemanticmethodinfo_length(map: MapStrArraysemanticmethodinfo) -> i32 {
@@ -3109,6 +3602,7 @@ fn MapStrArraysemanticmethodinfo_delete(map: MapStrArraysemanticmethodinfo, key:
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrArraysemanticmethodinfo_rehash(map, len(map.buckets)); }
 }
 
 class MapAstnodeSemanticclassinfo {
@@ -3159,15 +3653,36 @@ fn MapAstnodeSemanticclassinfo_delete(map: MapAstnodeSemanticclassinfo, key: Ast
 
 class MapStrSemanticclassinfo {
     pub let keys: []str = [];
+    pub let buckets: []i32 = [];
     pub let values: []SemanticClassInfo = [];
 }
 
 fn MapStrSemanticclassinfo_index(map: MapStrSemanticclassinfo, key: str) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapStrSemanticclassinfo_rehash(map: MapStrSemanticclassinfo, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapStrSemanticclassinfo_has(map: MapStrSemanticclassinfo, key: str) -> bool {
@@ -3185,6 +3700,17 @@ fn MapStrSemanticclassinfo_put(map: MapStrSemanticclassinfo, key: str, value: Se
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrSemanticclassinfo_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapStrSemanticclassinfo_length(map: MapStrSemanticclassinfo) -> i32 {
@@ -3201,19 +3727,41 @@ fn MapStrSemanticclassinfo_delete(map: MapStrSemanticclassinfo, key: str) -> voi
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrSemanticclassinfo_rehash(map, len(map.buckets)); }
 }
 
 class MapStrMapstrsemanticclassinfo {
     pub let keys: []str = [];
+    pub let buckets: []i32 = [];
     pub let values: []MapStrSemanticclassinfo = [];
 }
 
 fn MapStrMapstrsemanticclassinfo_index(map: MapStrMapstrsemanticclassinfo, key: str) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapStrMapstrsemanticclassinfo_rehash(map: MapStrMapstrsemanticclassinfo, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapStrMapstrsemanticclassinfo_has(map: MapStrMapstrsemanticclassinfo, key: str) -> bool {
@@ -3231,6 +3779,17 @@ fn MapStrMapstrsemanticclassinfo_put(map: MapStrMapstrsemanticclassinfo, key: st
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrMapstrsemanticclassinfo_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapStrMapstrsemanticclassinfo_length(map: MapStrMapstrsemanticclassinfo) -> i32 {
@@ -3247,19 +3806,41 @@ fn MapStrMapstrsemanticclassinfo_delete(map: MapStrMapstrsemanticclassinfo, key:
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrMapstrsemanticclassinfo_rehash(map, len(map.buckets)); }
 }
 
 class MapStrSemanticscope {
     pub let keys: []str = [];
+    pub let buckets: []i32 = [];
     pub let values: []SemanticScope = [];
 }
 
 fn MapStrSemanticscope_index(map: MapStrSemanticscope, key: str) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapStrSemanticscope_rehash(map: MapStrSemanticscope, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapStrSemanticscope_has(map: MapStrSemanticscope, key: str) -> bool {
@@ -3277,6 +3858,17 @@ fn MapStrSemanticscope_put(map: MapStrSemanticscope, key: str, value: SemanticSc
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrSemanticscope_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapStrSemanticscope_length(map: MapStrSemanticscope) -> i32 {
@@ -3293,19 +3885,41 @@ fn MapStrSemanticscope_delete(map: MapStrSemanticscope, key: str) -> void {
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrSemanticscope_rehash(map, len(map.buckets)); }
 }
 
 class MapStrSemanticsymbol {
     pub let keys: []str = [];
+    pub let buckets: []i32 = [];
     pub let values: []SemanticSymbol = [];
 }
 
 fn MapStrSemanticsymbol_index(map: MapStrSemanticsymbol, key: str) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapStrSemanticsymbol_rehash(map: MapStrSemanticsymbol, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapStrSemanticsymbol_has(map: MapStrSemanticsymbol, key: str) -> bool {
@@ -3323,6 +3937,17 @@ fn MapStrSemanticsymbol_put(map: MapStrSemanticsymbol, key: str, value: Semantic
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrSemanticsymbol_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapStrSemanticsymbol_length(map: MapStrSemanticsymbol) -> i32 {
@@ -3339,19 +3964,41 @@ fn MapStrSemanticsymbol_delete(map: MapStrSemanticsymbol, key: str) -> void {
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrSemanticsymbol_rehash(map, len(map.buckets)); }
 }
 
 class MapStrSemantictype {
     pub let keys: []str = [];
+    pub let buckets: []i32 = [];
     pub let values: []SemanticType = [];
 }
 
 fn MapStrSemantictype_index(map: MapStrSemantictype, key: str) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapStrSemantictype_rehash(map: MapStrSemantictype, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapStrSemantictype_has(map: MapStrSemantictype, key: str) -> bool {
@@ -3369,6 +4016,17 @@ fn MapStrSemantictype_put(map: MapStrSemantictype, key: str, value: SemanticType
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrSemantictype_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapStrSemantictype_length(map: MapStrSemantictype) -> i32 {
@@ -3385,19 +4043,41 @@ fn MapStrSemantictype_delete(map: MapStrSemantictype, key: str) -> void {
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrSemantictype_rehash(map, len(map.buckets)); }
 }
 
 class MapStrArraysemanticsymbol {
     pub let keys: []str = [];
+    pub let buckets: []i32 = [];
     pub let values: [][]SemanticSymbol = [];
 }
 
 fn MapStrArraysemanticsymbol_index(map: MapStrArraysemanticsymbol, key: str) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapStrArraysemanticsymbol_rehash(map: MapStrArraysemanticsymbol, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapStrArraysemanticsymbol_has(map: MapStrArraysemanticsymbol, key: str) -> bool {
@@ -3415,6 +4095,17 @@ fn MapStrArraysemanticsymbol_put(map: MapStrArraysemanticsymbol, key: str, value
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrArraysemanticsymbol_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapStrArraysemanticsymbol_length(map: MapStrArraysemanticsymbol) -> i32 {
@@ -3431,19 +4122,41 @@ fn MapStrArraysemanticsymbol_delete(map: MapStrArraysemanticsymbol, key: str) ->
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrArraysemanticsymbol_rehash(map, len(map.buckets)); }
 }
 
 class MapStrSemanticbuiltininfo {
     pub let keys: []str = [];
+    pub let buckets: []i32 = [];
     pub let values: []SemanticBuiltinInfo = [];
 }
 
 fn MapStrSemanticbuiltininfo_index(map: MapStrSemanticbuiltininfo, key: str) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapStrSemanticbuiltininfo_rehash(map: MapStrSemanticbuiltininfo, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapStrSemanticbuiltininfo_has(map: MapStrSemanticbuiltininfo, key: str) -> bool {
@@ -3461,6 +4174,17 @@ fn MapStrSemanticbuiltininfo_put(map: MapStrSemanticbuiltininfo, key: str, value
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrSemanticbuiltininfo_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapStrSemanticbuiltininfo_length(map: MapStrSemanticbuiltininfo) -> i32 {
@@ -3477,6 +4201,7 @@ fn MapStrSemanticbuiltininfo_delete(map: MapStrSemanticbuiltininfo, key: str) ->
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrSemanticbuiltininfo_rehash(map, len(map.buckets)); }
 }
 
 class MapAstnodeStr {
@@ -3527,15 +4252,36 @@ fn MapAstnodeStr_delete(map: MapAstnodeStr, key: AstNode) -> void {
 
 class MapStrMapstrbool {
     pub let keys: []str = [];
+    pub let buckets: []i32 = [];
     pub let values: []MapStrBool = [];
 }
 
 fn MapStrMapstrbool_index(map: MapStrMapstrbool, key: str) -> i32 {
     if (map == null) { return -1; }
-    for (let i: i32 = 0; i < len(map.keys); i++) {
+    let capacity: i32 = len(map.buckets);
+    if (capacity == 0) {
+        for (let i: i32 = 0; i < len(map.keys); i++) {
+            if (map.keys[i] == key) { return i; }
+        }
+        return -1;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) {
+        let i: i32 = map.buckets[slot] - 1;
         if (map.keys[i] == key) { return i; }
+        slot = (slot + 1) & (capacity - 1);
     }
     return -1;
+}
+
+fn MapStrMapstrbool_rehash(map: MapStrMapstrbool, capacity: i32) -> void {
+    if (len(map.buckets) != capacity) { map.buckets = array_I32(capacity); }
+    else { for (let i: i32 = 0; i < capacity; i++) { map.buckets[i] = 0; } }
+    for (let i: i32 = 0; i < len(map.keys); i++) {
+        let slot: i32 = compiler_hash_string(map.keys[i]) & (capacity - 1);
+        while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+        map.buckets[slot] = i + 1;
+    }
 }
 
 fn MapStrMapstrbool_has(map: MapStrMapstrbool, key: str) -> bool {
@@ -3553,6 +4299,17 @@ fn MapStrMapstrbool_put(map: MapStrMapstrbool, key: str, value: MapStrBool) -> v
     if (index >= 0) { map.values[index] = value; return; }
     array_append(map.keys, key);
     array_append(map.values, value);
+    let count: i32 = len(map.keys);
+    if (count < 8 && len(map.buckets) == 0) { return; }
+    let capacity: i32 = len(map.buckets);
+    if (count * 2 > capacity) {
+        if (capacity == 0) { capacity = 8; }
+        MapStrMapstrbool_rehash(map, capacity * 2);
+        return;
+    }
+    let slot: i32 = compiler_hash_string(key) & (capacity - 1);
+    while (map.buckets[slot] != 0) { slot = (slot + 1) & (capacity - 1); }
+    map.buckets[slot] = count;
 }
 
 fn MapStrMapstrbool_length(map: MapStrMapstrbool) -> i32 {
@@ -3569,6 +4326,7 @@ fn MapStrMapstrbool_delete(map: MapStrMapstrbool, key: str) -> void {
     }
     array_pop(map.keys);
     array_pop(map.values);
+    if (len(map.buckets) != 0) { MapStrMapstrbool_rehash(map, len(map.buckets)); }
 }
 
 fn array_Str(count: i32) -> []str {
@@ -3578,11 +4336,13 @@ fn array_Str(count: i32) -> []str {
 }
 
 fn append_Str(items: []str, value: str) -> []str {
+    if (len(items) == 0) { items = []; }
     array_append(items, value);
     return items;
 }
 
 fn extend_Str(items: []str, more: []str) -> []str {
+    if (len(items) == 0 && len(more) != 0) { items = []; }
     let count: i32 = len(more);
     for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
     return items;
@@ -3788,11 +4548,13 @@ fn array_Astnode(count: i32) -> []AstNode {
 }
 
 fn append_Astnode(items: []AstNode, value: AstNode) -> []AstNode {
+    if (len(items) == 0) { items = []; }
     array_append(items, value);
     return items;
 }
 
 fn extend_Astnode(items: []AstNode, more: []AstNode) -> []AstNode {
+    if (len(items) == 0 && len(more) != 0) { items = []; }
     let count: i32 = len(more);
     for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
     return items;
@@ -3878,11 +4640,13 @@ fn array_Astclassfield(count: i32) -> []AstClassField {
 }
 
 fn append_Astclassfield(items: []AstClassField, value: AstClassField) -> []AstClassField {
+    if (len(items) == 0) { items = []; }
     array_append(items, value);
     return items;
 }
 
 fn extend_Astclassfield(items: []AstClassField, more: []AstClassField) -> []AstClassField {
+    if (len(items) == 0 && len(more) != 0) { items = []; }
     let count: i32 = len(more);
     for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
     return items;
@@ -3908,11 +4672,13 @@ fn array_Astclassmethod(count: i32) -> []AstClassMethod {
 }
 
 fn append_Astclassmethod(items: []AstClassMethod, value: AstClassMethod) -> []AstClassMethod {
+    if (len(items) == 0) { items = []; }
     array_append(items, value);
     return items;
 }
 
 fn extend_Astclassmethod(items: []AstClassMethod, more: []AstClassMethod) -> []AstClassMethod {
+    if (len(items) == 0 && len(more) != 0) { items = []; }
     let count: i32 = len(more);
     for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
     return items;
@@ -3938,11 +4704,13 @@ fn array_Astparam(count: i32) -> []AstParam {
 }
 
 fn append_Astparam(items: []AstParam, value: AstParam) -> []AstParam {
+    if (len(items) == 0) { items = []; }
     array_append(items, value);
     return items;
 }
 
 fn extend_Astparam(items: []AstParam, more: []AstParam) -> []AstParam {
+    if (len(items) == 0 && len(more) != 0) { items = []; }
     let count: i32 = len(more);
     for (let i: i32 = 0; i < count; i++) { array_append(items, more[i]); }
     return items;

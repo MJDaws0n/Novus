@@ -2,22 +2,44 @@ module std_memory;
 
 fn make_buffer(size: i32) -> str {
     if (size <= 0) { return ""; }
-    let block: str = " ";
-    let result: str = "";
-    let remaining: i32 = size;
-    while (remaining > 0) {
-        if ((remaining & 1) != 0) { result = result + block; }
-        remaining = remaining >> 1;
-        if (remaining > 0) { block = block + block; }
-    }
+    let result: str = alloc_string(size);
+    let address: u64 = ptr(result);
+    for (let i: i32 = 0; i < size; i++) { store_byte(address + i32_to_u64(i), 32); }
     return result;
 }
 
-fn copy_bytes_raw(src: u64, length: i32) -> str {
-    let result: str = make_buffer(length);
-    for (let i: i32 = 0; i < length; i++) {
-        store_byte(ptr(result) + i32_to_u64(i), load8(src + i32_to_u64(i)));
+// Copy disjoint byte ranges using native words, with a byte tail. Neither
+// range needs word alignment. Callers retain ownership of the source object.
+#if(arch == "x86") {
+    fn memory_copy(destination: u64, source: u64, count: i32) -> void {
+        while (count >= 4) {
+            store_word(destination, load32(source));
+            destination += 4; source += 4; count -= 4;
+        }
+        while (count > 0) {
+            store_byte(destination, load8(source));
+            destination++; source++; count--;
+        }
     }
+}
+
+#if(arch != "x86") {
+    fn memory_copy(destination: u64, source: u64, count: i32) -> void {
+        while (count >= 8) {
+            store_word(destination, load64(source));
+            destination += 8; source += 8; count -= 8;
+        }
+        while (count > 0) {
+            store_byte(destination, load8(source));
+            destination++; source++; count--;
+        }
+    }
+}
+
+fn copy_bytes_raw(src: u64, length: i32) -> str {
+    if (length <= 0) { return ""; }
+    let result: str = alloc_string(length);
+    memory_copy(ptr(result), src, length);
     return result;
 }
 

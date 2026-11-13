@@ -15,6 +15,42 @@ class FileReadResult {
     pub let error: str = "";
 }
 
+class FileTextResult {
+    pub let data: str = "";
+    pub let error: str = "";
+}
+
+fn read_all_text(path: str) -> FileTextResult {
+    let result: FileTextResult = new FileTextResult();
+    let descriptor: i32 = file_open_read(path);
+    if (descriptor < 0) { result.error = "cannot open file: " + path; return result; }
+    let buffer: str = make_buffer(16384);
+    let content: StringBuilder = new StringBuilder();
+    while (true) {
+        let amount: i32 = file_read(descriptor, ptr(buffer), 16384);
+        if (amount == 0) { break; }
+        if (amount < 0) { result.error = "cannot read file: " + path; break; }
+        content.append_bytes(ptr(buffer), amount);
+    }
+    file_close(descriptor);
+    result.data = content.text();
+    return result;
+}
+
+fn write_all_text(path: str, data: str) -> str {
+    let descriptor: i32 = file_open_write(path);
+    if (descriptor < 0) { return "cannot open file for writing: " + path; }
+    let count: i32 = len(data);
+    let offset: i32 = 0;
+    while (offset < count) {
+        let written: i32 = file_write(descriptor, ptr(data) + i32_to_u64(offset), count - offset);
+        if (written <= 0) { file_close(descriptor); return "cannot write file: " + path; }
+        offset += written;
+    }
+    file_close(descriptor);
+    return "";
+}
+
 class PathResult {
     pub let path: str = "";
     pub let error: str = "";

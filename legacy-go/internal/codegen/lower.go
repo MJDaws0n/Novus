@@ -1341,6 +1341,7 @@ func (l *Lowerer) builtinHandlers() map[string]builtinHandler {
 		"load8":         l.builtinLoad8,
 		"store_byte":    l.builtinStoreByte,
 		"store_word":    l.builtinStoreWord,
+		"alloc_string":  l.builtinAllocString,
 		"load32":        l.builtinLoad32,
 		"load64":        l.builtinLoad64,
 		"win_call":      l.builtinWinCall,
@@ -1558,6 +1559,22 @@ func (l *Lowerer) builtinLen(e *ast.CallExpr) Operand {
 }
 
 // load8(addr) — load unsigned byte from memory address → i32.
+func (l *Lowerer) builtinAllocString(e *ast.CallExpr) Operand {
+	if len(e.Args) != 1 {
+		return None()
+	}
+	length := l.lowerExpr(e.Args[0])
+	size := VReg(l.freshVReg())
+	l.emit(IRInstr{Op: IRAdd, Dst: size, Src1: length, Src2: Imm(1)})
+	result := VReg(l.freshVReg())
+	l.emit(IRInstr{Op: IRHeapAlloc, Dst: result, Src1: size})
+	end := VReg(l.freshVReg())
+	l.emit(IRInstr{Op: IRAdd, Dst: end, Src1: result, Src2: length})
+	l.emit(IRInstr{Op: IRStoreByte, Dst: end, Src1: Imm(0)})
+	l.vregIsStr[result.Reg] = true
+	return result
+}
+
 func (l *Lowerer) builtinLoad8(e *ast.CallExpr) Operand {
 	if len(e.Args) != 1 {
 		return None()
