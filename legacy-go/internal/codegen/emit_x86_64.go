@@ -1250,6 +1250,10 @@ func (e *x86_64Emitter) emitNASMFunction(fn *IRFunc) {
 	w.WriteString(fmt.Sprintf("%s:\n", fn.Name))
 	w.WriteString("    push rbp\n")
 	w.WriteString("    mov rbp, rsp\n")
+	for frameSize >= 4096 {
+		w.WriteString("    sub rsp, 4096\n    mov byte [rsp], 0\n")
+		frameSize -= 4096
+	}
 	if frameSize > 0 {
 		w.WriteString(fmt.Sprintf("    sub rsp, %d\n", frameSize))
 	}

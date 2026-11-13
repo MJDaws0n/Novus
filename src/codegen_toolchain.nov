@@ -176,7 +176,7 @@ fn codegen_Toolchain_linkWindows(tc: CodegenToolchain) -> str {
         if (!(ok)) {
             return ("Windows ARM64 requires lld-link or link.exe");
         }
-        let args: []str = ["/machine:arm64", "/entry:main", "/subsystem:console", ("/out:" + tc.ExeFile), tc.ObjFile];
+        let args: []str = ["/machine:arm64", "/entry:main", "/subsystem:console", "/stack:16777216", ("/out:" + tc.ExeFile), tc.ObjFile];
         if (tc.WindowsAPI) {
             args = append_Str(append_Str(append_Str(append_Str(args, "kernel32.lib"), "user32.lib"), "gdi32.lib"), "msvcrt.lib");
             args = append_Str(append_Str(args, "urlmon.lib"), "shell32.lib");
@@ -197,14 +197,14 @@ fn codegen_Toolchain_linkWindows(tc: CodegenToolchain) -> str {
         }
     }
     if ((golinkBin != "")) {
-        let cmd: ProcessCommand = runtime_os_exec_Command(golinkBin, ["/entry", "main", "/console", tc.ObjFile, "kernel32.dll", "user32.dll", "gdi32.dll", "msvcrt.dll", "urlmon.dll", "shell32.dll"]);
+        let cmd: ProcessCommand = runtime_os_exec_Command(golinkBin, ["/entry", "main", "/console", "/stacksize", "1000000", tc.ObjFile, "kernel32.dll", "user32.dll", "gdi32.dll", "msvcrt.dll", "urlmon.dll", "shell32.dll"]);
         return codegen_Toolchain_runCmd(tc, cmd, "link (golink)");
     }
     let result_484: ResultStrStr = runtime_os_exec_LookPath("link.exe");
     let link: str = result_484.value0;
     let err: str = result_484.value1;
     if ((err == "")) {
-        let cmd: ProcessCommand = runtime_os_exec_Command(link, ["/ENTRY:main", "/SUBSYSTEM:CONSOLE", ("/OUT:" + tc.ExeFile), tc.ObjFile, "kernel32.lib", "user32.lib", "gdi32.lib", "msvcrt.lib", "urlmon.lib", "shell32.lib"]);
+        let cmd: ProcessCommand = runtime_os_exec_Command(link, ["/ENTRY:main", "/SUBSYSTEM:CONSOLE", "/STACK:16777216", ("/OUT:" + tc.ExeFile), tc.ObjFile, "kernel32.lib", "user32.lib", "gdi32.lib", "msvcrt.lib", "urlmon.lib", "shell32.lib"]);
         return codegen_Toolchain_runCmd(tc, cmd, "link (msvc)");
     }
     return ("no suitable linker found for Windows (tried golink, link.exe)");

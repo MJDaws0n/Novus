@@ -8,6 +8,7 @@ from pathlib import Path
 import platform
 import shutil
 import subprocess
+import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,6 +99,12 @@ try:
     run([compiler, f"--target={target}", "--gc-entries=1024", "tests/selfhost/gc_graph.nov"], "gc-small-table-build")
     run([output / ("gc_graph" + extension)], "gc-small-table-run", timeout=60)
     report["tests"].append({"name": "gc-small-table", "passed": True})
+    if not args.test_only and not args.bootstrap:
+        run([sys.executable, ROOT / "scripts" / "differential.py", "--reference", work / ("bootstrap-go" + extension),
+             "--compiler", compiler, "--target", target], "differential", timeout=600)
+        compared = json.loads((ROOT / "build" / "differential" / f"{target_os}_{artifact_arch}" / "results.json").read_text())
+        report["comparisons"] = {"passed": compared["passed"], "failed": compared["failed"]}
+        print(f"PASS {compared['passed']} compiler comparisons", flush=True)
     report["passed"] = True
     if args.package:
         release_arch = "386" if target_arch in ("386", "x86") else target_arch

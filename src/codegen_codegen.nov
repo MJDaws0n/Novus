@@ -97,7 +97,7 @@ fn codegen_Generate(program: AstNode, opts: CodegenOptions) -> ResultCodegenresu
                     let items_128: []CodegenIRInstr = fn_value.Instrs;
                     let count_130: i32 = len(items_128);
                     for (let index_129: i32 = 0; index_129 < count_130; index_129++) {
-                        let instr: CodegenIRInstr = copy_CodegenIRInstr(items_128[index_129]);
+                        let instr: CodegenIRInstr = items_128[index_129];
                         if ((instr.Op == 54)) {
                             tc.WindowsAPI = true;
                         }
@@ -186,12 +186,12 @@ fn codegen_checkRegisterWarnings(mod: CodegenIRModule, target: CodegenTarget) ->
                 let items_138: []CodegenIRInstr = fn_value.Instrs;
                 let count_140: i32 = len(items_138);
                 for (let index_139: i32 = 0; index_139 < count_140; index_139++) {
-                    let instr: CodegenIRInstr = copy_CodegenIRInstr(items_138[index_139]);
+                    let instr: CodegenIRInstr = items_138[index_139];
                     {
-                        let items_141: []CodegenOperand = [copy_CodegenOperand(instr.Dst), copy_CodegenOperand(instr.Src1), copy_CodegenOperand(instr.Src2)];
+                        let items_141: []CodegenOperand = [instr.Dst, instr.Src1, instr.Src2];
                         let count_143: i32 = len(items_141);
                         for (let index_142: i32 = 0; index_142 < count_143; index_142++) {
-                            let op: CodegenOperand = copy_CodegenOperand(items_141[index_142]);
+                            let op: CodegenOperand = items_141[index_142];
                             if ((op.Kind == 2)) {
                                 MapStrBool_put(usedRegs, op.PhysReg, true);
                             }
@@ -201,7 +201,7 @@ fn codegen_checkRegisterWarnings(mod: CodegenIRModule, target: CodegenTarget) ->
                         let items_144: []CodegenOperand = instr.Args;
                         let count_146: i32 = len(items_144);
                         for (let index_145: i32 = 0; index_145 < count_146; index_145++) {
-                            let op: CodegenOperand = copy_CodegenOperand(items_144[index_145]);
+                            let op: CodegenOperand = items_144[index_145];
                             if ((op.Kind == 2)) {
                                 MapStrBool_put(usedRegs, op.PhysReg, true);
                             }
@@ -247,7 +247,7 @@ fn codegen_findFloatOp(mod: CodegenIRModule) -> str {
                 let items_154: []CodegenIRInstr = fn_value.Instrs;
                 let count_156: i32 = len(items_154);
                 for (let index_155: i32 = 0; index_155 < count_156; index_155++) {
-                    let instr: CodegenIRInstr = copy_CodegenIRInstr(items_154[index_155]);
+                    let instr: CodegenIRInstr = items_154[index_155];
                     {
                         let choice_157: i32 = instr.Op;
                         if ((choice_157 == 57) || (choice_157 == 58) || (choice_157 == 59) || (choice_157 == 60) || (choice_157 == 61) || (choice_157 == 62) || (choice_157 == 63) || (choice_157 == 64) || (choice_157 == 65) || (choice_157 == 66) || (choice_157 == 67) || (choice_157 == 68) || (choice_157 == 69) || (choice_157 == 70)) {

@@ -31,12 +31,12 @@ fn codegen_x86_64Emitter_computeFrameSize(e: CodegenX86_64Emitter, fn_value: Cod
         let items_243: []CodegenIRInstr = fn_value.Instrs;
         let count_245: i32 = len(items_243);
         for (let index_244: i32 = 0; index_244 < count_245; index_244++) {
-            let instr: CodegenIRInstr = copy_CodegenIRInstr(items_243[index_244]);
+            let instr: CodegenIRInstr = items_243[index_244];
             {
-                let items_246: []CodegenOperand = [copy_CodegenOperand(instr.Dst), copy_CodegenOperand(instr.Src1), copy_CodegenOperand(instr.Src2)];
+                let items_246: []CodegenOperand = [instr.Dst, instr.Src1, instr.Src2];
                 let count_248: i32 = len(items_246);
                 for (let index_247: i32 = 0; index_247 < count_248; index_247++) {
-                    let op: CodegenOperand = copy_CodegenOperand(items_246[index_247]);
+                    let op: CodegenOperand = items_246[index_247];
                     if (((op.Kind == 1) && ((op.Reg + 1) > maxVReg))) {
                         maxVReg = (op.Reg + 1);
                     }
@@ -46,7 +46,7 @@ fn codegen_x86_64Emitter_computeFrameSize(e: CodegenX86_64Emitter, fn_value: Cod
                 let items_249: []CodegenOperand = instr.Args;
                 let count_251: i32 = len(items_249);
                 for (let index_250: i32 = 0; index_250 < count_251; index_250++) {
-                    let op: CodegenOperand = copy_CodegenOperand(items_249[index_250]);
+                    let op: CodegenOperand = items_249[index_250];
                     if (((op.Kind == 1) && ((op.Reg + 1) > maxVReg))) {
                         maxVReg = (op.Reg + 1);
                     }
@@ -82,7 +82,7 @@ fn codegen_x86_64Emitter_emitGAS(e: CodegenX86_64Emitter) -> void {
             let items_252: []CodegenIRStringConst = e.mod.Strings;
             let count_254: i32 = len(items_252);
             for (let index_253: i32 = 0; index_253 < count_254; index_253++) {
-                let s: CodegenIRStringConst = copy_CodegenIRStringConst(items_252[index_253]);
+                let s: CodegenIRStringConst = items_252[index_253];
                 let label: str = codegen_Target_Sym(e.target, s.Label);
                 w.append((label + ":\n"));
                 w.append(("    .asciz " + codegen_gasQuoteString(s.Value) + "\n"));
@@ -104,7 +104,7 @@ fn codegen_x86_64Emitter_emitGAS(e: CodegenX86_64Emitter) -> void {
             let items_255: []CodegenIRGlobal = e.mod.Globals;
             let count_257: i32 = len(items_255);
             for (let index_256: i32 = 0; index_256 < count_257; index_256++) {
-                let g: CodegenIRGlobal = copy_CodegenIRGlobal(items_255[index_256]);
+                let g: CodegenIRGlobal = items_255[index_256];
                 let label: str = codegen_Target_Sym(e.target, g.Name);
                 w.append((".p2align 3\n"));
                 w.append((label + ":\n"));
@@ -226,8 +226,8 @@ fn codegen_x86_64Emitter_emitGASFunction(e: CodegenX86_64Emitter, fn_value: Code
         let items_261: []CodegenIRInstr = fn_value.Instrs;
         let count_263: i32 = len(items_261);
         for (let index_262: i32 = 0; index_262 < count_263; index_262++) {
-            let instr: CodegenIRInstr = copy_CodegenIRInstr(items_261[index_262]);
-            codegen_x86_64Emitter_emitGASInstr(e, fn_value, copy_CodegenIRInstr(instr));
+            let instr: CodegenIRInstr = items_261[index_262];
+            codegen_x86_64Emitter_emitGASInstr(e, fn_value, instr);
         }
     }
     w.append("\n");
@@ -308,7 +308,7 @@ fn codegen_x86_64Emitter_gasSpillIfNeeded(e: CodegenX86_64Emitter, fn_value: Cod
 
 // gasEnsureReg loads dst operand into scratch, returns the register or phys reg string.
 fn codegen_x86_64Emitter_gasEnsureReg(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, op: CodegenOperand, scratch: str) -> str {
-    return codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(op), scratch);
+    return codegen_x86_64Emitter_gasLoadToReg(e, fn_value, op, scratch);
 }
 
 // gasStoreToOperand stores a register value into a destination operand.
@@ -336,8 +336,8 @@ fn codegen_x86_64Emitter_gasStoreToOperand(e: CodegenX86_64Emitter, fn_value: Co
 // as mov(r10, optionPtr); mov(r8, 4) into r10=4 immediately before syscall.
 fn codegen_x86_64Emitter_emitGASMove(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, dst: CodegenOperand, src: CodegenOperand) -> void {
     if ((dst.Kind != 2)) {
-        let loaded: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(src), "%r10");
-        codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(dst), loaded);
+        let loaded: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, src, "%r10");
+        codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, dst, loaded);
         return;
     }
     let w: StringBuilder = e.b;
@@ -377,7 +377,7 @@ fn codegen_x86_64Emitter_emitGASInstr(e: CodegenX86_64Emitter, fn_value: Codegen
                 w.append(("    ## " + instr.Src1.Label + "\n"));
             }
         } else if ((choice_268 == 0)) {
-            codegen_x86_64Emitter_emitGASMove(e, fn_value, copy_CodegenOperand(instr.Dst), copy_CodegenOperand(instr.Src1));
+            codegen_x86_64Emitter_emitGASMove(e, fn_value, instr.Dst, instr.Src1);
         } else if ((choice_268 == 1)) {
             let scratch: str = "%r10";
             if ((instr.Src1.Kind == 4)) {
@@ -395,12 +395,12 @@ fn codegen_x86_64Emitter_emitGASInstr(e: CodegenX86_64Emitter, fn_value: Codegen
                         if ((instr.Src1.Kind == 6)) {
                             w.append(("    leaq " + runtime_string_i64(instr.Src1.MemOffset) + "(" + "%" + codegen_promoteReg(instr.Src1.MemBase) + "), " + scratch + "\n"));
                         } else {
-                            codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), scratch);
+                            codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, scratch);
                         }
                     }
                 }
             }
-            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), scratch);
+            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, scratch);
         } else if ((choice_268 == 2)) {
             let scratch: str = "%r10";
             if ((instr.Src1.Kind == 6)) {
@@ -411,130 +411,130 @@ fn codegen_x86_64Emitter_emitGASInstr(e: CodegenX86_64Emitter, fn_value: Codegen
                     let sym: str = codegen_Target_Sym(e.target, label);
                     w.append(("    leaq " + sym + "(" + "%" + "rip), " + scratch + "\n"));
                 } else {
-                    codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), scratch);
+                    codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, scratch);
                 }
             }
-            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), scratch);
+            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, scratch);
         } else if ((choice_268 == 3)) {
-            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
             if ((instr.Dst.Kind == 6)) {
                 w.append(("    movq " + src + ", " + runtime_string_i64(instr.Dst.MemOffset) + "(" + "%" + codegen_promoteReg(instr.Dst.MemBase) + ")\n"));
             } else {
                 if ((instr.Src2.Kind != 0)) {
-                    let addr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "%r11");
+                    let addr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src2, "%r11");
                     w.append(("    movq " + src + ", (" + addr + ")\n"));
                 }
             }
         } else if ((choice_268 == 4)) {
-            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
             w.append(("    pushq " + src + "\n"));
         } else if ((choice_268 == 5)) {
             if ((instr.Dst.Kind == 2)) {
                 w.append(("    popq " + "%" + instr.Dst.PhysReg + "\n"));
             } else {
                 w.append("    popq %r10\n");
-                codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
+                codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r10");
             }
         } else if ((choice_268 == 6)) {
-            codegen_x86_64Emitter_emitGASBinOp(e, fn_value, copy_CodegenIRInstr(instr), "addq");
+            codegen_x86_64Emitter_emitGASBinOp(e, fn_value, instr, "addq");
         } else if ((choice_268 == 7)) {
-            codegen_x86_64Emitter_emitGASBinOp(e, fn_value, copy_CodegenIRInstr(instr), "subq");
+            codegen_x86_64Emitter_emitGASBinOp(e, fn_value, instr, "subq");
         } else if ((choice_268 == 8)) {
-            codegen_x86_64Emitter_emitGASMul(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASMul(e, fn_value, instr);
         } else if ((choice_268 == 9)) {
-            codegen_x86_64Emitter_emitGASDiv(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASDiv(e, fn_value, instr);
         } else if ((choice_268 == 11)) {
-            codegen_x86_64Emitter_emitGASUDiv(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASUDiv(e, fn_value, instr);
         } else if ((choice_268 == 10)) {
-            codegen_x86_64Emitter_emitGASMod(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASMod(e, fn_value, instr);
         } else if ((choice_268 == 12)) {
-            codegen_x86_64Emitter_emitGASUMod(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASUMod(e, fn_value, instr);
         } else if ((choice_268 == 13)) {
-            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
             w.append(("    negq " + src + "\n"));
-            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), src);
+            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, src);
         } else if ((choice_268 == 17)) {
-            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
             w.append(("    xorq $1, " + src + "\n"));
-            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), src);
+            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, src);
         } else if ((choice_268 == 14)) {
-            codegen_x86_64Emitter_emitGASBinOp(e, fn_value, copy_CodegenIRInstr(instr), "andq");
+            codegen_x86_64Emitter_emitGASBinOp(e, fn_value, instr, "andq");
         } else if ((choice_268 == 15)) {
-            codegen_x86_64Emitter_emitGASBinOp(e, fn_value, copy_CodegenIRInstr(instr), "orq");
+            codegen_x86_64Emitter_emitGASBinOp(e, fn_value, instr, "orq");
         } else if ((choice_268 == 16)) {
-            codegen_x86_64Emitter_emitGASBinOp(e, fn_value, copy_CodegenIRInstr(instr), "xorq");
+            codegen_x86_64Emitter_emitGASBinOp(e, fn_value, instr, "xorq");
         } else if ((choice_268 == 18)) {
-            let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+            let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
             if ((src1 != "%r10")) {
                 w.append(("    movq " + src1 + ", " + "%" + "r10\n"));
             }
             if ((instr.Src2.Kind == 3)) {
                 w.append(("    shlq $" + runtime_string_i64(instr.Src2.Imm) + ", " + "%" + "r10\n"));
             } else {
-                let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "%rcx");
+                let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src2, "%rcx");
                 if ((src2 != "%rcx")) {
                     w.append(("    movq " + src2 + ", " + "%" + "rcx\n"));
                 }
                 w.append("    shlq %cl, %r10\n");
             }
-            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
+            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r10");
         } else if ((choice_268 == 19)) {
-            let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+            let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
             if ((src1 != "%r10")) {
                 w.append(("    movq " + src1 + ", " + "%" + "r10\n"));
             }
             if ((instr.Src2.Kind == 3)) {
                 w.append(("    sarq $" + runtime_string_i64(instr.Src2.Imm) + ", " + "%" + "r10\n"));
             } else {
-                let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "%rcx");
+                let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src2, "%rcx");
                 if ((src2 != "%rcx")) {
                     w.append(("    movq " + src2 + ", " + "%" + "rcx\n"));
                 }
                 w.append("    sarq %cl, %r10\n");
             }
-            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
+            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r10");
         } else if ((choice_268 == 20)) {
-            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
             if ((src != "%r10")) {
                 w.append(("    movq " + src + ", " + "%" + "r10\n"));
             }
             w.append("    notq %r10\n");
-            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
+            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r10");
         } else if ((choice_268 == 21)) {
-            codegen_x86_64Emitter_emitGASCmp(e, fn_value, copy_CodegenIRInstr(instr), "sete");
+            codegen_x86_64Emitter_emitGASCmp(e, fn_value, instr, "sete");
         } else if ((choice_268 == 22)) {
-            codegen_x86_64Emitter_emitGASCmp(e, fn_value, copy_CodegenIRInstr(instr), "setne");
+            codegen_x86_64Emitter_emitGASCmp(e, fn_value, instr, "setne");
         } else if ((choice_268 == 23)) {
-            codegen_x86_64Emitter_emitGASCmp(e, fn_value, copy_CodegenIRInstr(instr), "setl");
+            codegen_x86_64Emitter_emitGASCmp(e, fn_value, instr, "setl");
         } else if ((choice_268 == 24)) {
-            codegen_x86_64Emitter_emitGASCmp(e, fn_value, copy_CodegenIRInstr(instr), "setle");
+            codegen_x86_64Emitter_emitGASCmp(e, fn_value, instr, "setle");
         } else if ((choice_268 == 25)) {
-            codegen_x86_64Emitter_emitGASCmp(e, fn_value, copy_CodegenIRInstr(instr), "setg");
+            codegen_x86_64Emitter_emitGASCmp(e, fn_value, instr, "setg");
         } else if ((choice_268 == 26)) {
-            codegen_x86_64Emitter_emitGASCmp(e, fn_value, copy_CodegenIRInstr(instr), "setge");
+            codegen_x86_64Emitter_emitGASCmp(e, fn_value, instr, "setge");
         } else if ((choice_268 == 75)) {
-            codegen_x86_64Emitter_emitGASCmp(e, fn_value, copy_CodegenIRInstr(instr), "setb");
+            codegen_x86_64Emitter_emitGASCmp(e, fn_value, instr, "setb");
         } else if ((choice_268 == 76)) {
-            codegen_x86_64Emitter_emitGASCmp(e, fn_value, copy_CodegenIRInstr(instr), "setbe");
+            codegen_x86_64Emitter_emitGASCmp(e, fn_value, instr, "setbe");
         } else if ((choice_268 == 77)) {
-            codegen_x86_64Emitter_emitGASCmp(e, fn_value, copy_CodegenIRInstr(instr), "seta");
+            codegen_x86_64Emitter_emitGASCmp(e, fn_value, instr, "seta");
         } else if ((choice_268 == 78)) {
-            codegen_x86_64Emitter_emitGASCmp(e, fn_value, copy_CodegenIRInstr(instr), "setae");
+            codegen_x86_64Emitter_emitGASCmp(e, fn_value, instr, "setae");
         } else if ((choice_268 == 27)) {
             w.append(("    jmp " + instr.Dst.Label + "\n"));
         } else if ((choice_268 == 28)) {
-            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
             w.append(("    testq " + src + ", " + src + "\n"));
             w.append(("    jnz " + instr.Dst.Label + "\n"));
         } else if ((choice_268 == 29)) {
-            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
             w.append(("    testq " + src + ", " + src + "\n"));
             w.append(("    jz " + instr.Dst.Label + "\n"));
         } else if ((choice_268 == 31)) {
-            codegen_x86_64Emitter_emitGASCall(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASCall(e, fn_value, instr);
         } else if ((choice_268 == 32)) {
             if ((instr.Src1.Kind != 0)) {
-                let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+                let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
                 if ((src != "%rax")) {
                     w.append(("    movq " + src + ", " + "%" + "rax\n"));
                 }
@@ -551,37 +551,37 @@ fn codegen_x86_64Emitter_emitGASInstr(e: CodegenX86_64Emitter, fn_value: Codegen
             if ((instr.Src1.Kind == 3)) {
                 w.append(("    int $0x" + runtime_format_integer(instr.Src1.Imm, "%x") + "\n"));
             } else {
-                let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+                let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
                 w.append(("    ## dynamic int via " + src + " (using int $0x80)\n"));
                 w.append("    int $0x80\n");
             }
         } else if ((choice_268 == 35)) {
             w.append("    nop\n");
         } else if ((choice_268 == 36)) {
-            codegen_x86_64Emitter_emitGASMove(e, fn_value, copy_CodegenOperand(instr.Dst), copy_CodegenOperand(instr.Src1));
+            codegen_x86_64Emitter_emitGASMove(e, fn_value, instr.Dst, instr.Src1);
         } else if ((choice_268 == 37)) {
-            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
-            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), src);
+            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
+            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, src);
         } else if ((choice_268 == 38) || (choice_268 == 39)) {
-            codegen_x86_64Emitter_emitGASFlagOp(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASFlagOp(e, fn_value, instr);
         } else if ((choice_268 == 40)) {
-            codegen_x86_64Emitter_emitGASStrConcat(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASStrConcat(e, fn_value, instr);
         } else if ((choice_268 == 41)) {
-            codegen_x86_64Emitter_emitGASStrLen(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASStrLen(e, fn_value, instr);
         } else if ((choice_268 == 42)) {
-            codegen_x86_64Emitter_emitGASStrIndex(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASStrIndex(e, fn_value, instr);
         } else if ((choice_268 == 44)) {
-            codegen_x86_64Emitter_emitGASStrCmpEq(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASStrCmpEq(e, fn_value, instr);
         } else if ((choice_268 == 43)) {
-            let addr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Dst), "%r11");
-            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+            let addr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Dst, "%r11");
+            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
             w.append(("    movb " + src + "b, (" + addr + ")\n"));
         } else if ((choice_268 == 45)) {
-            let addr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+            let addr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
             w.append(("    movzbl (" + addr + "), " + "%" + "r11d\n"));
-            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r11");
+            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r11");
         } else if ((choice_268 == 79)) {
-            codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+            codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
             {
                 let choice_269: i64 = instr.Src2.Imm;
                 if ((choice_269 == 8)) {
@@ -598,38 +598,39 @@ fn codegen_x86_64Emitter_emitGASInstr(e: CodegenX86_64Emitter, fn_value: Codegen
                     w.append("    movl %r10d, %r11d\n");
                 }
             }
-            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r11");
+            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r11");
         } else if ((choice_268 == 80)) {
-            codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
-            codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "%rcx");
+            codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
+            codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src2, "%rcx");
             w.append("    shrq %cl, %r10\n");
-            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
+            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r10");
         } else if ((choice_268 == 46)) {
-            let addr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+            let addr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
             w.append(("    movslq (" + addr + "), " + "%" + "r11\n"));
-            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r11");
+            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r11");
         } else if ((choice_268 == 47)) {
-            let addr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+            let addr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
             w.append(("    movq (" + addr + "), " + "%" + "r11\n"));
-            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r11");
+            codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r11");
         } else if ((choice_268 == 74)) {
-            let assigned_270: CodegenOperand = copy_CodegenOperand(codegen_LabelOp("_novus_gc_alloc"));
-            let assigned_271: []CodegenOperand = [copy_CodegenOperand(instr.Src1)];
+            instr = copy_CodegenIRInstr(instr);
+            let assigned_270: CodegenOperand = codegen_LabelOp("_novus_gc_alloc");
+            let assigned_271: []CodegenOperand = [instr.Src1];
             instr.Src1 = assigned_270;
             instr.Args = assigned_271;
-            codegen_x86_64Emitter_emitGASCall(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASCall(e, fn_value, instr);
         } else if ((choice_268 == 48)) {
-            codegen_x86_64Emitter_emitGASArrayNew(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASArrayNew(e, fn_value, instr);
         } else if ((choice_268 == 49)) {
-            codegen_x86_64Emitter_emitGASArrayGet(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASArrayGet(e, fn_value, instr);
         } else if ((choice_268 == 50)) {
-            codegen_x86_64Emitter_emitGASArraySet(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASArraySet(e, fn_value, instr);
         } else if ((choice_268 == 51)) {
-            codegen_x86_64Emitter_emitGASArrayAppend(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASArrayAppend(e, fn_value, instr);
         } else if ((choice_268 == 52)) {
-            codegen_x86_64Emitter_emitGASArrayPop(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASArrayPop(e, fn_value, instr);
         } else if ((choice_268 == 53)) {
-            codegen_x86_64Emitter_emitGASArrayLen(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASArrayLen(e, fn_value, instr);
         } else if ((choice_268 == 54)) {
             w.append("    ## win_call: Windows API calls not supported on this target\n");
         } else if ((choice_268 == 55)) {
@@ -641,12 +642,12 @@ fn codegen_x86_64Emitter_emitGASInstr(e: CodegenX86_64Emitter, fn_value: Codegen
                 } else {
                     w.append(("    movq " + globalSym + "(" + "%" + "rip), " + "%" + "r10\n"));
                 }
-                codegen_x86_64Emitter_gasSpillIfNeeded(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
+                codegen_x86_64Emitter_gasSpillIfNeeded(e, fn_value, instr.Dst, "%r10");
             }
         } else if ((choice_268 == 56)) {
             if ((instr.Dst.Kind == 5)) {
                 let globalSym: str = codegen_Target_Sym(e.target, instr.Dst.Label);
-                let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+                let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
                 if ((e.target.OS == 1)) {
                     w.append(("    movq " + globalSym + "@GOTPCREL(" + "%" + "rip), " + "%" + "r11\n"));
                     w.append(("    movq " + src + ", (" + "%" + "r11)\n"));
@@ -656,33 +657,33 @@ fn codegen_x86_64Emitter_emitGASInstr(e: CodegenX86_64Emitter, fn_value: Codegen
             }
         } else if ((choice_268 == 72)) {
         } else if ((choice_268 == 57)) {
-            codegen_x86_64Emitter_emitGASFBinOp(e, fn_value, copy_CodegenIRInstr(instr), "addsd");
+            codegen_x86_64Emitter_emitGASFBinOp(e, fn_value, instr, "addsd");
         } else if ((choice_268 == 58)) {
-            codegen_x86_64Emitter_emitGASFBinOp(e, fn_value, copy_CodegenIRInstr(instr), "subsd");
+            codegen_x86_64Emitter_emitGASFBinOp(e, fn_value, instr, "subsd");
         } else if ((choice_268 == 59)) {
-            codegen_x86_64Emitter_emitGASFBinOp(e, fn_value, copy_CodegenIRInstr(instr), "mulsd");
+            codegen_x86_64Emitter_emitGASFBinOp(e, fn_value, instr, "mulsd");
         } else if ((choice_268 == 60)) {
-            codegen_x86_64Emitter_emitGASFBinOp(e, fn_value, copy_CodegenIRInstr(instr), "divsd");
+            codegen_x86_64Emitter_emitGASFBinOp(e, fn_value, instr, "divsd");
         } else if ((choice_268 == 61)) {
-            codegen_x86_64Emitter_emitGASFMod(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASFMod(e, fn_value, instr);
         } else if ((choice_268 == 62)) {
-            codegen_x86_64Emitter_emitGASFNeg(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASFNeg(e, fn_value, instr);
         } else if ((choice_268 == 63)) {
-            codegen_x86_64Emitter_emitGASFCmp(e, fn_value, copy_CodegenIRInstr(instr), "eq");
+            codegen_x86_64Emitter_emitGASFCmp(e, fn_value, instr, "eq");
         } else if ((choice_268 == 64)) {
-            codegen_x86_64Emitter_emitGASFCmp(e, fn_value, copy_CodegenIRInstr(instr), "ne");
+            codegen_x86_64Emitter_emitGASFCmp(e, fn_value, instr, "ne");
         } else if ((choice_268 == 65)) {
-            codegen_x86_64Emitter_emitGASFCmp(e, fn_value, copy_CodegenIRInstr(instr), "lt");
+            codegen_x86_64Emitter_emitGASFCmp(e, fn_value, instr, "lt");
         } else if ((choice_268 == 66)) {
-            codegen_x86_64Emitter_emitGASFCmp(e, fn_value, copy_CodegenIRInstr(instr), "le");
+            codegen_x86_64Emitter_emitGASFCmp(e, fn_value, instr, "le");
         } else if ((choice_268 == 67)) {
-            codegen_x86_64Emitter_emitGASFCmp(e, fn_value, copy_CodegenIRInstr(instr), "gt");
+            codegen_x86_64Emitter_emitGASFCmp(e, fn_value, instr, "gt");
         } else if ((choice_268 == 68)) {
-            codegen_x86_64Emitter_emitGASFCmp(e, fn_value, copy_CodegenIRInstr(instr), "ge");
+            codegen_x86_64Emitter_emitGASFCmp(e, fn_value, instr, "ge");
         } else if ((choice_268 == 69)) {
-            codegen_x86_64Emitter_emitGASIntToFloat(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASIntToFloat(e, fn_value, instr);
         } else if ((choice_268 == 70)) {
-            codegen_x86_64Emitter_emitGASFloatToInt(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitGASFloatToInt(e, fn_value, instr);
         } else if ((choice_268 == 73)) {
             let gcCollectSym: str = codegen_Target_Sym(e.target, "_novus_gc_collect");
             w.append(("    call " + gcCollectSym + "\n"));
@@ -692,28 +693,28 @@ fn codegen_x86_64Emitter_emitGASInstr(e: CodegenX86_64Emitter, fn_value: Codegen
 
 fn codegen_x86_64Emitter_emitGASBinOp(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr, mnemonic: str) -> void {
     let w: StringBuilder = e.b;
-    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
-    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "%r11");
+    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
+    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src2, "%r11");
     if ((src1 != "%r10")) {
         w.append(("    movq " + src1 + ", " + "%" + "r10\n"));
     }
     w.append(("    " + mnemonic + " " + src2 + ", " + "%" + "r10\n"));
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r10");
 }
 
 fn codegen_x86_64Emitter_emitGASMul(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
-    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "%r11");
+    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
+    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src2, "%r11");
     w.append(("    movq " + src1 + ", " + "%" + "rax\n"));
     w.append(("    imulq " + src2 + ", " + "%" + "rax\n"));
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%rax");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%rax");
 }
 
 fn codegen_x86_64Emitter_emitGASDiv(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
-    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "%r11");
+    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
+    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src2, "%r11");
     w.append(("    movq " + src1 + ", " + "%" + "rax\n"));
     w.append("    cqo\n");
     if (((src2 == "%r11") || (src2 == "%rcx"))) {
@@ -722,13 +723,13 @@ fn codegen_x86_64Emitter_emitGASDiv(e: CodegenX86_64Emitter, fn_value: CodegenIR
         w.append(("    movq " + src2 + ", " + "%" + "rcx\n"));
         w.append("    idivq %rcx\n");
     }
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%rax");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%rax");
 }
 
 fn codegen_x86_64Emitter_emitGASMod(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
-    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "%r11");
+    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
+    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src2, "%r11");
     w.append(("    movq " + src1 + ", " + "%" + "rax\n"));
     w.append("    cqo\n");
     if (((src2 == "%r11") || (src2 == "%rcx"))) {
@@ -737,13 +738,13 @@ fn codegen_x86_64Emitter_emitGASMod(e: CodegenX86_64Emitter, fn_value: CodegenIR
         w.append(("    movq " + src2 + ", " + "%" + "rcx\n"));
         w.append("    idivq %rcx\n");
     }
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%rdx");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%rdx");
 }
 
 fn codegen_x86_64Emitter_emitGASUDiv(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
-    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "%r11");
+    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
+    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src2, "%r11");
     w.append(("    movq " + src1 + ", " + "%" + "rax\n"));
     w.append("    xorq %rdx, %rdx\n");
     if (((src2 == "%r11") || (src2 == "%rcx"))) {
@@ -752,13 +753,13 @@ fn codegen_x86_64Emitter_emitGASUDiv(e: CodegenX86_64Emitter, fn_value: CodegenI
         w.append(("    movq " + src2 + ", " + "%" + "rcx\n"));
         w.append("    divq %rcx\n");
     }
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%rax");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%rax");
 }
 
 fn codegen_x86_64Emitter_emitGASUMod(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
-    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "%r11");
+    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
+    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src2, "%r11");
     w.append(("    movq " + src1 + ", " + "%" + "rax\n"));
     w.append("    xorq %rdx, %rdx\n");
     if (((src2 == "%r11") || (src2 == "%rcx"))) {
@@ -767,39 +768,39 @@ fn codegen_x86_64Emitter_emitGASUMod(e: CodegenX86_64Emitter, fn_value: CodegenI
         w.append(("    movq " + src2 + ", " + "%" + "rcx\n"));
         w.append("    divq %rcx\n");
     }
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%rdx");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%rdx");
 }
 
 fn codegen_x86_64Emitter_emitGASCmp(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr, setcc: str) -> void {
     let w: StringBuilder = e.b;
-    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
-    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "%r11");
+    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
+    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src2, "%r11");
     if ((src1 != "%r10")) {
         w.append(("    movq " + src1 + ", " + "%" + "r10\n"));
     }
     w.append(("    cmpq " + src2 + ", " + "%" + "r10\n"));
     w.append(("    " + setcc + " " + "%" + "r10b\n"));
     w.append("    movzbq %r10b, %r10\n");
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r10");
 }
 
 // emitGASFBinOp handles addsd, subsd, mulsd, divsd.
 fn codegen_x86_64Emitter_emitGASFBinOp(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr, mnemonic: str) -> void {
     let w: StringBuilder = e.b;
-    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
-    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "%r11");
+    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
+    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src2, "%r11");
     w.append(("    movq " + src1 + ", " + "%" + "xmm0\n"));
     w.append(("    movq " + src2 + ", " + "%" + "xmm1\n"));
     w.append(("    " + mnemonic + " " + "%" + "xmm1, " + "%" + "xmm0\n"));
     w.append("    movq %xmm0, %r10\n");
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r10");
 }
 
 // emitGASFMod handles fmod (a - trunc(a/b) * b).
 fn codegen_x86_64Emitter_emitGASFMod(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
-    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "%r11");
+    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
+    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src2, "%r11");
     w.append(("    movq " + src1 + ", " + "%" + "xmm0\n"));
     w.append(("    movq " + src2 + ", " + "%" + "xmm1\n"));
     w.append("    movapd %xmm0, %xmm2\n");
@@ -809,19 +810,19 @@ fn codegen_x86_64Emitter_emitGASFMod(e: CodegenX86_64Emitter, fn_value: CodegenI
     w.append("    mulsd %xmm1, %xmm2\n");
     w.append("    subsd %xmm2, %xmm0\n");
     w.append("    movq %xmm0, %r10\n");
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r10");
 }
 
 // emitGASFNeg handles fneg (flip the sign bit).
 fn codegen_x86_64Emitter_emitGASFNeg(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+    let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
     if ((src != "%r10")) {
         w.append(("    movq " + src + ", " + "%" + "r10\n"));
     }
     w.append("    movabsq $-9223372036854775808, %r11\n");
     w.append("    xorq %r11, %r10\n");
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r10");
 }
 
 // emitGASFCmp handles float comparisons via ucomisd.
@@ -829,8 +830,8 @@ fn codegen_x86_64Emitter_emitGASFNeg(e: CodegenX86_64Emitter, fn_value: CodegenI
 // operands except ne, which is true.
 fn codegen_x86_64Emitter_emitGASFCmp(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr, cond: str) -> void {
     let w: StringBuilder = e.b;
-    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
-    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "%r11");
+    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
+    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src2, "%r11");
     w.append(("    movq " + src1 + ", " + "%" + "xmm0\n"));
     w.append(("    movq " + src2 + ", " + "%" + "xmm1\n"));
     {
@@ -860,25 +861,25 @@ fn codegen_x86_64Emitter_emitGASFCmp(e: CodegenX86_64Emitter, fn_value: CodegenI
         }
     }
     w.append("    movzbq %r10b, %r10\n");
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r10");
 }
 
 // emitGASIntToFloat: cvtsi2sd (signed i64 → f64).
 fn codegen_x86_64Emitter_emitGASIntToFloat(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+    let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
     w.append(("    cvtsi2sd " + src + ", " + "%" + "xmm0\n"));
     w.append("    movq %xmm0, %r10\n");
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r10");
 }
 
 // emitGASFloatToInt: cvttsd2si (f64 → signed i64, truncate toward zero).
 fn codegen_x86_64Emitter_emitGASFloatToInt(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+    let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
     w.append(("    movq " + src + ", " + "%" + "xmm0\n"));
     w.append("    cvttsd2si %xmm0, %r10\n");
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r10");
 }
 
 fn codegen_x86_64Emitter_emitGASCall(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
@@ -896,7 +897,7 @@ fn codegen_x86_64Emitter_emitGASCall(e: CodegenX86_64Emitter, fn_value: CodegenI
         {
             let i: i32 = (len(instr.Args) - 1);
             for (; (i >= len(argRegs)); i--) {
-                let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Args[i]), "%r10");
+                let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Args[i], "%r10");
                 w.append(("    pushq " + src + "\n"));
             }
         }
@@ -904,7 +905,7 @@ fn codegen_x86_64Emitter_emitGASCall(e: CodegenX86_64Emitter, fn_value: CodegenI
     {
         let i: i32 = 0;
         for (; ((i < len(instr.Args)) && (i < len(argRegs))); i++) {
-            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Args[i]), "%r10");
+            let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Args[i], "%r10");
             let reg: str = ("%" + argRegs[i]);
             if ((src != reg)) {
                 w.append(("    movq " + src + ", " + reg + "\n"));
@@ -922,14 +923,14 @@ fn codegen_x86_64Emitter_emitGASCall(e: CodegenX86_64Emitter, fn_value: CodegenI
         w.append(("    addq $" + runtime_string_i32(stackBytes) + ", " + "%" + "rsp\n"));
     }
     if ((instr.Dst.Kind != 0)) {
-        codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%rax");
+        codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%rax");
     }
 }
 
 fn codegen_x86_64Emitter_emitGASStrConcat(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
-    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "%r11");
+    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
+    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src2, "%r11");
     let id: i32 = codegen_x86_64Emitter_uniqueID(e);
     let len1Label: str = (".Lscl1_" + runtime_string_i32(id));
     let len1Done: str = (".Lscl1d_" + runtime_string_i32(id));
@@ -989,12 +990,12 @@ fn codegen_x86_64Emitter_emitGASStrConcat(e: CodegenX86_64Emitter, fn_value: Cod
     w.append("    incq %rdi\n");
     w.append(("    jmp " + copy2Label + "\n"));
     w.append((doneLabel + ":\n"));
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%rax");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%rax");
 }
 
 fn codegen_x86_64Emitter_emitGASStrLen(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+    let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
     let id: i32 = codegen_x86_64Emitter_uniqueID(e);
     let startLabel: str = (".Lstrlen_s_" + runtime_string_i32(id));
     let doneLabel: str = (".Lstrlen_d_" + runtime_string_i32(id));
@@ -1008,13 +1009,13 @@ fn codegen_x86_64Emitter_emitGASStrLen(e: CodegenX86_64Emitter, fn_value: Codege
     w.append("    incq %r11\n");
     w.append(("    jmp " + startLabel + "\n"));
     w.append((doneLabel + ":\n"));
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r11");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r11");
 }
 
 fn codegen_x86_64Emitter_emitGASStrIndex(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
-    let idx: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "%r11");
+    let src: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
+    let idx: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src2, "%r11");
     if ((src != "%r10")) {
         w.append(("    movq " + src + ", " + "%" + "r10\n"));
     }
@@ -1023,15 +1024,15 @@ fn codegen_x86_64Emitter_emitGASStrIndex(e: CodegenX86_64Emitter, fn_value: Code
     }
     w.append("    xorq %rax, %rax\n");
     w.append("    movb (%r10,%r11), %al\n");
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%rax");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%rax");
 }
 
 // emitGASStrCmpEq emits an inline byte-by-byte string comparison (GAS/AT&T).
 // dst = 1 if strings are equal, 0 otherwise.
 fn codegen_x86_64Emitter_emitGASStrCmpEq(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
-    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "%r11");
+    let src1: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
+    let src2: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src2, "%r11");
     if ((src1 != "%r10")) {
         w.append(("    movq " + src1 + ", " + "%" + "r10\n"));
     }
@@ -1059,7 +1060,7 @@ fn codegen_x86_64Emitter_emitGASStrCmpEq(e: CodegenX86_64Emitter, fn_value: Code
     w.append((eqLabel + ":\n"));
     w.append("    movq $1, %rax\n");
     w.append((endLabel + ":\n"));
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%rax");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%rax");
 }
 
 fn codegen_x86_64Emitter_emitNASM(e: CodegenX86_64Emitter) -> void {
@@ -1072,7 +1073,7 @@ fn codegen_x86_64Emitter_emitNASM(e: CodegenX86_64Emitter) -> void {
             let items_273: []CodegenIRStringConst = e.mod.Strings;
             let count_275: i32 = len(items_273);
             for (let index_274: i32 = 0; index_274 < count_275; index_274++) {
-                let s: CodegenIRStringConst = copy_CodegenIRStringConst(items_273[index_274]);
+                let s: CodegenIRStringConst = items_273[index_274];
                 w.append(("    " + s.Label + ": db " + codegen_nasmQuoteString(s.Value) + ", 0\n"));
                 w.append(("    " + s.Label + "_len: equ $ - " + s.Label + " - 1\n"));
             }
@@ -1106,7 +1107,7 @@ fn codegen_x86_64Emitter_emitNASM(e: CodegenX86_64Emitter) -> void {
             let items_276: []CodegenIRGlobal = e.mod.Globals;
             let count_278: i32 = len(items_276);
             for (let index_277: i32 = 0; index_277 < count_278; index_277++) {
-                let g: CodegenIRGlobal = copy_CodegenIRGlobal(items_276[index_277]);
+                let g: CodegenIRGlobal = items_276[index_277];
                 if ((g.InitStr >= 0)) {
                     let strLabel: str = e.mod.Strings[g.InitStr].Label;
                     w.append(("    " + g.Name + ": dq " + strLabel + "\n"));
@@ -1159,6 +1160,10 @@ fn codegen_x86_64Emitter_emitNASMFunction(e: CodegenX86_64Emitter, fn_value: Cod
     w.append((fn_value.Name + ":\n"));
     w.append("    push rbp\n");
     w.append("    mov rbp, rsp\n");
+    while (frameSize >= 4096) {
+        w.append("    sub rsp, 4096\n    mov byte [rsp], 0\n");
+        frameSize -= 4096;
+    }
     if ((frameSize > 0)) {
         w.append(("    sub rsp, " + runtime_string_i32(frameSize) + "\n"));
     }
@@ -1176,8 +1181,8 @@ fn codegen_x86_64Emitter_emitNASMFunction(e: CodegenX86_64Emitter, fn_value: Cod
         let items_291: []CodegenIRInstr = fn_value.Instrs;
         let count_293: i32 = len(items_291);
         for (let index_292: i32 = 0; index_292 < count_293; index_292++) {
-            let instr: CodegenIRInstr = copy_CodegenIRInstr(items_291[index_292]);
-            codegen_x86_64Emitter_emitNASMInstr(e, fn_value, copy_CodegenIRInstr(instr));
+            let instr: CodegenIRInstr = items_291[index_292];
+            codegen_x86_64Emitter_emitNASMInstr(e, fn_value, instr);
         }
     }
     w.append("\n");
@@ -1237,8 +1242,8 @@ fn codegen_x86_64Emitter_nasmStoreToOperand(e: CodegenX86_64Emitter, fn_value: C
 // cannot silently overwrite a value prepared for native code or an API call.
 fn codegen_x86_64Emitter_emitNASMMove(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, dst: CodegenOperand, src: CodegenOperand) -> void {
     if ((dst.Kind != 2)) {
-        let loaded: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(src), "r10");
-        codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(dst), loaded);
+        let loaded: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, src, "r10");
+        codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, dst, loaded);
         return;
     }
     let w: StringBuilder = e.b;
@@ -1288,7 +1293,7 @@ fn codegen_x86_64Emitter_emitNASMInstr(e: CodegenX86_64Emitter, fn_value: Codege
                 w.append(("    ; " + instr.Src1.Label + "\n"));
             }
         } else if ((choice_297 == 0)) {
-            codegen_x86_64Emitter_emitNASMMove(e, fn_value, copy_CodegenOperand(instr.Dst), copy_CodegenOperand(instr.Src1));
+            codegen_x86_64Emitter_emitNASMMove(e, fn_value, instr.Dst, instr.Src1);
         } else if ((choice_297 == 1)) {
             let scratch: str = "r10";
             if ((instr.Src1.Kind == 4)) {
@@ -1305,12 +1310,12 @@ fn codegen_x86_64Emitter_emitNASMInstr(e: CodegenX86_64Emitter, fn_value: Codege
                         if ((instr.Src1.Kind == 6)) {
                             w.append(("    lea " + scratch + ", [" + instr.Src1.MemBase + runtime_format_value(runtime_string_i64(instr.Src1.MemOffset), "%+d") + "]\n"));
                         } else {
-                            codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), scratch);
+                            codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, scratch);
                         }
                     }
                 }
             }
-            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), scratch);
+            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, scratch);
         } else if ((choice_297 == 2)) {
             let scratch: str = "r10";
             if ((instr.Src1.Kind == 6)) {
@@ -1320,164 +1325,164 @@ fn codegen_x86_64Emitter_emitNASMInstr(e: CodegenX86_64Emitter, fn_value: Codege
                     let label: str = e.mod.Strings[instr.Src1.Imm].Label;
                     w.append(("    lea " + scratch + ", [rel " + label + "]\n"));
                 } else {
-                    codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), scratch);
+                    codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, scratch);
                 }
             }
-            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), scratch);
+            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, scratch);
         } else if ((choice_297 == 3)) {
-            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
             if ((instr.Dst.Kind == 6)) {
                 w.append(("    mov qword [" + instr.Dst.MemBase + runtime_format_value(runtime_string_i64(instr.Dst.MemOffset), "%+d") + "], " + src + "\n"));
             } else {
                 if ((instr.Src2.Kind != 0)) {
-                    let addr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "r11");
+                    let addr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src2, "r11");
                     w.append(("    mov [" + addr + "], " + src + "\n"));
                 }
             }
         } else if ((choice_297 == 4)) {
-            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
             w.append(("    push " + src + "\n"));
         } else if ((choice_297 == 5)) {
             if ((instr.Dst.Kind == 2)) {
                 w.append(("    pop " + instr.Dst.PhysReg + "\n"));
             } else {
                 w.append("    pop r10\n");
-                codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+                codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
             }
         } else if ((choice_297 == 6)) {
-            codegen_x86_64Emitter_emitNASMBinOp(e, fn_value, copy_CodegenIRInstr(instr), "add");
+            codegen_x86_64Emitter_emitNASMBinOp(e, fn_value, instr, "add");
         } else if ((choice_297 == 7)) {
-            codegen_x86_64Emitter_emitNASMBinOp(e, fn_value, copy_CodegenIRInstr(instr), "sub");
+            codegen_x86_64Emitter_emitNASMBinOp(e, fn_value, instr, "sub");
         } else if ((choice_297 == 8)) {
-            let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
-            let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "r11");
+            let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
+            let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src2, "r11");
             w.append(("    mov rax, " + src1 + "\n"));
             w.append(("    imul rax, " + src2 + "\n"));
-            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "rax");
+            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "rax");
         } else if ((choice_297 == 9)) {
-            let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
-            let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "r11");
+            let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
+            let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src2, "r11");
             w.append(("    mov rax, " + src1 + "\n"));
             w.append("    cqo\n");
             w.append(("    mov rcx, " + src2 + "\n"));
             w.append("    idiv rcx\n");
-            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "rax");
+            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "rax");
         } else if ((choice_297 == 11)) {
-            let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
-            let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "r11");
+            let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
+            let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src2, "r11");
             w.append(("    mov rax, " + src1 + "\n"));
             w.append("    xor rdx, rdx\n");
             w.append(("    mov rcx, " + src2 + "\n"));
             w.append("    div rcx\n");
-            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "rax");
+            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "rax");
         } else if ((choice_297 == 10)) {
-            let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
-            let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "r11");
+            let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
+            let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src2, "r11");
             w.append(("    mov rax, " + src1 + "\n"));
             w.append("    cqo\n");
             w.append(("    mov rcx, " + src2 + "\n"));
             w.append("    idiv rcx\n");
-            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "rdx");
+            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "rdx");
         } else if ((choice_297 == 12)) {
-            let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
-            let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "r11");
+            let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
+            let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src2, "r11");
             w.append(("    mov rax, " + src1 + "\n"));
             w.append("    xor rdx, rdx\n");
             w.append(("    mov rcx, " + src2 + "\n"));
             w.append("    div rcx\n");
-            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "rdx");
+            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "rdx");
         } else if ((choice_297 == 13)) {
-            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
             if ((src != "r10")) {
                 w.append(("    mov r10, " + src + "\n"));
             }
             w.append("    neg r10\n");
-            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
         } else if ((choice_297 == 17)) {
-            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
             if ((src != "r10")) {
                 w.append(("    mov r10, " + src + "\n"));
             }
             w.append("    xor r10, 1\n");
-            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
         } else if ((choice_297 == 14)) {
-            codegen_x86_64Emitter_emitNASMBinOp(e, fn_value, copy_CodegenIRInstr(instr), "and");
+            codegen_x86_64Emitter_emitNASMBinOp(e, fn_value, instr, "and");
         } else if ((choice_297 == 15)) {
-            codegen_x86_64Emitter_emitNASMBinOp(e, fn_value, copy_CodegenIRInstr(instr), "or");
+            codegen_x86_64Emitter_emitNASMBinOp(e, fn_value, instr, "or");
         } else if ((choice_297 == 16)) {
-            codegen_x86_64Emitter_emitNASMBinOp(e, fn_value, copy_CodegenIRInstr(instr), "xor");
+            codegen_x86_64Emitter_emitNASMBinOp(e, fn_value, instr, "xor");
         } else if ((choice_297 == 18)) {
-            let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+            let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
             if ((src1 != "r10")) {
                 w.append(("    mov r10, " + src1 + "\n"));
             }
             if ((instr.Src2.Kind == 3)) {
                 w.append(("    shl r10, " + runtime_string_i64(instr.Src2.Imm) + "\n"));
             } else {
-                let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "rcx");
+                let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src2, "rcx");
                 if ((src2 != "rcx")) {
                     w.append(("    mov rcx, " + src2 + "\n"));
                 }
                 w.append("    shl r10, cl\n");
             }
-            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
         } else if ((choice_297 == 19)) {
-            let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+            let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
             if ((src1 != "r10")) {
                 w.append(("    mov r10, " + src1 + "\n"));
             }
             if ((instr.Src2.Kind == 3)) {
                 w.append(("    sar r10, " + runtime_string_i64(instr.Src2.Imm) + "\n"));
             } else {
-                let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "rcx");
+                let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src2, "rcx");
                 if ((src2 != "rcx")) {
                     w.append(("    mov rcx, " + src2 + "\n"));
                 }
                 w.append("    sar r10, cl\n");
             }
-            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
         } else if ((choice_297 == 20)) {
-            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
             if ((src != "r10")) {
                 w.append(("    mov r10, " + src + "\n"));
             }
             w.append("    not r10\n");
-            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
         } else if ((choice_297 == 21)) {
-            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, copy_CodegenIRInstr(instr), "sete");
+            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, instr, "sete");
         } else if ((choice_297 == 22)) {
-            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, copy_CodegenIRInstr(instr), "setne");
+            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, instr, "setne");
         } else if ((choice_297 == 23)) {
-            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, copy_CodegenIRInstr(instr), "setl");
+            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, instr, "setl");
         } else if ((choice_297 == 24)) {
-            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, copy_CodegenIRInstr(instr), "setle");
+            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, instr, "setle");
         } else if ((choice_297 == 25)) {
-            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, copy_CodegenIRInstr(instr), "setg");
+            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, instr, "setg");
         } else if ((choice_297 == 26)) {
-            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, copy_CodegenIRInstr(instr), "setge");
+            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, instr, "setge");
         } else if ((choice_297 == 75)) {
-            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, copy_CodegenIRInstr(instr), "setb");
+            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, instr, "setb");
         } else if ((choice_297 == 76)) {
-            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, copy_CodegenIRInstr(instr), "setbe");
+            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, instr, "setbe");
         } else if ((choice_297 == 77)) {
-            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, copy_CodegenIRInstr(instr), "seta");
+            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, instr, "seta");
         } else if ((choice_297 == 78)) {
-            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, copy_CodegenIRInstr(instr), "setae");
+            codegen_x86_64Emitter_emitNASMCmp(e, fn_value, instr, "setae");
         } else if ((choice_297 == 27)) {
             w.append(("    jmp " + instr.Dst.Label + "\n"));
         } else if ((choice_297 == 28)) {
-            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
             w.append(("    test " + src + ", " + src + "\n"));
             w.append(("    jnz " + instr.Dst.Label + "\n"));
         } else if ((choice_297 == 29)) {
-            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
             w.append(("    test " + src + ", " + src + "\n"));
             w.append(("    jz " + instr.Dst.Label + "\n"));
         } else if ((choice_297 == 31)) {
-            codegen_x86_64Emitter_emitNASMCall(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitNASMCall(e, fn_value, instr);
         } else if ((choice_297 == 32)) {
             if ((instr.Src1.Kind != 0)) {
-                let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+                let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
                 if ((src != "rax")) {
                     w.append(("    mov rax, " + src + "\n"));
                 }
@@ -1499,30 +1504,30 @@ fn codegen_x86_64Emitter_emitNASMInstr(e: CodegenX86_64Emitter, fn_value: Codege
         } else if ((choice_297 == 35)) {
             w.append("    nop\n");
         } else if ((choice_297 == 36)) {
-            codegen_x86_64Emitter_emitNASMMove(e, fn_value, copy_CodegenOperand(instr.Dst), copy_CodegenOperand(instr.Src1));
+            codegen_x86_64Emitter_emitNASMMove(e, fn_value, instr.Dst, instr.Src1);
         } else if ((choice_297 == 37)) {
-            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
-            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), src);
+            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
+            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, src);
         } else if ((choice_297 == 38) || (choice_297 == 39)) {
-            codegen_x86_64Emitter_emitNASMFlagOp(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitNASMFlagOp(e, fn_value, instr);
         } else if ((choice_297 == 41)) {
-            codegen_x86_64Emitter_emitNASMStrLen(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitNASMStrLen(e, fn_value, instr);
         } else if ((choice_297 == 42)) {
-            codegen_x86_64Emitter_emitNASMStrIndex(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitNASMStrIndex(e, fn_value, instr);
         } else if ((choice_297 == 43)) {
-            let addr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Dst), "r11");
-            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+            let addr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Dst, "r11");
+            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
             w.append(("    mov byte [" + addr + "], " + src + "b\n"));
         } else if ((choice_297 == 40)) {
-            codegen_x86_64Emitter_emitNASMStrConcat(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitNASMStrConcat(e, fn_value, instr);
         } else if ((choice_297 == 44)) {
-            codegen_x86_64Emitter_emitNASMStrCmpEq(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitNASMStrCmpEq(e, fn_value, instr);
         } else if ((choice_297 == 45)) {
-            let addr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+            let addr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
             w.append(("    movzx r11d, byte [" + addr + "]\n"));
-            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r11");
+            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r11");
         } else if ((choice_297 == 79)) {
-            codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+            codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
             {
                 let choice_298: i64 = instr.Src2.Imm;
                 if ((choice_298 == 8)) {
@@ -1539,127 +1544,128 @@ fn codegen_x86_64Emitter_emitNASMInstr(e: CodegenX86_64Emitter, fn_value: Codege
                     w.append("    mov r11d, r10d\n");
                 }
             }
-            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r11");
+            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r11");
         } else if ((choice_297 == 80)) {
-            codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
-            codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "rcx");
+            codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
+            codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src2, "rcx");
             w.append("    shr r10, cl\n");
-            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
         } else if ((choice_297 == 46)) {
-            let addr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+            let addr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
             w.append(("    mov r11d, dword [" + addr + "]\n"));
-            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r11");
+            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r11");
         } else if ((choice_297 == 47)) {
-            let addr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+            let addr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
             w.append(("    mov r11, qword [" + addr + "]\n"));
-            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r11");
+            codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r11");
         } else if ((choice_297 == 74)) {
-            let assigned_299: CodegenOperand = copy_CodegenOperand(codegen_LabelOp("_novus_gc_alloc"));
-            let assigned_300: []CodegenOperand = [copy_CodegenOperand(instr.Src1)];
+            instr = copy_CodegenIRInstr(instr);
+            let assigned_299: CodegenOperand = codegen_LabelOp("_novus_gc_alloc");
+            let assigned_300: []CodegenOperand = [instr.Src1];
             instr.Src1 = assigned_299;
             instr.Args = assigned_300;
-            codegen_x86_64Emitter_emitNASMCall(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitNASMCall(e, fn_value, instr);
         } else if ((choice_297 == 48)) {
-            codegen_x86_64Emitter_emitNASMArrayNew(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitNASMArrayNew(e, fn_value, instr);
         } else if ((choice_297 == 49)) {
-            codegen_x86_64Emitter_emitNASMArrayGet(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitNASMArrayGet(e, fn_value, instr);
         } else if ((choice_297 == 50)) {
-            codegen_x86_64Emitter_emitNASMArraySet(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitNASMArraySet(e, fn_value, instr);
         } else if ((choice_297 == 51)) {
-            codegen_x86_64Emitter_emitNASMArrayAppend(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitNASMArrayAppend(e, fn_value, instr);
         } else if ((choice_297 == 52)) {
-            codegen_x86_64Emitter_emitNASMArrayPop(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitNASMArrayPop(e, fn_value, instr);
         } else if ((choice_297 == 53)) {
-            codegen_x86_64Emitter_emitNASMArrayLen(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitNASMArrayLen(e, fn_value, instr);
         } else if ((choice_297 == 54)) {
-            codegen_x86_64Emitter_emitNASMWinCall(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitNASMWinCall(e, fn_value, instr);
         } else if ((choice_297 == 55)) {
             if ((instr.Src1.Kind == 5)) {
                 let globalSym: str = instr.Src1.Label;
                 w.append(("    mov r10, [rel " + globalSym + "]\n"));
-                codegen_x86_64Emitter_nasmSpillIfNeeded(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+                codegen_x86_64Emitter_nasmSpillIfNeeded(e, fn_value, instr.Dst, "r10");
             }
         } else if ((choice_297 == 56)) {
             if ((instr.Dst.Kind == 5)) {
                 let globalSym: str = instr.Dst.Label;
-                let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+                let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
                 w.append(("    mov [rel " + globalSym + "], " + src + "\n"));
             }
         } else if ((choice_297 == 73)) {
             w.append("    call _novus_gc_collect\n");
         } else if ((choice_297 == 57)) {
-            codegen_x86_64Emitter_emitNASMFBinOp(e, fn_value, copy_CodegenIRInstr(instr), "addsd");
+            codegen_x86_64Emitter_emitNASMFBinOp(e, fn_value, instr, "addsd");
         } else if ((choice_297 == 58)) {
-            codegen_x86_64Emitter_emitNASMFBinOp(e, fn_value, copy_CodegenIRInstr(instr), "subsd");
+            codegen_x86_64Emitter_emitNASMFBinOp(e, fn_value, instr, "subsd");
         } else if ((choice_297 == 59)) {
-            codegen_x86_64Emitter_emitNASMFBinOp(e, fn_value, copy_CodegenIRInstr(instr), "mulsd");
+            codegen_x86_64Emitter_emitNASMFBinOp(e, fn_value, instr, "mulsd");
         } else if ((choice_297 == 60)) {
-            codegen_x86_64Emitter_emitNASMFBinOp(e, fn_value, copy_CodegenIRInstr(instr), "divsd");
+            codegen_x86_64Emitter_emitNASMFBinOp(e, fn_value, instr, "divsd");
         } else if ((choice_297 == 61)) {
-            codegen_x86_64Emitter_emitNASMFMod(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitNASMFMod(e, fn_value, instr);
         } else if ((choice_297 == 62)) {
-            codegen_x86_64Emitter_emitNASMFNeg(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitNASMFNeg(e, fn_value, instr);
         } else if ((choice_297 == 63)) {
-            codegen_x86_64Emitter_emitNASMFCmp(e, fn_value, copy_CodegenIRInstr(instr), "eq");
+            codegen_x86_64Emitter_emitNASMFCmp(e, fn_value, instr, "eq");
         } else if ((choice_297 == 64)) {
-            codegen_x86_64Emitter_emitNASMFCmp(e, fn_value, copy_CodegenIRInstr(instr), "ne");
+            codegen_x86_64Emitter_emitNASMFCmp(e, fn_value, instr, "ne");
         } else if ((choice_297 == 65)) {
-            codegen_x86_64Emitter_emitNASMFCmp(e, fn_value, copy_CodegenIRInstr(instr), "lt");
+            codegen_x86_64Emitter_emitNASMFCmp(e, fn_value, instr, "lt");
         } else if ((choice_297 == 66)) {
-            codegen_x86_64Emitter_emitNASMFCmp(e, fn_value, copy_CodegenIRInstr(instr), "le");
+            codegen_x86_64Emitter_emitNASMFCmp(e, fn_value, instr, "le");
         } else if ((choice_297 == 67)) {
-            codegen_x86_64Emitter_emitNASMFCmp(e, fn_value, copy_CodegenIRInstr(instr), "gt");
+            codegen_x86_64Emitter_emitNASMFCmp(e, fn_value, instr, "gt");
         } else if ((choice_297 == 68)) {
-            codegen_x86_64Emitter_emitNASMFCmp(e, fn_value, copy_CodegenIRInstr(instr), "ge");
+            codegen_x86_64Emitter_emitNASMFCmp(e, fn_value, instr, "ge");
         } else if ((choice_297 == 69)) {
-            codegen_x86_64Emitter_emitNASMIntToFloat(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitNASMIntToFloat(e, fn_value, instr);
         } else if ((choice_297 == 70)) {
-            codegen_x86_64Emitter_emitNASMFloatToInt(e, fn_value, copy_CodegenIRInstr(instr));
+            codegen_x86_64Emitter_emitNASMFloatToInt(e, fn_value, instr);
         }
     }
 }
 
 fn codegen_x86_64Emitter_emitNASMBinOp(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr, mnemonic: str) -> void {
     let w: StringBuilder = e.b;
-    let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
-    let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "r11");
+    let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
+    let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src2, "r11");
     if ((src1 != "r10")) {
         w.append(("    mov r10, " + src1 + "\n"));
     }
     w.append(("    " + mnemonic + " r10, " + src2 + "\n"));
-    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
 }
 
 fn codegen_x86_64Emitter_emitNASMCmp(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr, setcc: str) -> void {
     let w: StringBuilder = e.b;
-    let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
-    let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "r11");
+    let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
+    let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src2, "r11");
     if ((src1 != "r10")) {
         w.append(("    mov r10, " + src1 + "\n"));
     }
     w.append(("    cmp r10, " + src2 + "\n"));
     w.append(("    " + setcc + " r10b\n"));
     w.append("    movzx r10, r10b\n");
-    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
 }
 
 // emitNASMFBinOp handles addsd, subsd, mulsd, divsd.
 fn codegen_x86_64Emitter_emitNASMFBinOp(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr, mnemonic: str) -> void {
     let w: StringBuilder = e.b;
-    let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
-    let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "r11");
+    let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
+    let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src2, "r11");
     w.append(("    movq xmm0, " + src1 + "\n"));
     w.append(("    movq xmm1, " + src2 + "\n"));
     w.append(("    " + mnemonic + " xmm0, xmm1\n"));
     w.append("    movq r10, xmm0\n");
-    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
 }
 
 // emitNASMFMod handles fmod (a - trunc(a/b) * b).
 fn codegen_x86_64Emitter_emitNASMFMod(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
-    let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "r11");
+    let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
+    let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src2, "r11");
     w.append(("    movq xmm0, " + src1 + "\n"));
     w.append(("    movq xmm1, " + src2 + "\n"));
     w.append("    movapd xmm2, xmm0\n");
@@ -1669,19 +1675,19 @@ fn codegen_x86_64Emitter_emitNASMFMod(e: CodegenX86_64Emitter, fn_value: Codegen
     w.append("    mulsd xmm2, xmm1\n");
     w.append("    subsd xmm0, xmm2\n");
     w.append("    movq r10, xmm0\n");
-    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
 }
 
 // emitNASMFNeg handles fneg (flip the sign bit).
 fn codegen_x86_64Emitter_emitNASMFNeg(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+    let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
     if ((src != "r10")) {
         w.append(("    mov r10, " + src + "\n"));
     }
     w.append("    mov r11, 0x8000000000000000\n");
     w.append("    xor r10, r11\n");
-    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
 }
 
 // emitNASMFCmp handles float comparisons via ucomisd.
@@ -1689,8 +1695,8 @@ fn codegen_x86_64Emitter_emitNASMFNeg(e: CodegenX86_64Emitter, fn_value: Codegen
 // operands except ne, which is true.
 fn codegen_x86_64Emitter_emitNASMFCmp(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr, cond: str) -> void {
     let w: StringBuilder = e.b;
-    let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
-    let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "r11");
+    let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
+    let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src2, "r11");
     w.append(("    movq xmm0, " + src1 + "\n"));
     w.append(("    movq xmm1, " + src2 + "\n"));
     {
@@ -1720,25 +1726,25 @@ fn codegen_x86_64Emitter_emitNASMFCmp(e: CodegenX86_64Emitter, fn_value: Codegen
         }
     }
     w.append("    movzx r10, r10b\n");
-    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
 }
 
 // emitNASMIntToFloat: cvtsi2sd (signed i64 → f64).
 fn codegen_x86_64Emitter_emitNASMIntToFloat(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+    let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
     w.append(("    cvtsi2sd xmm0, " + src + "\n"));
     w.append("    movq r10, xmm0\n");
-    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
 }
 
 // emitNASMFloatToInt: cvttsd2si (f64 → signed i64, truncate toward zero).
 fn codegen_x86_64Emitter_emitNASMFloatToInt(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+    let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
     w.append(("    movq xmm0, " + src + "\n"));
     w.append("    cvttsd2si r10, xmm0\n");
-    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
 }
 
 fn codegen_x86_64Emitter_emitNASMCall(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
@@ -1755,7 +1761,7 @@ fn codegen_x86_64Emitter_emitNASMCall(e: CodegenX86_64Emitter, fn_value: Codegen
         {
             let i: i32 = (len(instr.Args) - 1);
             for (; (i >= len(argRegs)); i--) {
-                let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Args[i]), "r10");
+                let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Args[i], "r10");
                 w.append(("    push " + src + "\n"));
                 stackArgs++;
             }
@@ -1764,7 +1770,7 @@ fn codegen_x86_64Emitter_emitNASMCall(e: CodegenX86_64Emitter, fn_value: Codegen
     {
         let i: i32 = 0;
         for (; ((i < len(instr.Args)) && (i < len(argRegs))); i++) {
-            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Args[i]), "r10");
+            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Args[i], "r10");
             if ((src != argRegs[i])) {
                 w.append(("    mov " + argRegs[i] + ", " + src + "\n"));
             }
@@ -1782,13 +1788,13 @@ fn codegen_x86_64Emitter_emitNASMCall(e: CodegenX86_64Emitter, fn_value: Codegen
         w.append(("    add rsp, " + runtime_string_i32(((stackArgs * 8) + alignPad)) + "\n"));
     }
     if ((instr.Dst.Kind != 0)) {
-        codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "rax");
+        codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "rax");
     }
 }
 
 fn codegen_x86_64Emitter_emitNASMStrLen(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+    let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
     let id: i32 = codegen_x86_64Emitter_uniqueID(e);
     let startLabel: str = (".strlen_s_" + runtime_string_i32(id));
     let doneLabel: str = (".strlen_d_" + runtime_string_i32(id));
@@ -1800,26 +1806,26 @@ fn codegen_x86_64Emitter_emitNASMStrLen(e: CodegenX86_64Emitter, fn_value: Codeg
     w.append("    inc rcx\n");
     w.append(("    jmp " + startLabel + "\n"));
     w.append((doneLabel + ":\n"));
-    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "rcx");
+    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "rcx");
 }
 
 fn codegen_x86_64Emitter_emitNASMStrIndex(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
-    let idx: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "r11");
+    let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
+    let idx: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src2, "r11");
     w.append(("    mov rdi, " + src + "\n"));
     w.append(("    mov rsi, " + idx + "\n"));
     w.append("    xor rax, rax\n");
     w.append("    mov al, [rdi+rsi]\n");
-    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "rax");
+    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "rax");
 }
 
 // emitNASMStrCmpEq emits an inline byte-by-byte string comparison (NASM/Intel).
 // dst = 1 if strings are equal, 0 otherwise.
 fn codegen_x86_64Emitter_emitNASMStrCmpEq(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
-    let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "r11");
+    let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
+    let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src2, "r11");
     if ((src1 != "r10")) {
         w.append(("    mov r10, " + src1 + "\n"));
     }
@@ -1847,13 +1853,13 @@ fn codegen_x86_64Emitter_emitNASMStrCmpEq(e: CodegenX86_64Emitter, fn_value: Cod
     w.append((eqLabel + ":\n"));
     w.append("    mov rax, 1\n");
     w.append((endLabel + ":\n"));
-    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "rax");
+    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "rax");
 }
 
 fn codegen_x86_64Emitter_emitNASMStrConcat(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
-    let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "r11");
+    let src1: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
+    let src2: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src2, "r11");
     let id: i32 = codegen_x86_64Emitter_uniqueID(e);
     let len1Label: str = (".scl1_" + runtime_string_i32(id));
     let len1Done: str = (".scl1d_" + runtime_string_i32(id));
@@ -1914,7 +1920,7 @@ fn codegen_x86_64Emitter_emitNASMStrConcat(e: CodegenX86_64Emitter, fn_value: Co
     w.append("    inc rdi\n");
     w.append(("    jmp " + copy2Label + "\n"));
     w.append((doneLabel + ":\n"));
-    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "rax");
+    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "rax");
 }
 
 fn codegen_x86_64Emitter_emitGASArrayNew(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
@@ -1931,31 +1937,31 @@ fn codegen_x86_64Emitter_emitGASArrayNew(e: CodegenX86_64Emitter, fn_value: Code
     w.append("    movq %r10, (%rax)\n");
     w.append("    movq $0, 8(%rax)\n");
     w.append(("    movq $" + runtime_string_i64(cap) + ", 16(" + "%" + "rax)\n"));
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%rax");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%rax");
 }
 
 fn codegen_x86_64Emitter_emitGASArrayGet(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let arrPtr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
-    let idx: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "%r11");
+    let arrPtr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
+    let idx: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src2, "%r11");
     w.append(("    movq (" + arrPtr + "), " + "%" + "r10\n"));
     w.append(("    movq (" + "%" + "r10," + idx + ",8), " + "%" + "r10\n"));
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r10");
 }
 
 fn codegen_x86_64Emitter_emitGASArraySet(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let arrPtr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
-    let idx: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r11");
-    let val: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "%rcx");
+    let arrPtr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Dst, "%r10");
+    let idx: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r11");
+    let val: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src2, "%rcx");
     w.append(("    movq (" + arrPtr + "), " + "%" + "r10\n"));
     w.append(("    movq " + val + ", (" + "%" + "r10," + idx + ",8)\n"));
 }
 
 fn codegen_x86_64Emitter_emitGASArrayAppend(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let arrPtr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
-    let val: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r11");
+    let arrPtr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Dst, "%r10");
+    let val: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r11");
     let id: i32 = codegen_x86_64Emitter_uniqueID(e);
     let noGrowLabel: str = (".Laang_" + runtime_string_i32(id));
     let capOkLabel: str = (".Laaco_" + runtime_string_i32(id));
@@ -2014,20 +2020,20 @@ fn codegen_x86_64Emitter_emitGASArrayAppend(e: CodegenX86_64Emitter, fn_value: C
 
 fn codegen_x86_64Emitter_emitGASArrayPop(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let arrPtr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+    let arrPtr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
     w.append(("    movq 8(" + arrPtr + "), " + "%" + "r11\n"));
     w.append("    decq %r11\n");
     w.append(("    movq " + "%" + "r11, 8(" + arrPtr + ")\n"));
     w.append(("    movq (" + arrPtr + "), " + "%" + "r10\n"));
     w.append("    movq (%r10,%r11,8), %r10\n");
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r10");
 }
 
 fn codegen_x86_64Emitter_emitGASArrayLen(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let arrPtr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "%r10");
+    let arrPtr: str = codegen_x86_64Emitter_gasLoadToReg(e, fn_value, instr.Src1, "%r10");
     w.append(("    movq 8(" + arrPtr + "), " + "%" + "r10\n"));
-    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
+    codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r10");
 }
 
 fn codegen_x86_64Emitter_emitNASMArrayNew(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
@@ -2045,31 +2051,31 @@ fn codegen_x86_64Emitter_emitNASMArrayNew(e: CodegenX86_64Emitter, fn_value: Cod
     w.append("    mov [rax], r10\n");
     w.append("    mov qword [rax+8], 0\n");
     w.append(("    mov qword [rax+16], " + runtime_string_i64(cap) + "\n"));
-    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "rax");
+    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "rax");
 }
 
 fn codegen_x86_64Emitter_emitNASMArrayGet(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let arrPtr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
-    let idx: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "r11");
+    let arrPtr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
+    let idx: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src2, "r11");
     w.append(("    mov r10, [" + arrPtr + "]\n"));
     w.append(("    mov r10, [r10+" + idx + "*8]\n"));
-    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
 }
 
 fn codegen_x86_64Emitter_emitNASMArraySet(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let arrPtr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
-    let idx: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r11");
-    let val: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src2), "rcx");
+    let arrPtr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Dst, "r10");
+    let idx: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r11");
+    let val: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src2, "rcx");
     w.append(("    mov r10, [" + arrPtr + "]\n"));
     w.append(("    mov [r10+" + idx + "*8], " + val + "\n"));
 }
 
 fn codegen_x86_64Emitter_emitNASMArrayAppend(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let arrPtr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
-    let val: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r11");
+    let arrPtr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Dst, "r10");
+    let val: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r11");
     let id: i32 = codegen_x86_64Emitter_uniqueID(e);
     let noGrowLabel: str = (".aang_" + runtime_string_i32(id));
     let capOkLabel: str = (".aaco_" + runtime_string_i32(id));
@@ -2134,20 +2140,20 @@ fn codegen_x86_64Emitter_emitNASMArrayAppend(e: CodegenX86_64Emitter, fn_value: 
 
 fn codegen_x86_64Emitter_emitNASMArrayPop(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let arrPtr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+    let arrPtr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
     w.append(("    mov r11, [" + arrPtr + "+8]\n"));
     w.append("    dec r11\n");
     w.append(("    mov [" + arrPtr + "+8], r11\n"));
     w.append(("    mov r10, [" + arrPtr + "]\n"));
     w.append("    mov r10, [r10+r11*8]\n");
-    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
 }
 
 fn codegen_x86_64Emitter_emitNASMArrayLen(e: CodegenX86_64Emitter, fn_value: CodegenIRFunc, instr: CodegenIRInstr) -> void {
     let w: StringBuilder = e.b;
-    let arrPtr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Src1), "r10");
+    let arrPtr: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Src1, "r10");
     w.append(("    mov r10, [" + arrPtr + "+8]\n"));
-    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+    codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
 }
 
 // collectWinCallExterns scans all IR functions for IRWinCall instructions
@@ -2165,7 +2171,7 @@ fn codegen_x86_64Emitter_collectWinCallExterns(e: CodegenX86_64Emitter) -> []str
                 let items_306: []CodegenIRInstr = fn_value.Instrs;
                 let count_308: i32 = len(items_306);
                 for (let index_307: i32 = 0; index_307 < count_308; index_307++) {
-                    let instr: CodegenIRInstr = copy_CodegenIRInstr(items_306[index_307]);
+                    let instr: CodegenIRInstr = items_306[index_307];
                     if (((instr.Op == 54) && (instr.Src1.Kind == 5))) {
                         let name: str = instr.Src1.Label;
                         if (!(MapStrBool_get(seen, name))) {
@@ -2201,7 +2207,7 @@ fn codegen_x86_64Emitter_emitNASMWinCall(e: CodegenX86_64Emitter, fn_value: Code
         {
             let i: i32 = (len(instr.Args) - 1);
             for (; (i >= 4); i--) {
-                let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Args[i]), "r10");
+                let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Args[i], "r10");
                 w.append(("    push " + src + "\n"));
                 stackArgs++;
             }
@@ -2210,7 +2216,7 @@ fn codegen_x86_64Emitter_emitNASMWinCall(e: CodegenX86_64Emitter, fn_value: Code
     {
         let i: i32 = 0;
         for (; ((i < len(instr.Args)) && (i < 4)); i++) {
-            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, copy_CodegenOperand(instr.Args[i]), "r10");
+            let src: str = codegen_x86_64Emitter_nasmLoadToReg(e, fn_value, instr.Args[i], "r10");
             if ((src != winArgRegs[i])) {
                 w.append(("    mov " + winArgRegs[i] + ", " + src + "\n"));
             }
@@ -2223,7 +2229,7 @@ fn codegen_x86_64Emitter_emitNASMWinCall(e: CodegenX86_64Emitter, fn_value: Code
         w.append(("    add rsp, " + runtime_string_i32((stackArgs * 8)) + "\n"));
     }
     if ((instr.Dst.Kind != 0)) {
-        codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "rax");
+        codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "rax");
     }
 }
 
@@ -2369,7 +2375,7 @@ fn codegen_x86_64Emitter_usesHeap(e: CodegenX86_64Emitter) -> bool {
                 let items_312: []CodegenIRInstr = fn_value.Instrs;
                 let count_314: i32 = len(items_312);
                 for (let index_313: i32 = 0; index_313 < count_314; index_313++) {
-                    let instr: CodegenIRInstr = copy_CodegenIRInstr(items_312[index_313]);
+                    let instr: CodegenIRInstr = items_312[index_313];
                     {
                         let choice_315: i32 = instr.Op;
                         if ((choice_315 == 74) || (choice_315 == 40) || (choice_315 == 48) || (choice_315 == 51) || (choice_315 == 73)) {
@@ -2425,7 +2431,18 @@ fn codegen_gasQuoteString(value: ByteBuffer) -> str {
 
 fn codegen_nasmQuoteString(value: ByteBuffer) -> str {
     let parts: []str = [];
-    for (let i: i32 = 0; i < value.length(); i++) { array_append(parts, i32_to_str(value.get(i))); }
+    let current: ByteBuffer = new ByteBuffer();
+    for (let i: i32 = 0; i < value.length(); i++) {
+        let ch: i32 = value.get(i);
+        if (ch < 32 || ch > 126 || ch == 34) {
+            if (current.length() > 0) {
+                array_append(parts, "\"" + current.text() + "\"");
+                current = new ByteBuffer();
+            }
+            array_append(parts, i32_to_str(ch));
+        } else { current.append(ch); }
+    }
+    if (current.length() > 0) { array_append(parts, "\"" + current.text() + "\""); }
     if (len(parts) == 0) { return "\"\""; }
     return string_join(parts, ", ");
 }
@@ -2476,7 +2493,7 @@ fn codegen_x86_64Emitter_emitGASFlagOp(e: CodegenX86_64Emitter, fn_value: Codege
             w.append(("    ## getflag: unrecognised flag " + runtime_quote(flagName) + "\n"));
             w.append("    xorq %r10, %r10\n");
         }
-        codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "%r10");
+        codegen_x86_64Emitter_gasStoreToOperand(e, fn_value, instr.Dst, "%r10");
     } else {
         w.append(("    ## setflag " + runtime_quote(flagName) + " not directly supported on x86\n"));
     }
@@ -2511,7 +2528,7 @@ fn codegen_x86_64Emitter_emitNASMFlagOp(e: CodegenX86_64Emitter, fn_value: Codeg
             w.append(("    ; getflag: unrecognised flag " + runtime_quote(flagName) + "\n"));
             w.append("    xor r10, r10\n");
         }
-        codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, copy_CodegenOperand(instr.Dst), "r10");
+        codegen_x86_64Emitter_nasmStoreToOperand(e, fn_value, instr.Dst, "r10");
     } else {
         w.append(("    ; setflag " + runtime_quote(flagName) + " not directly supported on x86\n"));
     }

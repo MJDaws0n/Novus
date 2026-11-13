@@ -1267,8 +1267,8 @@ func (e *arm64Emitter) emitArrayAppend(fn *IRFunc, instr IRInstr) {
 	w.WriteString(fmt.Sprintf("%s:\n", copyLabel))
 	w.WriteString("    cmp x9, x13\n") // while i < len
 	w.WriteString(fmt.Sprintf("    b.ge %s\n", copyDoneLabel))
-	w.WriteString("    ldr x18, [x16, x9, lsl #3]\n") // load old[i]
-	w.WriteString("    str x18, [x17, x9, lsl #3]\n") // store new[i]
+	w.WriteString("    ldr x8, [x16, x9, lsl #3]\n") // x18 is reserved by platform ABIs
+	w.WriteString("    str x8, [x17, x9, lsl #3]\n")
 	w.WriteString("    add x9, x9, #1\n")
 	w.WriteString(fmt.Sprintf("    b %s\n", copyLabel))
 	w.WriteString(fmt.Sprintf("%s:\n", copyDoneLabel))
@@ -1336,6 +1336,12 @@ func (e *arm64Emitter) usesHeap() bool {
 // values.
 func (e *arm64Emitter) emitSPAdj(mnemonic string, size int) {
 	w := e.b
+	if e.target.OS == OS_Windows && mnemonic == "sub" {
+		for size >= 4096 {
+			w.WriteString("    sub sp, sp, #4096\n    str xzr, [sp]\n")
+			size -= 4096
+		}
+	}
 	if size <= 4095 {
 		w.WriteString(fmt.Sprintf("    %s sp, sp, #%d\n", mnemonic, size))
 	} else {
