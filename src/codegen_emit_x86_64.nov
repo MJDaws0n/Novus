@@ -2487,7 +2487,7 @@ fn codegen_x86_64Emitter_emitGASFlagOp(e: CodegenX86_64Emitter, fn_value: Codege
     if ((instr.Op == 39)) {
         let setcc: str = codegen_flagNameToX86Setcc(flagName);
         if ((setcc != "")) {
-            w.append("    xorq %r10, %r10\n");
+            w.append("    movq $0, %r10\n");
             w.append(("    " + setcc + " " + "%" + "r10b\n"));
         } else {
             w.append(("    ## getflag: unrecognised flag " + runtime_quote(flagName) + "\n"));
@@ -2522,7 +2522,7 @@ fn codegen_x86_64Emitter_emitNASMFlagOp(e: CodegenX86_64Emitter, fn_value: Codeg
     if ((instr.Op == 39)) {
         let setcc: str = codegen_flagNameToX86Setcc(flagName);
         if ((setcc != "")) {
-            w.append("    xor r10, r10\n");
+            w.append("    mov r10, 0\n");
             w.append(("    " + setcc + " r10b\n"));
         } else {
             w.append(("    ; getflag: unrecognised flag " + runtime_quote(flagName) + "\n"));

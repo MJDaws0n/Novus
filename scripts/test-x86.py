@@ -15,6 +15,7 @@ work.mkdir(parents=True, exist_ok=True)
 results = []
 for source, name in (("tests/classes/main.nov", "classes"),
                      ("tests/selfhost/register_arguments.nov", "register_arguments"),
+                     ("tests/selfhost/flags.nov", "flags"),
                      ("tests/selfhost/x86_compat.nov", "x86_compat")):
     for phase, command in (("build", [compiler, "--target=linux/386", "--gc-entries=1024", source]),
                            ("run", [root / "build" / "linux_x86" / name])):

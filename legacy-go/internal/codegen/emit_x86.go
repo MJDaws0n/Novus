@@ -817,9 +817,10 @@ func (e *x86Emitter) emitFlagOp(instr IRInstr) {
 		setcc := flagNameToX86Setcc(flagName)
 		dst := e.operand(instr.Dst)
 		if setcc != "" {
-			w.WriteString("    xorl %eax, %eax\n")
+			w.WriteString("    pushl %eax\n    movl $0, %eax\n")
 			w.WriteString(fmt.Sprintf("    %s %%al\n", setcc))
 			w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
+			w.WriteString("    popl %eax\n")
 		} else {
 			w.WriteString(fmt.Sprintf("    ## getflag: unrecognised flag %q\n", flagName))
 			w.WriteString(fmt.Sprintf("    movl $0, %s\n", dst))

@@ -2723,7 +2723,7 @@ func (e *x86_64Emitter) emitGASFlagOp(fn *IRFunc, instr IRInstr) {
 	if instr.Op == IRGetFlag {
 		setcc := flagNameToX86Setcc(flagName)
 		if setcc != "" {
-			w.WriteString("    xorq %r10, %r10\n")
+			w.WriteString("    movq $0, %r10\n")
 			w.WriteString(fmt.Sprintf("    %s %%r10b\n", setcc))
 		} else {
 			w.WriteString(fmt.Sprintf("    ## getflag: unrecognised flag %q\n", flagName))
@@ -2756,7 +2756,7 @@ func (e *x86_64Emitter) emitNASMFlagOp(fn *IRFunc, instr IRInstr) {
 	if instr.Op == IRGetFlag {
 		setcc := flagNameToX86Setcc(flagName)
 		if setcc != "" {
-			w.WriteString("    xor r10, r10\n")
+			w.WriteString("    mov r10, 0\n")
 			w.WriteString(fmt.Sprintf("    %s r10b\n", setcc))
 		} else {
 			w.WriteString(fmt.Sprintf("    ; getflag: unrecognised flag %q\n", flagName))

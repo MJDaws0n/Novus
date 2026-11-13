@@ -775,9 +775,10 @@ fn codegen_x86Emitter_emitFlagOp(e: CodegenX86Emitter, instr: CodegenIRInstr) ->
         let setcc: str = codegen_flagNameToX86Setcc(flagName);
         let dst: str = codegen_x86Emitter_operand(e, instr.Dst);
         if ((setcc != "")) {
-            w.append("    xorl %eax, %eax\n");
+            w.append("    pushl %eax\n    movl $0, %eax\n");
             w.append(("    " + setcc + " " + "%" + "al\n"));
             w.append(("    movl " + "%" + "eax, " + dst + "\n"));
+            w.append("    popl %eax\n");
         } else {
             w.append(("    ## getflag: unrecognised flag " + runtime_quote(flagName) + "\n"));
             w.append(("    movl $0, " + dst + "\n"));

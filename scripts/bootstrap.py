@@ -102,6 +102,7 @@ try:
     fixtures = [("tests/classes/main.nov", "classes"),
                 ("tests/selfhost/compiler_regressions.nov", "compiler_regressions"),
                 ("tests/selfhost/register_arguments.nov", "register_arguments"),
+                ("tests/selfhost/flags.nov", "flags"),
                 ("tests/selfhost/gc_graph.nov", "gc_graph"),
                 ("tests/selfhost/time_memory.nov", "time_memory"),
                 ("tests/selfhost/libraries.nov", "library_smoke"),
