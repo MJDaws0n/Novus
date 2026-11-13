@@ -2371,8 +2371,8 @@ fn make_ResultSemanticmethodinfoArrayastnode(value0: SemanticMethodInfo, value1:
 fn compiler_hash_string(key: str) -> i32 {
     let hash: i32 = 5381;
     let address: u64 = ptr(key);
-    let count: i32 = len(key);
-    for (let i: i32 = 0; i < count; i++) { hash = (hash * 33) ^ load8(address); address++; }
+    let byte: i32 = load8(address);
+    while (byte != 0) { hash = (hash * 33) ^ byte; address++; byte = load8(address); }
     return hash & 2147483647;
 }
 

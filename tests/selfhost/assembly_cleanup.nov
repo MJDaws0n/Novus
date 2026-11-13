@@ -1,0 +1,35 @@
+module assembly_cleanup;
+import ../../lib/std;
+
+fn main() -> i32 {
+    let inputs: []str = [
+        "", "plain text", "plain text\n",
+        "    stur x1, [x29, #-8]\n    ldur x1, [x29, #-8]",
+        "    stur x1, [x29, #-8]\n    ldur x1, [x29, #-8]\n",
+        "    stur x1, [x29, #-8]\n    ldur x2, [x29, #-8]",
+        "    stur x1, [x29, #-8]\n    ldur x2, [x29, #-8]\n",
+        "prefix\n    str x1, [sp, #8]\n    ldr x1, [sp, #8]\nsuffix\n",
+        "\tstr x1, [sp, #8] \r\n\tldr x2, [sp, #8]\r\nend",
+        "    str x1, [sp, #8]\n    ldr x1, [sp, #16]\n",
+        "    str x1, [sp, #8]\nlabel:\n    ldr x1, [sp, #8]\n",
+        "    str x1, [sp, #8]\n    ldr x2, [sp, #8]\n    str x3, [sp, #16]\n    ldr x3, [sp, #16]",
+        "\n\n    stur x1, [x29, #-8]\n    ldur x2, [x29, #-8]\n\n\n"
+    ];
+    let expected: []str = [
+        "", "plain text", "plain text\n",
+        "    stur x1, [x29, #-8]",
+        "    stur x1, [x29, #-8]\n",
+        "    stur x1, [x29, #-8]\n    mov x2, x1",
+        "    stur x1, [x29, #-8]\n    mov x2, x1\n",
+        "prefix\n    str x1, [sp, #8]\nsuffix\n",
+        "\tstr x1, [sp, #8] \r\n    mov x2, x1\nend",
+        "    str x1, [sp, #8]\n    ldr x1, [sp, #16]\n",
+        "    str x1, [sp, #8]\nlabel:\n    ldr x1, [sp, #8]\n",
+        "    str x1, [sp, #8]\n    mov x2, x1\n    str x3, [sp, #16]",
+        "\n\n    stur x1, [x29, #-8]\n    mov x2, x1\n\n\n"
+    ];
+    for (let i: i32 = 0; i < len(inputs); i++) {
+        if (codegen_peepholeARM64(inputs[i]) != expected[i]) { return i + 1; }
+    }
+    return 0;
+}

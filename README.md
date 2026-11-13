@@ -117,6 +117,9 @@ For a verified release binary in `dist/`, use `./build-release.sh` (or
 `python scripts/bootstrap.py --package` on Windows). CI builds on native runners
 for macOS ARM64/Intel, Linux ARM64/x64/x86 (32-bit), and Windows ARM64/x64.
 Every host runs the same self-compilation and runtime verification suite.
+CI also compares fresh-process compilation of Nox and the compiler itself with
+the Go bootstrap. Each large workload must take at most 1.25 times Go's median
+time, measured over six alternating runs after a warm-up.
 
 See the [migration and benchmark report](docs/self-hosting.md) and
 [verification matrix](docs/testing-matrix.md) for measured results and platform

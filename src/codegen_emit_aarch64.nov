@@ -1849,32 +1849,45 @@ fn codegen_arm64LineEnd(text: str, start: i32, size: i32) -> i32 {
 
 // Return the register's first byte, without allocating substrings or tokens.
 fn codegen_arm64MemRegister(text: str, start: i32, end: i32, store: bool) -> i32 {
-    while (start < end && (byte_at(text, start) == 32 || byte_at(text, start) == 9 || byte_at(text, start) == 13)) { start++; }
+    let address: u64 = ptr(text) + i32_to_u64(start);
+    while (start < end) {
+        let ch: i32 = load8(address);
+        if (ch != 32 && ch != 9 && ch != 13) { break; }
+        start++; address++;
+    }
     if (end - start < 7) { return -1; }
     let first: i32 = 108;
     let second: i32 = 100;
     if (store) { first = 115; second = 116; }
-    if (byte_at(text, start) != first || byte_at(text, start + 1) != second) { return -1; }
-    start += 2;
-    if (byte_at(text, start) == 117) { start++; }
-    if (byte_at(text, start) != 114 || byte_at(text, start + 1) != 32) { return -1; }
-    start += 2;
-    while (start < end && (byte_at(text, start) == 32 || byte_at(text, start) == 9)) { start++; }
+    if (load8(address) != first || load8(address + 1) != second) { return -1; }
+    start += 2; address += 2;
+    if (load8(address) == 117) { start++; address++; }
+    if (load8(address) != 114 || load8(address + 1) != 32) { return -1; }
+    start += 2; address += 2;
+    while (start < end) {
+        let ch: i32 = load8(address);
+        if (ch != 32 && ch != 9) { break; }
+        start++; address++;
+    }
     return start;
 }
 
 fn codegen_arm64MemComma(text: str, start: i32, end: i32) -> i32 {
+    let address: u64 = ptr(text) + i32_to_u64(start);
     for (let i: i32 = start; i + 2 < end; i++) {
-        if (byte_at(text, i) == 44 && byte_at(text, i + 1) == 32 && byte_at(text, i + 2) == 91) { return i; }
+        if (load8(address) == 44 && load8(address + 1) == 32 && load8(address + 2) == 91) { return i; }
+        address++;
     }
     return -1;
 }
 
 fn codegen_assemblyRangeEqual(text: str, first: i32, firstEnd: i32, second: i32, secondEnd: i32) -> bool {
     if (firstEnd - first != secondEnd - second) { return false; }
+    let left: u64 = ptr(text) + i32_to_u64(first);
+    let right: u64 = ptr(text) + i32_to_u64(second);
     while (first < firstEnd) {
-        if (byte_at(text, first) != byte_at(text, second)) { return false; }
-        first++; second++;
+        if (load8(left) != load8(right)) { return false; }
+        first++; left++; right++;
     }
     return true;
 }
@@ -1888,7 +1901,12 @@ fn codegen_copyAssemblyRange(output: str, offset: i32, text: str, start: i32, en
 }
 
 fn codegen_assemblyTrimEnd(text: str, start: i32, end: i32) -> i32 {
-    while (end > start && (byte_at(text, end - 1) == 32 || byte_at(text, end - 1) == 9 || byte_at(text, end - 1) == 13)) { end--; }
+    let address: u64 = ptr(text) + i32_to_u64(end);
+    while (end > start) {
+        let ch: i32 = load8(address - 1);
+        if (ch != 32 && ch != 9 && ch != 13) { break; }
+        end--; address--;
+    }
     return end;
 }
 
@@ -1897,11 +1915,11 @@ fn codegen_peepholeARM64(asm: str) -> str {
     let output: str = alloc_string(size);
     let written: i32 = 0;
     let start: i32 = 0;
+    let copyStart: i32 = 0;
     while (start < size) {
         let end: i32 = codegen_arm64LineEnd(asm, start, size);
         let next: i32 = end;
         if (next < size) { next++; }
-        written = codegen_copyAssemblyRange(output, written, asm, start, next);
         let stReg: i32 = codegen_arm64MemRegister(asm, start, end, true);
         if (stReg >= 0 && next < size) {
             let nextEnd: i32 = codegen_arm64LineEnd(asm, next, size);
@@ -1910,6 +1928,7 @@ fn codegen_peepholeARM64(asm: str) -> str {
                 let stComma: i32 = codegen_arm64MemComma(asm, stReg, end);
                 let ldComma: i32 = codegen_arm64MemComma(asm, ldReg, nextEnd);
                 if (stComma >= 0 && ldComma >= 0 && codegen_assemblyRangeEqual(asm, stComma + 2, codegen_assemblyTrimEnd(asm, stReg, end), ldComma + 2, codegen_assemblyTrimEnd(asm, ldReg, nextEnd))) {
+                    written = codegen_copyAssemblyRange(output, written, asm, copyStart, next);
                     let stRegEnd: i32 = codegen_assemblyTrimEnd(asm, stReg, stComma);
                     let ldRegEnd: i32 = codegen_assemblyTrimEnd(asm, ldReg, ldComma);
                     if (!codegen_assemblyRangeEqual(asm, stReg, stRegEnd, ldReg, ldRegEnd)) {
@@ -1921,11 +1940,13 @@ fn codegen_peepholeARM64(asm: str) -> str {
                     } else if (nextEnd == size) { written--; }
                     next = nextEnd;
                     if (next < size) { next++; }
+                    copyStart = next;
                 }
             }
         }
         start = next;
     }
+    written = codegen_copyAssemblyRange(output, written, asm, copyStart, size);
     string_set_byte(output, written, 0);
     return output;
 }

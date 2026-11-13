@@ -35,6 +35,9 @@ Ordinary application defaults remain 64 MiB and 65,536 tracked allocations.
 Exhausting the allocation table traps rather than silently leaving allocations
 untracked. The collector uses size-class reuse, a sorted allocation table, a
 bounded page index and a marking queue. Its tracing algorithm is Novus source.
+Radix sorting reuses the marking queue's scratch space. A bounded pointer cache
+reuses that space after sorting to avoid repeated lookups during tracing; it is
+cleared on every collection and does not increase the reserved heap or metadata.
 
 The [verification matrix](testing-matrix.md) and
 [machine-readable results](self-hosting-verification.json) distinguish native execution from
@@ -67,6 +70,21 @@ cross-target output comparisons. Linux x86 is a full 32-bit compiler host, with
 The one-time translation tools are retained under `legacy-go/migration/` for
 provenance. They are not part of a normal build and must not overwrite the reviewed
 Novus sources.
+
+## Performance changes
+
+Compiler maps retain insertion order while using hash buckets for lookup. Tokens,
+positions and operands are shared when immutable; empty AST lists allocate their
+own storage only when modified. Assembly generation avoids temporary operand
+arrays, redundant instruction copies and repeated decimal formatting, and combines
+adjacent literal output into a single append.
+
+The standard library uses a contiguous growing text builder and direct text file
+I/O. Byte copying uses native words, and text replacement appends each segment
+once instead of repeatedly copying the growing result. ARM64's assembly cleanup
+scans and copies ranges without allocating a string for each line. These paths,
+including embedded zero bytes, Unicode, builder snapshots and GC reuse, have
+runtime regression tests.
 
 ## Local compilation benchmark
 

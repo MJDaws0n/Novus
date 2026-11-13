@@ -155,6 +155,19 @@ try:
     run([output / ("gc_cache" + extension)], "gc-pointer-cache-run", timeout=60)
     report["tests"].append({"name": "gc-pointer-cache", "passed": True})
     print("PASS bounded GC pointer cache and interior roots", flush=True)
+    # Compile the actual cleanup helpers with edge-case inputs, without pulling
+    # the entire compiler into this small runtime test.
+    cleanup_source = (ROOT / "tests/selfhost/assembly_cleanup.nov").read_text()
+    std_import = os.path.relpath(ROOT / "lib/std", work).replace("\\", "/")
+    cleanup_source = cleanup_source.replace("../../lib/std", std_import)
+    emitter = (ROOT / "src/codegen_emit_aarch64.nov").read_text()
+    cleanup_source += "\nfn codegen_arm64LineEnd(" + emitter.split("fn codegen_arm64LineEnd(", 1)[1]
+    cleanup_path = work / "assembly_cleanup.nov"
+    cleanup_path.write_text(cleanup_source)
+    run([compiler, f"--target={target}", cleanup_path], "assembly-cleanup-build")
+    run([output / ("assembly_cleanup" + extension)], "assembly-cleanup-run")
+    report["tests"].append({"name": "assembly-cleanup", "passed": True})
+    print("PASS assembly cleanup boundaries and whitespace", flush=True)
     run([compiler, f"--target={target}", "tests/selfhost/download_archive.nov"], "download-archive-build")
     downloads = work / "download-fixtures"
     downloads.mkdir(exist_ok=True)
