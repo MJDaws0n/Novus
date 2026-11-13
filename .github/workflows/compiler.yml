@@ -2,7 +2,7 @@ name: Compiler
 
 on:
   push:
-    branches: [main, novus-classes]
+    branches: [main, novus-classes, 'release/v*']
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -59,11 +59,13 @@ jobs:
         run: |
           go run ./cmd/novus --target=${{ matrix.target }} tests/classes/main.nov
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & "./build/windows_${{ matrix.arch }}/classes.exe"
+          $binary = "./build/windows_${{ matrix.arch }}/classes.exe"
+          if (!(Test-Path $binary)) { throw "Novus did not produce $binary" }
+          & $binary
           exit $LASTEXITCODE
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/v')
     needs: test
     runs-on: ubuntu-24.04
     permissions:
@@ -77,6 +79,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          grep -Fx "const VERSION = \"${GITHUB_REF_NAME#v}\"" cmd/novus/main.go
+          tag="${GITHUB_REF_NAME#release/}"
+          grep -Fx "const VERSION = \"${tag#v}\"" cmd/novus/main.go
           ./build-release.sh
-          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes novus-darwin-* novus-linux-* novus-windows-*.exe
+          gh release create "$tag" --target "$GITHUB_SHA" --generate-notes novus-darwin-* novus-linux-* novus-windows-*.exe
