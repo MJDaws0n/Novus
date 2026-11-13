@@ -188,7 +188,7 @@ fn lexer_lexString(input: str, inputLength: i32, start: i32, line: i32, col: i32
                 continue;
             }
             if ((ch == quote)) {
-                let tok: LexerToken = make_LexerToken_39("STRING", runtime_substring(input, start, (i + 1)), startLine, startCol);
+                let tok: LexerToken = make_LexerToken_39("STRING", lexer_source_slice(input, start, (i + 1)), startLine, startCol);
                 i++;
                 col++;
                 return make_ResultLexertokenArraylexerlexerrorI32I32I32(tok, errs, i, line, col);

@@ -111,9 +111,6 @@ fn _novus_gc_index(table: WORD, size: WORD, pages: WORD) -> void {
     }
 }
 fn _novus_gc_mark(table: WORD, size: WORD, queue: WORD, candidate: WORD) -> void {
-    if (size == 0 || candidate < LOAD(table)) { return; }
-    let last: WORD = table + (size - 1) * ENTRYSIZE;
-    if (candidate >= LOAD(last) + LOAD(last + WORDSIZE)) { return; }
     let low: WORD = 0;
     let high: WORD = size;
     let pages: WORD = queue + PAGEOFFSET;
@@ -148,16 +145,28 @@ fn _novus_gc_trace(table: WORD, size: WORD, roots: WORD, root_count: WORD, stack
     _novus_gc_sort(table, size, queue, queue + PAGEOFFSET);
     _novus_gc_index(table, size, queue + PAGEOFFSET);
     store_word(queue, 0);
+    let heap_low: WORD = LOAD(table);
+    let last: WORD = table + (size - 1) * ENTRYSIZE;
+    let heap_high: WORD = LOAD(last) + LOAD(last + WORDSIZE);
     if (stack_high != 0) {
-        for (let cursor: WORD = stack_low; cursor < stack_high; cursor += WORDSIZE) { _novus_gc_mark(table, size, queue, LOAD(cursor)); }
+        for (let cursor: WORD = stack_low; cursor < stack_high; cursor += WORDSIZE) {
+            let candidate: WORD = LOAD(cursor);
+            if (candidate >= heap_low && candidate < heap_high) { _novus_gc_mark(table, size, queue, candidate); }
+        }
     }
-    for (let i: WORD = 0; i < root_count; i++) { _novus_gc_mark(table, size, queue, LOAD(LOAD(roots + i * WORDSIZE))); }
+    for (let i: WORD = 0; i < root_count; i++) {
+        let candidate: WORD = LOAD(LOAD(roots + i * WORDSIZE));
+        if (candidate >= heap_low && candidate < heap_high) { _novus_gc_mark(table, size, queue, candidate); }
+    }
     let cursor: WORD = 0;
     while (cursor < LOAD(queue)) {
         let entry: WORD = table + LOAD(queue + (cursor + 1) * WORDSIZE) * ENTRYSIZE;
         let address: WORD = LOAD(entry);
         let bytes: WORD = LOAD(entry + WORDSIZE);
-        for (let offset: WORD = 0; offset + WORDSIZE <= bytes; offset += WORDSIZE) { _novus_gc_mark(table, size, queue, LOAD(address + offset)); }
+        for (let offset: WORD = 0; offset + WORDSIZE <= bytes; offset += WORDSIZE) {
+            let candidate: WORD = LOAD(address + offset);
+            if (candidate >= heap_low && candidate < heap_high) { _novus_gc_mark(table, size, queue, candidate); }
+        }
         cursor++;
     }
     let kept: WORD = 0;

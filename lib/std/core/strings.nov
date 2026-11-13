@@ -5,6 +5,7 @@
 module std_strings;
 
 import core;
+import builder;
 
 fn read_byte(addr: u64) -> i32 {
     let w: i32 = load8(addr);
@@ -193,36 +194,41 @@ fn str_replace(s: str, old: str, new_val: str) -> str {
     let sl: i32 = len(s);
     let sptr: u64 = ptr(s);
     let op: u64 = ptr(old);
-    // Chunk-based: copy segments between matches with copy_bytes_raw
-    let result: str = "";
+    // Append each segment once; repeated concatenation copies the growing
+    // prefix again for every match and becomes quadratic on large inputs.
+    let result: StringBuilder = new StringBuilder();
     let seg_start: i32 = 0;
     let i: i32 = 0;
+    let cursor: u64 = sptr;
     while (i + ol <= sl) {
         let found: bool = true;
         let j: i32 = 0;
+        let left: u64 = cursor;
+        let right: u64 = op;
         while (j < ol) {
-            if (read_byte(sptr + i32_to_u64(i + j)) != read_byte(op + i32_to_u64(j))) {
+            if (load8(left) != load8(right)) {
                 found = false;
-                j = ol;
-            } else {
-                j = j + 1;
+                break;
             }
+            j++; left++; right++;
         }
         if (found) {
             if (i > seg_start) {
-                result = result + copy_bytes_raw(sptr + i32_to_u64(seg_start), i - seg_start);
+                result.append_bytes(sptr + i32_to_u64(seg_start), i - seg_start);
             }
-            result = result + new_val;
+            result.append(new_val);
             i = i + ol;
+            cursor += i32_to_u64(ol);
             seg_start = i;
         } else {
             i = i + 1;
+            cursor++;
         }
     }
     if (seg_start < sl) {
-        result = result + copy_bytes_raw(sptr + i32_to_u64(seg_start), sl - seg_start);
+        result.append_bytes(sptr + i32_to_u64(seg_start), sl - seg_start);
     }
-    return result;
+    return result.text();
 }
 
 // Replace only the first occurrence

@@ -3,8 +3,7 @@ module std_memory;
 fn make_buffer(size: i32) -> str {
     if (size <= 0) { return ""; }
     let result: str = alloc_string(size);
-    let address: u64 = ptr(result);
-    for (let i: i32 = 0; i < size; i++) { store_byte(address + i32_to_u64(i), 32); }
+    memset(ptr(result), 32, size);
     return result;
 }
 
@@ -70,7 +69,8 @@ fn store64(addr: u64, value: u64) -> void {
     }
 }
 fn memset(addr: u64, value: i32, count: i32) -> void {
-    for (let i: i32 = 0; i < count; i++) { store_byte(addr + i32_to_u64(i), value & 255); }
+    value = value & 255;
+    while (count > 0) { store_byte(addr, value); addr++; count--; }
 }
 fn byte_char(value: i32) -> str {
     let result: str = make_buffer(1);

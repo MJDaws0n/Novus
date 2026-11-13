@@ -1,8 +1,17 @@
 module compiler_collections;
 import ../../src/model;
+import ../../src/runtime;
 
 fn main() -> i32 {
     initialize_compiler();
+    if (runtime_string_i32(-65536) != "-65536" || runtime_string_i32(65536) != "65536") { return 12; }
+    if (runtime_string_i32(-65537) != "-65537" || runtime_string_i32(65537) != "65537") { return 13; }
+    if (runtime_string_i64(-9223372036854775807 - 1) != "-9223372036854775808") { return 14; }
+    if (runtime_string_u64(18446744073709551615) != "18446744073709551615") { return 15; }
+    for (let i: i32 = 0; i < 100; i++) {
+        if (runtime_string_i64(-65536) != "-65536" || runtime_string_u64(65536) != "65536") { return 16; }
+    }
+    if (MapI32Str_length(CompilerState.integerText) != 2) { return 17; }
     let names: MapStrI32 = new MapStrI32();
     let numbers: MapI32Bool = new MapI32Bool();
     for (let i: i32 = 0; i < 400; i++) {

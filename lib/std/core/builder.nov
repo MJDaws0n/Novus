@@ -21,12 +21,17 @@ class StringBuilder {
     }
 
     pub fn append(value: str) -> void {
-        self.append_bytes(ptr(value), len(value));
+        let count: i32 = len(value);
+        if (count == 0) { return; }
+        if (self.size + count > self.capacity) { self.reserve(self.size + count); }
+        memory_copy(ptr(self.buffer) + i32_to_u64(self.size), ptr(value), count);
+        self.size += count;
+        string_set_byte(self.buffer, self.size, 0);
     }
 
     pub fn append_bytes(source: u64, count: i32) -> void {
         if (count <= 0) { return; }
-        self.reserve(self.size + count);
+        if (self.size + count > self.capacity) { self.reserve(self.size + count); }
         memory_copy(ptr(self.buffer) + i32_to_u64(self.size), source, count);
         self.size += count;
         string_set_byte(self.buffer, self.size, 0);
@@ -35,7 +40,7 @@ class StringBuilder {
     pub fn append_byte(value: i32) -> void {
         value = value & 255;
         if (value == 0) { return; }
-        self.reserve(self.size + 1);
+        if (self.size + 1 > self.capacity) { self.reserve(self.size + 1); }
         string_set_byte(self.buffer, self.size, value);
         self.size++;
         string_set_byte(self.buffer, self.size, 0);

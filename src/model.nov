@@ -888,6 +888,7 @@ fn copy_AstNode(value: AstNode) -> AstNode {
 }
 
 class CompilerState {
+    pub static let integerText: MapI32Str = null;
     pub static let zeroPosition: AstPosition = null;
     pub static let empty_AstClassField: []AstClassField = [];
     pub static let empty_AstClassMethod: []AstClassMethod = [];
@@ -926,6 +927,7 @@ class CompilerState {
 }
 
 fn initialize_compiler() -> void {
+    CompilerState.integerText = new MapI32Str();
     CompilerState.zeroPosition = new AstPosition();
     CompilerState.codegen_noneOperand = new CodegenOperand();
     CompilerState.driver_debugMode = false;

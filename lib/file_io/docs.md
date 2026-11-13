@@ -19,6 +19,20 @@ import lib/file_io file_io;
 
 ## Functions
 
+### Whole-file text and binary I/O
+
+`read_all_text(path)` returns a `FileTextResult` with `data: str` and `error: str`.
+It reads through the platform's file APIs and preserves the bytes, including
+embedded zero bytes. Ordinary string functions see the prefix before the first
+zero. `write_all_text(path, text)` writes a zero-terminated string and returns
+an empty string on success or an error description. Both helpers handle partial
+reads/writes and close the file on success and failure.
+
+Use `read_all_bytes(path)` and `write_all_bytes(path, buffer)` when binary data
+needs an explicit length; their `ByteBuffer` representation includes zero bytes.
+The text helpers avoid expanding each source/assembly byte into an integer
+array when the compiler reads or writes text.
+
 ### `at_fdcwd`
 
 ```novus

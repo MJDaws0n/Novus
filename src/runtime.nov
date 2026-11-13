@@ -4,9 +4,24 @@ import model;
 
 fn runtime_print(value: str) -> void { print(value); }
 fn runtime_print_raw(value: str) -> void { print_raw(value); }
-fn runtime_string_i32(value: i32) -> str { return format_signed(to_i64(value)); }
-fn runtime_string_i64(value: i64) -> str { return format_signed(value); }
-fn runtime_string_u64(value: u64) -> str { return format_unsigned(value); }
+// Register offsets, labels and small constants recur throughout assembly.
+// Keep their immutable decimal text once instead of allocating per instruction.
+fn runtime_string_i32(value: i32) -> str {
+    if (value < -65536 || value > 65536) { return format_signed(to_i64(value)); }
+    let cached: str = MapI32Str_get(CompilerState.integerText, value);
+    if (cached != "") { return cached; }
+    let result: str = format_signed(to_i64(value));
+    MapI32Str_put(CompilerState.integerText, value, result);
+    return result;
+}
+fn runtime_string_i64(value: i64) -> str {
+    if (value >= -65536 && value <= 65536) { return runtime_string_i32(to_i32(value)); }
+    return format_signed(value);
+}
+fn runtime_string_u64(value: u64) -> str {
+    if (value <= 65536) { return runtime_string_i32(u64_to_i32(value)); }
+    return format_unsigned(value);
+}
 fn runtime_string_bool(value: bool) -> str { return bool_to_str(value); }
 fn runtime_substring(value: str, start: i32, end: i32) -> str { return substr_len(value, start, end - start); }
 fn runtime_quote(value: str) -> str { return quote_string(value); }

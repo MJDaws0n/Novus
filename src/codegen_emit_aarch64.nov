@@ -43,13 +43,11 @@ fn codegen_arm64Emitter_emit(e: CodegenArm64Emitter) -> void {
                 let label: str = codegen_Target_Sym(e.target, s.Label);
                 w.append(".p2align 3\n");
                 w.append(label);
-                w.append(":\n");
-                w.append("    .asciz ");
+                w.append(":\n    .asciz ");
                 w.append(codegen_gasQuoteString(s.Value));
                 w.append("\n");
                 w.append(label);
-                w.append("_len:\n");
-                w.append("    .quad ");
+                w.append("_len:\n    .quad ");
                 w.append(runtime_string_i32(s.Value.length()));
                 w.append("\n");
             }
@@ -58,8 +56,7 @@ fn codegen_arm64Emitter_emit(e: CodegenArm64Emitter) -> void {
     }
     if (codegen_arm64Emitter_usesHeap(e)) {
         if ((e.target.OS == 2)) {
-            w.append(".bss\n.p2align 3\n_novus_heap:\n");
-            w.append("    .space ");
+            w.append(".bss\n.p2align 3\n_novus_heap:\n    .space ");
             w.append(runtime_string_i64(e.target.HeapSize));
             w.append("\n");
         }
@@ -82,17 +79,13 @@ fn codegen_arm64Emitter_emit(e: CodegenArm64Emitter) -> void {
         w.append(gcTable);
         w.append(", ");
         w.append(runtime_string_i32((e.target.GCEntries * 24)));
-        w.append("\n");
-        w.append(".lcomm ");
+        w.append("\n.lcomm ");
         w.append(gcCount);
-        w.append(", 8\n");
-        w.append(".lcomm ");
+        w.append(", 8\n.lcomm ");
         w.append(gcThreshold);
-        w.append(", 8\n");
-        w.append(".lcomm ");
+        w.append(", 8\n.lcomm ");
         w.append(gcFreelist);
-        w.append(", 512\n");
-        w.append(".lcomm ");
+        w.append(", 512\n.lcomm ");
         w.append(gcStackBot);
         w.append(", 8\n\n");
     }
@@ -135,50 +128,35 @@ fn codegen_arm64Emitter_emit(e: CodegenArm64Emitter) -> void {
     let entryFuncName: str = codegen_Target_Sym(e.target, "main");
     w.append(".globl ");
     w.append(entryFuncName);
-    w.append("\n");
-    w.append(".p2align 2\n\n");
+    w.append("\n.p2align 2\n\n");
     if ((e.target.OS == 0)) {
-        w.append(".globl _start\n");
-        w.append("_start:\n");
+        w.append(".globl _start\n_start:\n");
         if (codegen_arm64Emitter_usesHeap(e)) {
             let gcStackBot: str = codegen_Target_Sym(e.target, "_novus_gc_stack_bottom");
             w.append("    adrp x9, ");
             w.append(gcStackBot);
-            w.append("\n");
-            w.append("    add x9, x9, :lo12:");
+            w.append("\n    add x9, x9, :lo12:");
             w.append(gcStackBot);
-            w.append("\n");
-            w.append("    mov x10, sp\n");
-            w.append("    str x10, [x9]\n");
+            w.append("\n    mov x10, sp\n    str x10, [x9]\n");
             let gcThreshold: str = codegen_Target_Sym(e.target, "_novus_gc_threshold");
             w.append("    adrp x9, ");
             w.append(gcThreshold);
-            w.append("\n");
-            w.append("    add x9, x9, :lo12:");
+            w.append("\n    add x9, x9, :lo12:");
             w.append(gcThreshold);
-            w.append("\n");
-            w.append("    mov x10, #256\n");
-            w.append("    str x10, [x9]\n");
+            w.append("\n    mov x10, #256\n    str x10, [x9]\n");
         }
-        w.append("    ldr x0, [sp]\n");
-        w.append("    add x1, sp, #8\n");
+        w.append("    ldr x0, [sp]\n    add x1, sp, #8\n");
         if (codegen_hasRuntimeEnvpGlobal(e.mod)) {
             let envpSym: str = codegen_Target_Sym(e.target, "_g___novus_envp");
-            w.append("    add x2, x1, x0, lsl #3\n");
-            w.append("    add x2, x2, #8\n");
-            w.append("    adrp x9, ");
+            w.append("    add x2, x1, x0, lsl #3\n    add x2, x2, #8\n    adrp x9, ");
             w.append(envpSym);
-            w.append("\n");
-            w.append("    add x9, x9, :lo12:");
+            w.append("\n    add x9, x9, :lo12:");
             w.append(envpSym);
-            w.append("\n");
-            w.append("    str x2, [x9]\n");
+            w.append("\n    str x2, [x9]\n");
         }
         w.append("    bl ");
         w.append(entryFuncName);
-        w.append("\n");
-        w.append("    mov x8, #93\n");
-        w.append("    svc #0\n\n");
+        w.append("\n    mov x8, #93\n    svc #0\n\n");
     }
     {
         let items_164: []CodegenIRFunc = e.mod.Functions;
@@ -275,9 +253,7 @@ fn codegen_arm64Emitter_emitFunction(e: CodegenArm64Emitter, fn_value: CodegenIR
         }
     }
     w.append(sym);
-    w.append(":\n");
-    w.append("    stp x29, x30, [sp, #-16]!\n");
-    w.append("    mov x29, sp\n");
+    w.append(":\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n");
     if ((frameSize > 0)) {
         codegen_arm64Emitter_emitSPAdj(e, "sub", frameSize);
     }
@@ -285,21 +261,17 @@ fn codegen_arm64Emitter_emitFunction(e: CodegenArm64Emitter, fn_value: CodegenIR
         let envpSym: str = codegen_Target_Sym(e.target, "_g___novus_envp");
         w.append("    adrp x9, ");
         w.append(envpSym);
-        w.append("@PAGE\n");
-        w.append("    add x9, x9, ");
+        w.append("@PAGE\n    add x9, x9, ");
         w.append(envpSym);
-        w.append("@PAGEOFF\n");
-        w.append("    str x2, [x9]\n");
+        w.append("@PAGEOFF\n    str x2, [x9]\n");
     }
     if ((((fn_value.Name == "main") && (e.target.OS != 0)) && codegen_arm64Emitter_usesHeap(e))) {
         let gcStackBot: str = codegen_Target_Sym(e.target, "_novus_gc_stack_bottom");
         codegen_arm64Emitter_emitLoadGlobal(e, "x9", gcStackBot);
-        w.append("    add x10, x29, #16\n");
-        w.append("    str x10, [x9]\n");
+        w.append("    add x10, x29, #16\n    str x10, [x9]\n");
         let gcThreshold: str = codegen_Target_Sym(e.target, "_novus_gc_threshold");
         codegen_arm64Emitter_emitLoadGlobal(e, "x9", gcThreshold);
-        w.append("    mov x10, #256\n");
-        w.append("    str x10, [x9]\n");
+        w.append("    mov x10, #256\n    str x10, [x9]\n");
     }
     if ((((fn_value.Name == "main") && (e.target.OS == 2)) && (fn_value.ParamCount >= 2))) {
         codegen_arm64Emitter_emitWinMainArgs(e);
@@ -448,8 +420,7 @@ fn codegen_arm64Emitter_emitInstr(e: CodegenArm64Emitter, fn_value: CodegenIRFun
             w.append(src1);
             w.append(", ");
             w.append(src2);
-            w.append("\n");
-            w.append("    msub ");
+            w.append("\n    msub ");
             w.append(dst);
             w.append(", x13, ");
             w.append(src2);
@@ -465,8 +436,7 @@ fn codegen_arm64Emitter_emitInstr(e: CodegenArm64Emitter, fn_value: CodegenIRFun
             w.append(src1);
             w.append(", ");
             w.append(src2);
-            w.append("\n");
-            w.append("    msub ");
+            w.append("\n    msub ");
             w.append(dst);
             w.append(", x13, ");
             w.append(src2);
@@ -568,8 +538,7 @@ fn codegen_arm64Emitter_emitInstr(e: CodegenArm64Emitter, fn_value: CodegenIRFun
             if ((frameSize > 0)) {
                 codegen_arm64Emitter_emitSPAdj(e, "add", frameSize);
             }
-            w.append("    ldp x29, x30, [sp], #16\n");
-            w.append("    ret\n");
+            w.append("    ldp x29, x30, [sp], #16\n    ret\n");
         } else if ((choice_185 == 33)) {
             w.append("    ");
             w.append(e.target.SyscallInstr);
@@ -845,11 +814,9 @@ fn codegen_arm64Emitter_emitFBinOp(e: CodegenArm64Emitter, fn_value: CodegenIRFu
     let src2: str = codegen_arm64Emitter_loadToReg(e, fn_value, instr.Src2, "x12");
     w.append("    fmov d1, ");
     w.append(src1);
-    w.append("\n");
-    w.append("    fmov d2, ");
+    w.append("\n    fmov d2, ");
     w.append(src2);
-    w.append("\n");
-    w.append("    ");
+    w.append("\n    ");
     w.append(mnemonic);
     w.append(" d0, d1, d2\n");
     let dst: str = codegen_arm64Emitter_dstReg(e, fn_value, instr.Dst, "x10");
@@ -866,13 +833,9 @@ fn codegen_arm64Emitter_emitFMod(e: CodegenArm64Emitter, fn_value: CodegenIRFunc
     let src2: str = codegen_arm64Emitter_loadToReg(e, fn_value, instr.Src2, "x12");
     w.append("    fmov d1, ");
     w.append(src1);
-    w.append("\n");
-    w.append("    fmov d2, ");
+    w.append("\n    fmov d2, ");
     w.append(src2);
-    w.append("\n");
-    w.append("    fdiv d3, d1, d2\n");
-    w.append("    frintz d3, d3\n");
-    w.append("    fmsub d0, d3, d2, d1\n");
+    w.append("\n    fdiv d3, d1, d2\n    frintz d3, d3\n    fmsub d0, d3, d2, d1\n");
     let dst: str = codegen_arm64Emitter_dstReg(e, fn_value, instr.Dst, "x10");
     w.append("    fmov ");
     w.append(dst);
@@ -886,8 +849,7 @@ fn codegen_arm64Emitter_emitFNeg(e: CodegenArm64Emitter, fn_value: CodegenIRFunc
     let src: str = codegen_arm64Emitter_loadToReg(e, fn_value, instr.Src1, "x11");
     w.append("    fmov d1, ");
     w.append(src);
-    w.append("\n");
-    w.append("    fneg d0, d1\n");
+    w.append("\n    fneg d0, d1\n");
     let dst: str = codegen_arm64Emitter_dstReg(e, fn_value, instr.Dst, "x10");
     w.append("    fmov ");
     w.append(dst);
@@ -902,11 +864,9 @@ fn codegen_arm64Emitter_emitFCmp(e: CodegenArm64Emitter, fn_value: CodegenIRFunc
     let src2: str = codegen_arm64Emitter_loadToReg(e, fn_value, instr.Src2, "x12");
     w.append("    fmov d1, ");
     w.append(src1);
-    w.append("\n");
-    w.append("    fmov d2, ");
+    w.append("\n    fmov d2, ");
     w.append(src2);
-    w.append("\n");
-    w.append("    fcmp d1, d2\n");
+    w.append("\n    fcmp d1, d2\n");
     let dst: str = codegen_arm64Emitter_dstReg(e, fn_value, instr.Dst, "x10");
     w.append("    cset ");
     w.append(dst);
@@ -1004,21 +964,15 @@ fn codegen_arm64Emitter_emitStrLen(e: CodegenArm64Emitter, fn_value: CodegenIRFu
     let doneLabel: str = (".Lstrlen_d_" + runtime_string_i32(id));
     w.append("    mov x14, ");
     w.append(src);
-    w.append("\n");
-    w.append("    mov x15, #0\n");
+    w.append("\n    mov x15, #0\n");
     w.append(startLabel);
-    w.append(":\n");
-    w.append("    ldrb w16, [x14, x15]\n");
-    w.append("    cbz w16, ");
+    w.append(":\n    ldrb w16, [x14, x15]\n    cbz w16, ");
     w.append(doneLabel);
-    w.append("\n");
-    w.append("    add x15, x15, #1\n");
-    w.append("    b ");
+    w.append("\n    add x15, x15, #1\n    b ");
     w.append(startLabel);
     w.append("\n");
     w.append(doneLabel);
-    w.append(":\n");
-    w.append("    mov ");
+    w.append(":\n    mov ");
     w.append(dst);
     w.append(", x15\n");
     codegen_arm64Emitter_spillIfNeeded(e, fn_value, instr.Dst, dst);
@@ -1064,60 +1018,33 @@ fn codegen_arm64Emitter_emitStrConcat(e: CodegenArm64Emitter, fn_value: CodegenI
     }
     w.append("    mov x15, #0\n");
     w.append(len1Label);
-    w.append(":\n");
-    w.append("    ldrb w16, [x13, x15]\n");
-    w.append("    cbz w16, ");
+    w.append(":\n    ldrb w16, [x13, x15]\n    cbz w16, ");
     w.append(len1Done);
-    w.append("\n");
-    w.append("    add x15, x15, #1\n");
-    w.append("    b ");
+    w.append("\n    add x15, x15, #1\n    b ");
     w.append(len1Label);
     w.append("\n");
     w.append(len1Done);
-    w.append(":\n");
-    w.append("    mov x9, x15\n");
-    w.append("    mov x15, #0\n");
+    w.append(":\n    mov x9, x15\n    mov x15, #0\n");
     w.append(len2Label);
-    w.append(":\n");
-    w.append("    ldrb w16, [x14, x15]\n");
-    w.append("    cbz w16, ");
+    w.append(":\n    ldrb w16, [x14, x15]\n    cbz w16, ");
     w.append(len2Done);
-    w.append("\n");
-    w.append("    add x15, x15, #1\n");
-    w.append("    b ");
+    w.append("\n    add x15, x15, #1\n    b ");
     w.append(len2Label);
     w.append("\n");
     w.append(len2Done);
-    w.append(":\n");
-    w.append("    add x0, x9, x15\n");
-    w.append("    add x0, x0, #1\n");
-    w.append("    stp x13, x14, [sp, #-16]!\n");
-    w.append("    stp x9, x15, [sp, #-16]!\n");
-    w.append("    bl ");
+    w.append(":\n    add x0, x9, x15\n    add x0, x0, #1\n    stp x13, x14, [sp, #-16]!\n    stp x9, x15, [sp, #-16]!\n    bl ");
     w.append(allocSym);
-    w.append("\n");
-    w.append("    ldp x9, x15, [sp], #16\n");
-    w.append("    ldp x13, x14, [sp], #16\n");
-    w.append("    mov x12, x0\n");
-    w.append("    mov x11, x0\n");
+    w.append("\n    ldp x9, x15, [sp], #16\n    ldp x13, x14, [sp], #16\n    mov x12, x0\n    mov x11, x0\n");
     w.append(copy1Label);
-    w.append(":\n");
-    w.append("    ldrb w16, [x13], #1\n");
-    w.append("    cbz w16, ");
+    w.append(":\n    ldrb w16, [x13], #1\n    cbz w16, ");
     w.append(copy2Label);
-    w.append("\n");
-    w.append("    strb w16, [x11], #1\n");
-    w.append("    b ");
+    w.append("\n    strb w16, [x11], #1\n    b ");
     w.append(copy1Label);
     w.append("\n");
     w.append(copy2Label);
-    w.append(":\n");
-    w.append("    ldrb w16, [x14], #1\n");
-    w.append("    strb w16, [x11], #1\n");
-    w.append("    cbnz w16, ");
+    w.append(":\n    ldrb w16, [x14], #1\n    strb w16, [x11], #1\n    cbnz w16, ");
     w.append(copy2Label);
-    w.append("\n");
-    w.append("    mov ");
+    w.append("\n    mov ");
     w.append(dst);
     w.append(", x12\n");
     codegen_arm64Emitter_spillIfNeeded(e, fn_value, instr.Dst, dst);
@@ -1132,8 +1059,7 @@ fn codegen_arm64Emitter_emitLoadGlobal(e: CodegenArm64Emitter, dstReg: str, sym:
         w.append(dstReg);
         w.append(", ");
         w.append(sym);
-        w.append("@PAGE\n");
-        w.append("    add ");
+        w.append("@PAGE\n    add ");
         w.append(dstReg);
         w.append(", ");
         w.append(dstReg);
@@ -1145,8 +1071,7 @@ fn codegen_arm64Emitter_emitLoadGlobal(e: CodegenArm64Emitter, dstReg: str, sym:
         w.append(dstReg);
         w.append(", ");
         w.append(sym);
-        w.append("\n");
-        w.append("    add ");
+        w.append("\n    add ");
         w.append(dstReg);
         w.append(", ");
         w.append(dstReg);
@@ -1161,22 +1086,11 @@ fn codegen_arm64Emitter_emitLoadGlobal(e: CodegenArm64Emitter, dstReg: str, sym:
 // Clobbers x0-x5 and the syscall-number register (x16 Darwin, x8 Linux).
 fn codegen_arm64Emitter_emitMmapSyscall(e: CodegenArm64Emitter) -> void {
     let w: StringBuilder = e.b;
-    w.append("    mov x0, #0\n");
-    w.append("    mov x1, #256\n");
-    w.append("    lsl x1, x1, #20\n");
-    w.append("    mov x2, #3\n");
+    w.append("    mov x0, #0\n    mov x1, #256\n    lsl x1, x1, #20\n    mov x2, #3\n");
     if ((e.target.OS == 1)) {
-        w.append("    mov x3, #0x1002\n");
-        w.append("    mov x4, #-1\n");
-        w.append("    mov x5, #0\n");
-        w.append("    mov x16, #197\n");
-        w.append("    svc #0x80\n");
+        w.append("    mov x3, #0x1002\n    mov x4, #-1\n    mov x5, #0\n    mov x16, #197\n    svc #0x80\n");
     } else {
-        w.append("    mov x3, #0x22\n");
-        w.append("    mov x4, #-1\n");
-        w.append("    mov x5, #0\n");
-        w.append("    mov x8, #222\n");
-        w.append("    svc #0\n");
+        w.append("    mov x3, #0x22\n    mov x4, #-1\n    mov x5, #0\n    mov x8, #222\n    svc #0\n");
     }
 }
 
@@ -1199,53 +1113,23 @@ fn codegen_arm64Emitter_emitHeapAllocator(e: CodegenArm64Emitter) -> void {
     let allocSym: str = codegen_Target_Sym(e.target, "_novus_heap_alloc");
     let heapPtrSym: str = codegen_Target_Sym(e.target, "_novus_heap_ptr");
     let heapEndSym: str = codegen_Target_Sym(e.target, "_novus_heap_end");
-    w.append("\n// ---- Runtime: mmap-backed heap allocator ----\n");
-    w.append(".p2align 2\n");
+    w.append("\n// ---- Runtime: mmap-backed heap allocator ----\n.p2align 2\n");
     w.append(allocSym);
-    w.append(":\n");
-    w.append("    stp x29, x30, [sp, #-16]!\n");
-    w.append("    mov x29, sp\n");
-    w.append("    add x0, x0, #7\n");
-    w.append("    bic x0, x0, #7\n");
+    w.append(":\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    add x0, x0, #7\n    bic x0, x0, #7\n");
     codegen_arm64Emitter_emitLoadGlobal(e, "x9", heapPtrSym);
-    w.append("    ldr x10, [x9]\n");
-    w.append("    cbz x10, .Lhalloc_init\n");
-    w.append(".Lhalloc_try:\n");
-    w.append("    add x11, x10, x0\n");
+    w.append("    ldr x10, [x9]\n    cbz x10, .Lhalloc_init\n.Lhalloc_try:\n    add x11, x10, x0\n");
     codegen_arm64Emitter_emitLoadGlobal(e, "x12", heapEndSym);
-    w.append("    ldr x13, [x12]\n");
-    w.append("    cmp x11, x13\n");
-    w.append("    b.hi .Lhalloc_grow\n");
-    w.append("    str x11, [x9]\n");
-    w.append("    mov x0, x10\n");
-    w.append("    ldp x29, x30, [sp], #16\n");
-    w.append("    ret\n");
-    w.append(".Lhalloc_init:\n");
-    w.append("    stp x0, x9, [sp, #-16]!\n");
+    w.append("    ldr x13, [x12]\n    cmp x11, x13\n    b.hi .Lhalloc_grow\n    str x11, [x9]\n    mov x0, x10\n    ldp x29, x30, [sp], #16\n    ret\n.Lhalloc_init:\n    stp x0, x9, [sp, #-16]!\n");
     codegen_arm64Emitter_emitMmapSyscall(e);
-    w.append("    mov x10, x0\n");
-    w.append("    ldp x0, x9, [sp], #16\n");
-    w.append("    str x10, [x9]\n");
-    w.append("    mov x14, #256\n");
-    w.append("    lsl x14, x14, #20\n");
-    w.append("    add x14, x10, x14\n");
+    w.append("    mov x10, x0\n    ldp x0, x9, [sp], #16\n    str x10, [x9]\n    mov x14, #256\n    lsl x14, x14, #20\n    add x14, x10, x14\n");
     codegen_arm64Emitter_emitLoadGlobal(e, "x12", heapEndSym);
-    w.append("    str x14, [x12]\n");
-    w.append("    b .Lhalloc_try\n");
-    w.append(".Lhalloc_grow:\n");
-    w.append("    str x0, [sp, #-16]!\n");
+    w.append("    str x14, [x12]\n    b .Lhalloc_try\n.Lhalloc_grow:\n    str x0, [sp, #-16]!\n");
     codegen_arm64Emitter_emitMmapSyscall(e);
-    w.append("    mov x10, x0\n");
-    w.append("    ldr x0, [sp], #16\n");
+    w.append("    mov x10, x0\n    ldr x0, [sp], #16\n");
     codegen_arm64Emitter_emitLoadGlobal(e, "x9", heapPtrSym);
-    w.append("    str x10, [x9]\n");
-    w.append("    mov x14, #256\n");
-    w.append("    lsl x14, x14, #20\n");
-    w.append("    add x14, x10, x14\n");
+    w.append("    str x10, [x9]\n    mov x14, #256\n    lsl x14, x14, #20\n    add x14, x10, x14\n");
     codegen_arm64Emitter_emitLoadGlobal(e, "x12", heapEndSym);
-    w.append("    str x14, [x12]\n");
-    w.append("    b .Lhalloc_try\n");
-    w.append("\n");
+    w.append("    str x14, [x12]\n    b .Lhalloc_try\n\n");
 }
 
 // emitGCRuntime emits the garbage collector runtime:
@@ -1273,84 +1157,39 @@ fn codegen_arm64Emitter_emitGCRuntime(e: CodegenArm64Emitter) -> void {
     let gcAllocSym: str = codegen_Target_Sym(e.target, "_novus_gc_alloc");
     let gcRegSym: str = codegen_Target_Sym(e.target, "_novus_gc_register");
     let gcCollectSym: str = codegen_Target_Sym(e.target, "_novus_gc_collect");
-    w.append("\n// ---- GC: register allocation ----\n");
-    w.append(".p2align 2\n");
+    w.append("\n// ---- GC: register allocation ----\n.p2align 2\n");
     w.append(gcRegSym);
-    w.append(":\n");
-    w.append("    stp x29, x30, [sp, #-16]!\n");
-    w.append("    mov x29, sp\n");
+    w.append(":\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n");
     codegen_arm64Emitter_emitLoadGlobal(e, "x9", gcCount);
     w.append("    ldr x10, [x9]\n");
     codegen_arm64Emitter_loadImm(e, "x11", runtime_to_i64(e.target.GCEntries));
-    w.append("    cmp x10, x11\n");
-    w.append("    b.lt .Lgcreg_space\n    brk #1\n.Lgcreg_space:\n");
+    w.append("    cmp x10, x11\n    b.lt .Lgcreg_space\n    brk #1\n.Lgcreg_space:\n");
     codegen_arm64Emitter_emitLoadGlobal(e, "x12", gcTable);
-    w.append("    mov x13, #24\n");
-    w.append("    mul x14, x10, x13\n");
-    w.append("    add x12, x12, x14\n");
-    w.append("    str x0, [x12, #0]\n");
-    w.append("    str x1, [x12, #8]\n");
-    w.append("    str xzr, [x12, #16]\n");
-    w.append("    add x10, x10, #1\n");
-    w.append("    str x10, [x9]\n");
-    w.append(".Lgcreg_done:\n");
-    w.append("    ldp x29, x30, [sp], #16\n");
-    w.append("    ret\n");
+    w.append("    mov x13, #24\n    mul x14, x10, x13\n    add x12, x12, x14\n    str x0, [x12, #0]\n    str x1, [x12, #8]\n    str xzr, [x12, #16]\n    add x10, x10, #1\n    str x10, [x9]\n.Lgcreg_done:\n    ldp x29, x30, [sp], #16\n    ret\n");
     codegen_arm64Emitter_emitFastCollector(e);
-    w.append("\n// ---- GC: allocator with free-list and auto-collection ----\n");
-    w.append(".p2align 2\n");
+    w.append("\n// ---- GC: allocator with free-list and auto-collection ----\n.p2align 2\n");
     w.append(gcAllocSym);
-    w.append(":\n");
-    w.append("    stp x29, x30, [sp, #-16]!\n");
-    w.append("    mov x29, sp\n");
-    w.append("    stp x19, x20, [sp, #-16]!\n");
-    w.append("    add x0, x0, #7\n");
-    w.append("    bic x0, x0, #7\n");
-    w.append("    cmp x0, #16\n");
-    w.append("    b.ge .Lgca_size_ok\n");
-    w.append("    mov x0, #16\n");
-    w.append(".Lgca_size_ok:\n");
-    w.append("    bl ");
+    w.append(":\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n    add x0, x0, #7\n    bic x0, x0, #7\n    cmp x0, #16\n    b.ge .Lgca_size_ok\n    mov x0, #16\n.Lgca_size_ok:\n    bl ");
     w.append(codegen_Target_Sym(e.target, "_novus_gc_round"));
-    w.append("\n");
-    w.append("    mov x19, x0\n");
+    w.append("\n    mov x19, x0\n");
     codegen_arm64Emitter_emitLoadGlobal(e, "x9", gcCount);
     w.append("    ldr x10, [x9]\n");
     codegen_arm64Emitter_emitLoadGlobal(e, "x9", gcThreshold);
-    w.append("    ldr x11, [x9]\n");
-    w.append("    cmp x10, x11\n");
-    w.append("    b.ge .Lgca_collect\n");
+    w.append("    ldr x11, [x9]\n    cmp x10, x11\n    b.ge .Lgca_collect\n");
     codegen_arm64Emitter_loadImm(e, "x12", runtime_to_i64(e.target.GCEntries));
-    w.append("    cmp x10, x12\n    b.lt .Lgca_try_free\n.Lgca_collect:\n");
-    w.append("    bl ");
+    w.append("    cmp x10, x12\n    b.lt .Lgca_try_free\n.Lgca_collect:\n    bl ");
     w.append(gcCollectSym);
-    w.append("\n");
-    w.append(".Lgca_try_free:\n");
+    w.append("\n.Lgca_try_free:\n");
     codegen_arm64Emitter_emitLoadGlobal(e, "x0", gcFreelist);
-    w.append("    mov x1, x19\n");
-    w.append("    bl ");
+    w.append("    mov x1, x19\n    bl ");
     w.append(codegen_Target_Sym(e.target, "_novus_gc_take"));
-    w.append("\n");
-    w.append("    cbz x0, .Lgca_bump\n    mov x20, x0\n    mov x1, x19\n");
-    w.append("    bl ");
+    w.append("\n    cbz x0, .Lgca_bump\n    mov x20, x0\n    mov x1, x19\n    bl ");
     w.append(gcRegSym);
-    w.append("\n");
-    w.append("    mov x0, x20\n    b .Lgca_ret\n");
-    w.append(".Lgca_bump:\n");
-    w.append("    mov x0, x19\n");
-    w.append("    bl ");
+    w.append("\n    mov x0, x20\n    b .Lgca_ret\n.Lgca_bump:\n    mov x0, x19\n    bl ");
     w.append(allocSym);
-    w.append("\n");
-    w.append("    mov x20, x0\n");
-    w.append("    mov x1, x19\n");
-    w.append("    bl ");
+    w.append("\n    mov x20, x0\n    mov x1, x19\n    bl ");
     w.append(gcRegSym);
-    w.append("\n");
-    w.append("    mov x0, x20\n");
-    w.append(".Lgca_ret:\n");
-    w.append("    ldp x19, x20, [sp], #16\n");
-    w.append("    ldp x29, x30, [sp], #16\n");
-    w.append("    ret\n");
+    w.append("\n    mov x0, x20\n.Lgca_ret:\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n");
 }
 
 // emitArrayNew allocates a new array header + data on the heap.
@@ -1367,14 +1206,9 @@ fn codegen_arm64Emitter_emitArrayNew(e: CodegenArm64Emitter, fn_value: CodegenIR
     codegen_arm64Emitter_loadImm(e, "x0", totalSize);
     w.append("    bl ");
     w.append(allocSym);
-    w.append("\n");
-    w.append("    mov x12, x0\n");
-    w.append("    add x13, x0, #24\n");
-    w.append("    str x13, [x12, #0]\n");
-    w.append("    str xzr, [x12, #8]\n");
+    w.append("\n    mov x12, x0\n    add x13, x0, #24\n    str x13, [x12, #0]\n    str xzr, [x12, #8]\n");
     codegen_arm64Emitter_loadImm(e, "x14", cap);
-    w.append("    str x14, [x12, #16]\n");
-    w.append("    mov ");
+    w.append("    str x14, [x12, #16]\n    mov ");
     w.append(dst);
     w.append(", x12\n");
     codegen_arm64Emitter_spillIfNeeded(e, fn_value, instr.Dst, dst);
@@ -1388,8 +1222,7 @@ fn codegen_arm64Emitter_emitArrayGet(e: CodegenArm64Emitter, fn_value: CodegenIR
     let dst: str = codegen_arm64Emitter_dstReg(e, fn_value, instr.Dst, "x10");
     w.append("    ldr x13, [");
     w.append(arrPtr);
-    w.append(", #0]\n");
-    w.append("    ldr ");
+    w.append(", #0]\n    ldr ");
     w.append(dst);
     w.append(", [x13, ");
     w.append(idx);
@@ -1405,8 +1238,7 @@ fn codegen_arm64Emitter_emitArraySet(e: CodegenArm64Emitter, fn_value: CodegenIR
     let val: str = codegen_arm64Emitter_loadToReg(e, fn_value, instr.Src2, "x13");
     w.append("    ldr x14, [");
     w.append(arrPtr);
-    w.append(", #0]\n");
-    w.append("    str ");
+    w.append(", #0]\n    str ");
     w.append(val);
     w.append(", [x14, ");
     w.append(idx);
@@ -1430,58 +1262,31 @@ fn codegen_arm64Emitter_emitArrayAppend(e: CodegenArm64Emitter, fn_value: Codege
         w.append(arrPtr);
         w.append("\n");
     }
-    w.append("    ldr x13, [x11, #8]\n");
-    w.append("    ldr x14, [x11, #16]\n");
-    w.append("    cmp x13, x14\n");
-    w.append("    b.lt ");
+    w.append("    ldr x13, [x11, #8]\n    ldr x14, [x11, #16]\n    cmp x13, x14\n    b.lt ");
     w.append(noGrowLabel);
-    w.append("\n");
-    w.append("    lsl x14, x14, #1\n");
-    w.append("    cmp x14, #4\n");
-    w.append("    b.ge ");
+    w.append("\n    lsl x14, x14, #1\n    cmp x14, #4\n    b.ge ");
     w.append(capOkLabel);
-    w.append("\n");
-    w.append("    mov x14, #4\n");
+    w.append("\n    mov x14, #4\n");
     w.append(capOkLabel);
-    w.append(":\n");
-    w.append("    stp x11, x12, [sp, #-16]!\n");
-    w.append("    stp x13, x14, [sp, #-16]!\n");
-    w.append("    lsl x0, x14, #3\n");
-    w.append("    bl ");
+    w.append(":\n    stp x11, x12, [sp, #-16]!\n    stp x13, x14, [sp, #-16]!\n    lsl x0, x14, #3\n    bl ");
     w.append(allocSym);
-    w.append("\n");
-    w.append("    mov x17, x0\n");
-    w.append("    ldp x13, x14, [sp], #16\n");
-    w.append("    ldp x11, x12, [sp], #16\n");
-    w.append("    ldr x16, [x11, #0]\n");
-    w.append("    mov x9, #0\n");
+    w.append("\n    mov x17, x0\n    ldp x13, x14, [sp], #16\n    ldp x11, x12, [sp], #16\n    ldr x16, [x11, #0]\n    mov x9, #0\n");
     w.append(copyLabel);
-    w.append(":\n");
-    w.append("    cmp x9, x13\n");
-    w.append("    b.ge ");
+    w.append(":\n    cmp x9, x13\n    b.ge ");
     w.append(copyDoneLabel);
-    w.append("\n");
-    w.append("    ldr x8, [x16, x9, lsl #3]\n");
-    w.append("    str x8, [x17, x9, lsl #3]\n");
-    w.append("    add x9, x9, #1\n");
-    w.append("    b ");
+    w.append("\n    ldr x8, [x16, x9, lsl #3]\n    str x8, [x17, x9, lsl #3]\n    add x9, x9, #1\n    b ");
     w.append(copyLabel);
     w.append("\n");
     w.append(copyDoneLabel);
-    w.append(":\n");
-    w.append("    str x17, [x11, #0]\n");
-    w.append("    str x14, [x11, #16]\n");
+    w.append(":\n    str x17, [x11, #0]\n    str x14, [x11, #16]\n");
     w.append(noGrowLabel);
-    w.append(":\n");
-    w.append("    ldr x16, [x11, #0]\n");
+    w.append(":\n    ldr x16, [x11, #0]\n");
     if ((val != "x12")) {
         w.append("    mov x12, ");
         w.append(val);
         w.append("\n");
     }
-    w.append("    str x12, [x16, x13, lsl #3]\n");
-    w.append("    add x13, x13, #1\n");
-    w.append("    str x13, [x11, #8]\n");
+    w.append("    str x12, [x16, x13, lsl #3]\n    add x13, x13, #1\n    str x13, [x11, #8]\n");
 }
 
 // emitArrayPop: dst = pop(arr). Src1 = arrPtr.
@@ -1491,15 +1296,11 @@ fn codegen_arm64Emitter_emitArrayPop(e: CodegenArm64Emitter, fn_value: CodegenIR
     let dst: str = codegen_arm64Emitter_dstReg(e, fn_value, instr.Dst, "x10");
     w.append("    ldr x13, [");
     w.append(arrPtr);
-    w.append(", #8]\n");
-    w.append("    sub x13, x13, #1\n");
-    w.append("    str x13, [");
+    w.append(", #8]\n    sub x13, x13, #1\n    str x13, [");
     w.append(arrPtr);
-    w.append(", #8]\n");
-    w.append("    ldr x14, [");
+    w.append(", #8]\n    ldr x14, [");
     w.append(arrPtr);
-    w.append(", #0]\n");
-    w.append("    ldr ");
+    w.append(", #0]\n    ldr ");
     w.append(dst);
     w.append(", [x14, x13, lsl #3]\n");
     codegen_arm64Emitter_spillIfNeeded(e, fn_value, instr.Dst, dst);
@@ -1599,8 +1400,7 @@ fn codegen_arm64Emitter_emitFlagOp(e: CodegenArm64Emitter, fn_value: CodegenIRFu
         } else {
             w.append("    // getflag: unrecognised flag ");
             w.append(runtime_quote(flagName));
-            w.append("\n");
-            w.append("    mov ");
+            w.append("\n    mov ");
             w.append(dst);
             w.append(", #0\n");
         }
@@ -1653,30 +1453,21 @@ fn codegen_arm64Emitter_emitStrCmpEq(e: CodegenArm64Emitter, fn_value: CodegenIR
         w.append("\n");
     }
     w.append(loopLabel);
-    w.append(":\n");
-    w.append("    ldrb w15, [x13], #1\n");
-    w.append("    ldrb w16, [x14], #1\n");
-    w.append("    cmp w15, w16\n");
-    w.append("    b.ne ");
+    w.append(":\n    ldrb w15, [x13], #1\n    ldrb w16, [x14], #1\n    cmp w15, w16\n    b.ne ");
     w.append(neLabel);
-    w.append("\n");
-    w.append("    cbz w15, ");
+    w.append("\n    cbz w15, ");
     w.append(eqLabel);
-    w.append("\n");
-    w.append("    b ");
+    w.append("\n    b ");
     w.append(loopLabel);
     w.append("\n");
     w.append(neLabel);
-    w.append(":\n");
-    w.append("    mov ");
+    w.append(":\n    mov ");
     w.append(dst);
-    w.append(", #0\n");
-    w.append("    b ");
+    w.append(", #0\n    b ");
     w.append(endLabel);
     w.append("\n");
     w.append(eqLabel);
-    w.append(":\n");
-    w.append("    mov ");
+    w.append(":\n    mov ");
     w.append(dst);
     w.append(", #1\n");
     w.append(endLabel);
@@ -2058,7 +1849,8 @@ fn codegen_arm64Emitter_emitFusedCmpBranch(e: CodegenArm64Emitter, fn_value: Cod
 //	ldur xM, [x29, #-K]    →  mov xM, xN  (cheaper than a memory load)
 fn codegen_arm64LineEnd(text: str, start: i32, size: i32) -> i32 {
     let end: i32 = start;
-    while (end < size && byte_at(text, end) != 10) { end++; }
+    let address: u64 = ptr(text) + i32_to_u64(start);
+    while (end < size && load8(address) != 10) { end++; address++; }
     return end;
 }
 
@@ -2109,7 +1901,7 @@ fn codegen_assemblyTrimEnd(text: str, start: i32, end: i32) -> i32 {
 
 fn codegen_peepholeARM64(asm: str) -> str {
     let size: i32 = len(asm);
-    let output: str = make_buffer(size);
+    let output: str = alloc_string(size);
     let written: i32 = 0;
     let start: i32 = 0;
     while (start < size) {
@@ -2141,5 +1933,6 @@ fn codegen_peepholeARM64(asm: str) -> str {
         }
         start = next;
     }
-    return substr_len(output, 0, written);
+    string_set_byte(output, written, 0);
+    return output;
 }

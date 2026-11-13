@@ -28,6 +28,11 @@ fn check_large_allocation() -> bool {
 }
 
 fn main() -> i32 {
+    if (str_replace("aaaaa", "aa", "b") != "bba") { return 17; }
+    if (str_replace("café café", "café", "猫") != "猫 猫") { return 18; }
+    if (str_replace("abc", "", "x") != "abc" || str_replace("", "x", "y") != "") { return 19; }
+    if (str_replace("abcabc", "abc", "") != "" || str_replace("abc", "bc", "bcbc") != "abcbc") { return 20; }
+    if (str_replace("abc", "xyz", "x") != "abc" || str_replace("aa", "aaa", "b") != "aa") { return 21; }
     let source: str = make_buffer(160);
     let target: str = make_buffer(180);
     for (let i: i32 = 0; i < 160; i++) { string_set_byte(source, i, i); }

@@ -170,6 +170,13 @@ These are provided by the compiler without any import:
 | `store_byte(address, value)`   | write the low byte to memory                    |
 | `load8` / `load32` / `load64`   | raw memory reads; `load32` sign-extends          |
 | `gc_collect()`                 | collect unreachable heap allocations           |
+| `alloc_string(size) -> str`     | allocate GC-tracked writable bytes and a trailing zero; initialize the bytes before reading them |
+
+`alloc_string` is a low-level primitive for library authors. Its size must be
+non-negative and fit in the target address space. It reserves `size + 1` bytes
+and writes a zero byte at offset `size`; the preceding bytes are uninitialized.
+Application code can use `make_buffer(size)` for a space-filled buffer,
+`copy_bytes(address, count)` for an owned copy, or `StringBuilder` for text.
 
 Class references can be `null`. The `&&` and `||` operators short-circuit, so
 `value != null && value.field > 0` safely guards the field access.

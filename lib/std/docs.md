@@ -191,6 +191,24 @@ str_split_first, str_split_rest, str_contains
 
 ---
 
+## Efficient buffers and builders
+
+`make_buffer(size)` allocates one owned, space-filled string buffer; non-positive
+sizes return an empty string. `copy_bytes(address, count)` copies an explicit
+byte range, including embedded zero bytes, and adds a trailing zero. The low-level
+`memory_copy(destination, source, count)` copies disjoint ranges without requiring
+word alignment. It does not append a terminator or allocate storage.
+
+`StringBuilder` grows a contiguous buffer geometrically. Its methods are
+`append(text)`, `append_byte(byte)`, `append_bytes(address, count)`, `length()`,
+`clear()` and `text()`. `text()` returns an independent snapshot: later appends
+and clears cannot change an earlier result. `append_bytes` preserves embedded
+zero bytes; ordinary string operations still stop at a zero terminator.
+
+The compiler bootstrap tests exercise alignment, byte tails, empty buffers,
+builder growth, snapshot independence and collection of cyclic object graphs on
+every supported native host.
+
 ## Testing
 
 ```bash

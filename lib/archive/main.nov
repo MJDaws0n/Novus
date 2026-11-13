@@ -10,7 +10,7 @@ fn extract_zip(archive: str, destination: str) -> str {
 
 #if(os == "windows") {
     fn extract_zip_process(archive: str, destination: str) -> ProcessResult {
-        let script: str = "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath '" + str_replace(archive, "'", "''") + "' -DestinationPath '" + str_replace(destination, "'", "''") + "' -Force";
+        let script: str = "$ErrorActionPreference='Stop'; $env:PSModulePath=$PSHOME+'\\Modules'; Expand-Archive -LiteralPath '" + str_replace(archive, "'", "''") + "' -DestinationPath '" + str_replace(destination, "'", "''") + "' -Force";
         return command_run(process_command("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]), true);
     }
 }
