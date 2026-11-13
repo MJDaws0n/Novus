@@ -17,6 +17,11 @@ const (
 	MODULE   = "MODULE"
 	IMPORT   = "IMPORT"
 	FN       = "FN"
+	CLASS    = "CLASS"
+	NEW      = "NEW"
+	PUB      = "PUB"
+	PRIV     = "PRIV"
+	STATIC   = "STATIC"
 	LET      = "LET"
 	RETURN   = "RETURN"
 	TRUE     = "TRUE"
@@ -99,6 +104,11 @@ var keywords = map[string]string{
 	"module":   MODULE,
 	"import":   IMPORT,
 	"fn":       FN,
+	"class":    CLASS,
+	"new":      NEW,
+	"pub":      PUB,
+	"priv":     PRIV,
+	"static":   STATIC,
 	"let":      LET,
 	"return":   RETURN,
 	"true":     TRUE,

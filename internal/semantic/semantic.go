@@ -35,9 +35,10 @@ func (s Severity) String() string {
 
 // Diagnostic represents a single message produced by the semantic analyser.
 type Diagnostic struct {
-	Message  string
-	Pos      ast.Position
-	Severity Severity
+	Message      string
+	Pos          ast.Position
+	Severity     Severity
+	classRelated bool
 }
 
 func (d Diagnostic) Error() string {
@@ -61,7 +62,9 @@ func HasErrors(diags []Diagnostic) bool {
 // Type represents a semantic type in the Novus language.
 type Type struct {
 	Name     string
-	IsArray  bool  // true for array types (e.g. []i32)
+	IsArray  bool // true for array types (e.g. []i32)
+	class    *classInfo
+	identity string
 	ElemType *Type // element type for arrays (e.g. TypeI32 for []i32)
 }
 
@@ -522,13 +525,19 @@ type ImportedFunc struct {
 
 // Analyzer holds the state for a single semantic-analysis pass.
 type Analyzer struct {
-	diagnostics   []Diagnostic
-	scope         *Scope
-	currentFunc   *ast.FnDecl // the function body we are currently inside
-	loopDepth     int         // > 0 when inside a loop
-	importedFuncs []ImportedFunc
-	importAliases map[string]bool      // set of known import aliases (for MemberExpr resolution)
-	importedFnSet map[*ast.FnDecl]bool // FnDecl pointers registered via imports (skip in prog.Functions pass)
+	diagnostics     []Diagnostic
+	scope           *Scope
+	currentFunc     *ast.FnDecl // the function body we are currently inside
+	loopDepth       int         // > 0 when inside a loop
+	importedFuncs   []ImportedFunc
+	sourceFile      string
+	currentClass    *classInfo
+	classInstance   bool
+	classes         map[string]map[string]*classInfo
+	classDecls      map[*ast.ClassDecl]*classInfo
+	classMethods    []classMethodBody
+	importAliases   map[string]bool      // set of known import aliases (for MemberExpr resolution)
+	importedFnSet   map[*ast.FnDecl]bool // FnDecl pointers registered via imports (skip in prog.Functions pass)
 	importedFnAlias map[*ast.FnDecl]string
 }
 
@@ -542,10 +551,12 @@ func Analyze(program *ast.Program) []Diagnostic {
 // AnalyzeWithImports runs semantic analysis with imported function metadata.
 func AnalyzeWithImports(program *ast.Program, importedFuncs []ImportedFunc) []Diagnostic {
 	a := &Analyzer{
-		scope:         newScope(nil), // global scope
-		importedFuncs: importedFuncs,
-		importAliases: make(map[string]bool),
-		importedFnSet: make(map[*ast.FnDecl]bool),
+		scope:           newScope(nil),
+		classes:         make(map[string]map[string]*classInfo),
+		classDecls:      make(map[*ast.ClassDecl]*classInfo), // global scope
+		importedFuncs:   importedFuncs,
+		importAliases:   make(map[string]bool),
+		importedFnSet:   make(map[*ast.FnDecl]bool),
 		importedFnAlias: make(map[*ast.FnDecl]string),
 	}
 	a.injectBuiltins()
@@ -614,16 +625,21 @@ func (a *Analyzer) injectBuiltins() {
 // ---------------------------------------------------------------------------
 
 func (a *Analyzer) analyzeProgram(prog *ast.Program) {
+	prog.ClassGlobals, prog.ClassFunctions, prog.Startup = nil, nil, nil
+	a.collectClasses(prog)
+	a.collectClassMembers(prog)
+
 	// Register imported functions in scope.
 	// Pre-scan: count distinct signatures per imported function name to detect true overloads.
 	// Functions with the same name AND same parameter types (from duplicate imports) are not overloads.
 	importSignatures := map[string]map[string]bool{} // name → set of param signature strings
 	for _, imp := range a.importedFuncs {
 		fn := imp.Fn
+		a.sourceFile = fn.SourceFile
 		var sigParts []string
 		for _, p := range fn.Params {
 			if p.Type != nil {
-				sigParts = append(sigParts, p.Type.Name)
+				sigParts = append(sigParts, typeKey(a.resolveType(p.Type), p.Type.Name))
 			} else {
 				sigParts = append(sigParts, "void")
 			}
@@ -637,6 +653,12 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 
 	for _, imp := range a.importedFuncs {
 		fn := imp.Fn
+		a.sourceFile = fn.SourceFile
+		a.checkClassConflict("", fn.Name, fn.Pos)
+		originalSource := a.sourceFile
+		a.sourceFile = prog.SourceFile
+		a.checkClassConflict(imp.Alias, fn.Name, fn.Pos)
+		a.sourceFile = originalSource
 		retType := a.resolveType(fn.ReturnType)
 		paramTypes := make([]*Type, len(fn.Params))
 		paramTypeNames := make([]string, len(fn.Params))
@@ -645,7 +667,7 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 		for i, p := range fn.Params {
 			paramTypes[i] = a.resolveType(p.Type)
 			if p.Type != nil {
-				paramTypeNames[i] = p.Type.Name
+				paramTypeNames[i] = typeKey(paramTypes[i], p.Type.Name)
 			} else {
 				paramTypeNames[i] = "void"
 			}
@@ -744,6 +766,9 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 			continue
 		}
 
+		a.sourceFile = fn.SourceFile
+		a.checkClassConflict("", fn.Name, fn.Pos)
+
 		// Check for collisions with builtins / registers.
 		if existing := a.scope.lookupLocal(fn.Name); existing != nil {
 			if existing.Kind == SymBuiltin {
@@ -766,7 +791,7 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 		for i, p := range fn.Params {
 			paramTypes[i] = a.resolveType(p.Type)
 			if p.Type != nil {
-				paramTypeNames[i] = p.Type.Name
+				paramTypeNames[i] = typeKey(paramTypes[i], p.Type.Name)
 			} else {
 				paramTypeNames[i] = "void"
 			}
@@ -821,7 +846,10 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 
 	// Register global variables in scope.
 	for _, g := range prog.Globals {
+		a.sourceFile = g.SourceFile
+		a.checkClassConflict("", g.Name, g.Pos)
 		gType := a.resolveType(g.Type)
+		g.RuntimeInit = gType != nil && gType.class != nil
 		if gType == nil {
 			gType = TypeVoid
 		}
@@ -844,9 +872,12 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 		})
 	}
 
+	a.analyzeClassBodies(prog)
+
 	// Second pass — analyse each function body.
 	for _, fn := range prog.Functions {
 		// Skip functions that failed registration (reserved names).
+		a.sourceFile = fn.SourceFile
 		mangledName := fn.MangledName
 		if mangledName == "" {
 			mangledName = fn.Name
@@ -875,6 +906,9 @@ func (a *Analyzer) analyzeProgram(prog *ast.Program) {
 func (a *Analyzer) analyzeFunction(fn *ast.FnDecl) {
 	a.currentFunc = fn
 	a.pushScope()
+	if a.currentClass != nil && a.classInstance {
+		a.scope.define(&Symbol{Name: "self", Kind: SymVar, Type: a.currentClass.typ, Pos: fn.Pos})
+	}
 
 	// Register parameters in the function scope.
 	for _, param := range fn.Params {
@@ -883,6 +917,10 @@ func (a *Analyzer) analyzeFunction(fn *ast.FnDecl) {
 			a.error(param.Pos, fmt.Sprintf("parameter %q cannot have type void", param.Name))
 		}
 
+		if a.currentClass != nil && param.Name == "self" {
+			a.classError(param.Pos, "self is reserved inside a class")
+			continue
+		}
 		// Prevent parameter names that collide with builtins/registers.
 		if existing := a.scope.lookup(param.Name); existing != nil && (existing.Kind == SymBuiltin || existing.Kind == SymReg) {
 			a.error(param.Pos, fmt.Sprintf("cannot use reserved name %q as parameter", param.Name))
@@ -952,8 +990,14 @@ func (a *Analyzer) analyzeImportedFunctionBody(fn *ast.FnDecl) {
 	a.popScope()
 	a.currentFunc = nil
 
-	// Discard any diagnostics produced while analyzing the imported body.
-	a.diagnostics = saved
+	// Keep class diagnostics even in legacy imported bodies.
+	var classDiagnostics []Diagnostic
+	for _, diag := range a.diagnostics[len(saved):] {
+		if diag.classRelated {
+			classDiagnostics = append(classDiagnostics, diag)
+		}
+	}
+	a.diagnostics = append(saved, classDiagnostics...)
 }
 
 func (a *Analyzer) analyzeBlock(block *ast.BlockStmt) {
@@ -1000,6 +1044,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 // ---- Let ----
 
 func (a *Analyzer) analyzeLetStmt(s *ast.LetStmt) {
+	if a.currentClass != nil && s.Name == "self" {
+		a.classError(s.Pos, "self is reserved inside a class")
+		return
+	}
 	declType := a.resolveType(s.Type)
 
 	if declType == TypeVoid {
@@ -1135,6 +1183,10 @@ func (a *Analyzer) analyzeForStmt(s *ast.ForStmt) {
 // ---- Assign ----
 
 func (a *Analyzer) analyzeAssignStmt(s *ast.AssignStmt) {
+	if ident, ok := s.Target.(*ast.IdentExpr); ok && ident.Name == "self" && a.currentClass != nil {
+		a.classError(s.Pos, "cannot assign to self")
+	}
+
 	targetType := a.analyzeExpr(s.Target)
 	valType := a.analyzeExpr(s.Value)
 
@@ -1180,6 +1232,8 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) *Type {
 		return a.analyzeBinaryExpr(e)
 	case *ast.CallExpr:
 		return a.analyzeCallExpr(e)
+	case *ast.NewExpr:
+		return a.analyzeNewExpr(e)
 	case *ast.MemberExpr:
 		return a.analyzeMemberExpr(e)
 	case *ast.IndexExpr:
@@ -1199,6 +1253,16 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) *Type {
 func (a *Analyzer) analyzeIdentExpr(e *ast.IdentExpr) *Type {
 	if e.Name == "<error>" {
 		return nil // parser error-recovery placeholder
+	}
+	if e.Name == "self" && a.currentClass != nil && a.scope.lookupLocal("self") == nil {
+		if sym := a.scope.lookup("self"); sym == nil || sym.Type != a.currentClass.typ {
+			a.classError(e.Pos, "self is available only on an instance")
+			return nil
+		}
+	}
+	if a.classType(e.Name) != nil && a.scope.lookup(e.Name) == nil {
+		a.classError(e.Pos, fmt.Sprintf("class %q is a type; use new to create an instance", e.Name))
+		return nil
 	}
 	// Import alias names are valid identifiers (used as namespace prefixes).
 	if a.importAliases[e.Name] {
@@ -1329,6 +1393,10 @@ func (a *Analyzer) analyzeBinaryExpr(e *ast.BinaryExpr) *Type {
 func (a *Analyzer) analyzeCallExpr(e *ast.CallExpr) *Type {
 	switch callee := e.Callee.(type) {
 	case *ast.IdentExpr:
+		if a.classType(callee.Name) != nil {
+			a.classError(callee.Pos, fmt.Sprintf("use new %s(...) to construct a class", callee.Name))
+			return nil
+		}
 		if callee.Name == "<error>" {
 			for _, arg := range e.Args {
 				a.analyzeExpr(arg)
@@ -1456,8 +1524,17 @@ func (a *Analyzer) analyzeCallExpr(e *ast.CallExpr) *Type {
 		return sym.ReturnType
 
 	case *ast.MemberExpr:
+		if ident, ok := callee.Object.(*ast.IdentExpr); !ok || !a.importAliases[ident.Name] || a.classType(ident.Name) != nil || (a.scope.lookup(ident.Name) != nil && a.scope.lookup(ident.Name).Kind == SymVar) {
+			if class, static := a.classReceiver(callee.Object); class != nil {
+				return a.analyzeClassCall(e, callee, class, static)
+			}
+		}
+		if a.classType(qualifiedClassName(callee)) != nil {
+			a.classError(e.Pos, fmt.Sprintf("use new %s(...) to construct a class", qualifiedClassName(callee)))
+			return nil
+		}
 		// Module-qualified calls (e.g. std.test()) — resolve via import aliases.
-		if ident, ok := callee.Object.(*ast.IdentExpr); ok && a.importAliases[ident.Name] {
+		if ident, ok := callee.Object.(*ast.IdentExpr); ok && a.importAliases[ident.Name] && (a.scope.lookup(ident.Name) == nil || a.scope.lookup(ident.Name).Kind != SymVar) {
 			alias := ident.Name
 			funcName := callee.Field
 			qualifiedName := alias + "." + funcName
@@ -1523,8 +1600,7 @@ func (a *Analyzer) analyzeCallExpr(e *ast.CallExpr) *Type {
 			return sym.ReturnType
 		}
 
-		// Unknown module — fall through to generic handling.
-		a.analyzeExpr(callee.Object)
+		// Unknown receiver — retain legacy handling for non-class calls.
 		for _, arg := range e.Args {
 			a.analyzeExpr(arg)
 		}
@@ -1542,14 +1618,20 @@ func (a *Analyzer) analyzeCallExpr(e *ast.CallExpr) *Type {
 // ---- Member ----
 
 func (a *Analyzer) analyzeMemberExpr(e *ast.MemberExpr) *Type {
+	if class, static := a.classReceiver(e.Object); class != nil {
+		return a.analyzeClassField(e, class, static)
+	}
+	if a.classType(qualifiedClassName(e)) != nil {
+		a.classError(e.Pos, fmt.Sprintf("class %q is a type; use new to create an instance", qualifiedClassName(e)))
+		return nil
+	}
 	// For import aliases used in call expressions, the CallExpr handler does resolution.
 	// For standalone member access (not in call position), check if it's a known alias.
 	if ident, ok := e.Object.(*ast.IdentExpr); ok && a.importAliases[ident.Name] {
 		// This is an aliased import reference — type will be resolved in call context.
 		return nil
 	}
-	a.analyzeExpr(e.Object)
-	// Member access on imported modules / structs cannot be resolved yet.
+	// Retain legacy handling for other member expressions.
 	return nil
 }
 
@@ -1565,6 +1647,8 @@ func (a *Analyzer) analyzeArrayLitExpr(e *ast.ArrayLitExpr) *Type {
 		}
 		if elemType == nil {
 			elemType = t
+		} else if (containsClass(t) || containsClass(elemType)) && !isAssignableTo(elemType, t) {
+			a.classError(el.GetPos(), fmt.Sprintf("array element has type %s; expected %s", t.Name, elemType.Name))
 		}
 	}
 	// For empty array literals, the type will be resolved at the let-statement level
@@ -1597,6 +1681,7 @@ func (a *Analyzer) analyzeIndexExpr(e *ast.IndexExpr) *Type {
 		return TypeStr
 	}
 	if objType.IsArray {
+		e.ArrayType = objType.ElemType.Name
 		return objType.ElemType
 	}
 
@@ -1614,6 +1699,18 @@ func (a *Analyzer) resolveType(te *ast.TypeExpr) *Type {
 	}
 	if te.Name == "<error>" {
 		return nil // parser error-recovery placeholder
+	}
+	if class := a.classType(te.Name); class != nil {
+		return class.typ
+	}
+	if strings.HasPrefix(te.Name, "[]") {
+		elem := a.resolveType(&ast.TypeExpr{Name: te.Name[2:], Pos: te.Pos})
+		if elem == nil {
+			return nil
+		}
+		if containsClass(elem) {
+			return &Type{Name: te.Name, IsArray: true, ElemType: elem}
+		}
 	}
 	t := LookupType(te.Name)
 	if t == nil {

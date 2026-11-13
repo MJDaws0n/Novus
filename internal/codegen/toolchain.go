@@ -22,6 +22,7 @@ type Toolchain struct {
 	ExeFile    string // path to the final executable
 	Verbose    bool
 	NASMPath   string // custom NASM path (auto-downloaded on Windows)
+	WindowsAPI bool   // link Windows SDK import libraries
 	GoLinkPath string // custom GoLink path (auto-downloaded on Windows)
 }
 
@@ -84,6 +85,8 @@ func (tc *Toolchain) assembleGAS() error {
 		} else {
 			cmd = exec.Command("as", "-arch", "x86_64", "-o", tc.ObjFile, tc.AsmFile)
 		}
+	case OS_Windows:
+		cmd = exec.Command("clang", "--target=aarch64-pc-windows-msvc", "-c", tc.AsmFile, "-o", tc.ObjFile)
 	case OS_Linux:
 		switch tc.Target.Arch {
 		case Arch_x86:
@@ -193,6 +196,18 @@ func (tc *Toolchain) linkLinux() error {
 }
 
 func (tc *Toolchain) linkWindows() error {
+	if tc.Target.Arch == Arch_ARM64 {
+		linker, ok := firstAvailableTool("lld-link", "link.exe")
+		if !ok {
+			return fmt.Errorf("Windows ARM64 requires lld-link or link.exe")
+		}
+		args := []string{"/machine:arm64", "/entry:main", "/subsystem:console", "/out:" + tc.ExeFile, tc.ObjFile}
+		if tc.WindowsAPI {
+			args = append(args, "kernel32.lib", "user32.lib", "gdi32.lib", "msvcrt.lib")
+		}
+		return tc.runCmd(exec.Command(linker, args...), "link (Windows ARM64)")
+	}
+
 	// Try GoLink first (common in hobby compiler setups), then MSVC link.
 	golinkBin := ""
 	if tc.GoLinkPath != "" {
@@ -209,7 +224,7 @@ func (tc *Toolchain) linkWindows() error {
 	}
 
 	// Try MSVC link.exe.
-	link, err := exec.LookPath("link")
+	link, err := exec.LookPath("link.exe")
 	if err == nil {
 		cmd := exec.Command(link,
 			"/ENTRY:main",
@@ -274,6 +289,15 @@ func DetectToolchain(target *Target) []string {
 // DetectToolchainWithPaths checks for tools using custom paths for NASM/GoLink.
 func DetectToolchainWithPaths(target *Target, nasmPath, golinkPath string) []string {
 	var missing []string
+	if target.OS == OS_Windows && target.Arch == Arch_ARM64 {
+		if _, ok := firstAvailableTool("clang"); !ok {
+			missing = append(missing, "clang (Windows ARM64 assembler)")
+		}
+		if _, ok := firstAvailableTool("lld-link", "link.exe"); !ok {
+			missing = append(missing, "lld-link or link.exe (Windows ARM64 linker)")
+		}
+		return missing
+	}
 
 	switch {
 	case target.Flavor == NASM:
@@ -330,7 +354,7 @@ func DetectToolchainWithPaths(target *Target, nasmPath, golinkPath string) []str
 			}
 		}
 		if !hasLinker {
-			for _, l := range []string{"golink", "link"} {
+			for _, l := range []string{"golink", "link.exe"} {
 				if _, err := exec.LookPath(l); err == nil {
 					hasLinker = true
 					break

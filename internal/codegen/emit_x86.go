@@ -215,6 +215,12 @@ func (e *x86Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		}
 
 	case IRStore:
+		if instr.Src2.Kind != OpNone {
+			w.WriteString(fmt.Sprintf("    movl %s, %%ecx\n", e.operand(instr.Src2)))
+			w.WriteString(fmt.Sprintf("    movl %s, %%eax\n", e.operand(instr.Src1)))
+			w.WriteString("    movl %eax, (%ecx)\n")
+			break
+		}
 		src := e.operand(instr.Src1)
 		if instr.Src2.Kind != OpNone {
 			addr := e.operand(instr.Src2)
@@ -485,6 +491,9 @@ func (e *x86Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		w.WriteString(fmt.Sprintf("    movl %%eax, %s\n", dst))
 
 	// Array operations (32-bit, 4-byte elements).
+	case IRHeapAlloc:
+		instr.Src1, instr.Args = LabelOp("_novus_gc_alloc"), []Operand{instr.Src1}
+		e.emitCall(fn, instr)
 	case IRArrayNew:
 		e.emitArrayNew(instr)
 	case IRArrayGet:
@@ -504,14 +513,14 @@ func (e *x86Emitter) emitInstr(fn *IRFunc, instr IRInstr) {
 		if instr.Src1.Kind == OpLabel {
 			globalSym := e.target.Sym(instr.Src1.Label)
 			dst := e.operand(instr.Dst)
-			w.WriteString(fmt.Sprintf("    movl %s, %s\n", globalSym, dst))
+			w.WriteString(fmt.Sprintf("    movl %s, %%eax\n    movl %%eax, %s\n", globalSym, dst))
 		}
 
 	case IRStoreGlobal:
 		if instr.Dst.Kind == OpLabel {
 			globalSym := e.target.Sym(instr.Dst.Label)
 			src := e.operand(instr.Src1)
-			w.WriteString(fmt.Sprintf("    movl %s, %s\n", src, globalSym))
+			w.WriteString(fmt.Sprintf("    movl %s, %%eax\n    movl %%eax, %s\n", src, globalSym))
 		}
 
 	case IRGCCollect:
@@ -691,7 +700,7 @@ func (e *x86Emitter) usesHeap() bool {
 	for _, fn := range e.mod.Functions {
 		for _, instr := range fn.Instrs {
 			switch instr.Op {
-			case IRStrConcat, IRArrayNew, IRArrayAppend, IRGCCollect:
+			case IRHeapAlloc, IRStrConcat, IRArrayNew, IRArrayAppend, IRGCCollect:
 				return true
 			}
 		}
@@ -1041,8 +1050,8 @@ func (e *x86Emitter) emitX86GCRuntime() {
 	w.WriteString("    movl _novus_gc_stack_bottom, %edi\n")
 	w.WriteString(".gcc32_scan_stack:\n")
 	w.WriteString("    cmpl %edi, %esi\n")
-	w.WriteString("    jge .gcc32_trans\n")  // go to transitive marking
-	w.WriteString("    movl (%esi), %edx\n") // potential pointer
+	w.WriteString("    jge .gcc32_mark_globals\n") // go to transitive marking
+	w.WriteString("    movl (%esi), %edx\n")       // potential pointer
 	// Inner loop: check edx against all table entries.
 	// Save esi/edi on stack since we need registers.
 	w.WriteString("    pushl %esi\n")
@@ -1070,6 +1079,32 @@ func (e *x86Emitter) emitX86GCRuntime() {
 	w.WriteString("    popl %esi\n")
 	w.WriteString("    addl $4, %esi\n")
 	w.WriteString("    jmp .gcc32_scan_stack\n")
+
+	w.WriteString(".gcc32_mark_globals:\n")
+	for _, global := range e.mod.Globals {
+		loop := ".Lgc32_global_" + global.Name
+		next := loop + "_next"
+		done := loop + "_done"
+		w.WriteString(fmt.Sprintf("    movl %s, %%edx\n", global.Name))
+		w.WriteString("    xorl %ebx, %ebx\n")
+		w.WriteString(loop + ":\n")
+		w.WriteString("    cmpl _novus_gc_count, %ebx\n")
+		w.WriteString("    jge " + done + "\n")
+		w.WriteString("    imull $12, %ebx, %eax\n")
+		w.WriteString("    addl $_novus_gc_table, %eax\n")
+		w.WriteString("    movl (%eax), %esi\n")
+		w.WriteString("    cmpl %esi, %edx\n")
+		w.WriteString("    jb " + next + "\n")
+		w.WriteString("    addl 4(%eax), %esi\n")
+		w.WriteString("    cmpl %esi, %edx\n")
+		w.WriteString("    jae " + next + "\n")
+		w.WriteString("    movl $1, 8(%eax)\n")
+		w.WriteString("    jmp " + done + "\n")
+		w.WriteString(next + ":\n")
+		w.WriteString("    incl %ebx\n")
+		w.WriteString("    jmp " + loop + "\n")
+		w.WriteString(done + ":\n")
+	}
 
 	// Transitive marking — scan marked allocation contents (4 bytes at a time).
 	w.WriteString(".gcc32_trans:\n")

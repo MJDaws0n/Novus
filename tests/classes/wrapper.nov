@@ -1,0 +1,8 @@
+module wrapper;
+
+import ball geometry;
+
+class Wrapper {
+    pub let ball: geometry.Ball = geometry.Ball.origin();
+    pub static let saved: []geometry.Ball = [new geometry.Ball(99)];
+}

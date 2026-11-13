@@ -158,6 +158,18 @@ func Generate(program *ast.Program, opts *Options) (*Result, error) {
 	// --- Step 3: Write assembly file ---
 	tc := NewToolchain(target, platformDir, outputName)
 	tc.Verbose = opts.Verbose
+	if target.OS == OS_Windows && target.Arch == Arch_ARM64 {
+		for _, fn := range irMod.Functions {
+			if fn.Name == "main" && fn.ParamCount >= 2 {
+				tc.WindowsAPI = true
+			}
+			for _, instr := range fn.Instrs {
+				if instr.Op == IRWinCall {
+					tc.WindowsAPI = true
+				}
+			}
+		}
+	}
 
 	if err := tc.WriteAssembly(asmText); err != nil {
 		return nil, fmt.Errorf("cannot write assembly file: %w", err)
@@ -174,7 +186,7 @@ func Generate(program *ast.Program, opts *Options) (*Result, error) {
 
 	// --- Step 4: Assemble ---
 	// On Windows, auto-download NASM and GoLink if not available.
-	if target.OS == OS_Windows {
+	if target.OS == OS_Windows && target.Arch == Arch_x86_64 {
 		nasmPath, golinkPath, dlErr := EnsureWindowsToolchain(opts.Verbose)
 		if dlErr != nil {
 			fmt.Printf("[codegen] Warning: could not set up Windows toolchain: %v\n", dlErr)

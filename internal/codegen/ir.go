@@ -93,9 +93,9 @@ const (
 	IRPop               // dst = pop from stack
 
 	// Arithmetic
-	IRAdd // dst = src1 + src2
-	IRSub // dst = src1 - src2
-	IRMul // dst = src1 * src2
+	IRAdd  // dst = src1 + src2
+	IRSub  // dst = src1 - src2
+	IRMul  // dst = src1 * src2
 	IRDiv  // dst = src1 / src2 (signed)
 	IRMod  // dst = src1 % src2 (signed)
 	IRUDiv // dst = src1 / src2 (unsigned)
@@ -168,12 +168,12 @@ const (
 	IRStoreGlobal // store src1 to global label (Dst=label)
 
 	// Floating-point arithmetic (f64) — operands carry IEEE 754 bit patterns in integer regs/slots
-	IRFAdd    // dst = src1 + src2 (float64)
-	IRFSub    // dst = src1 - src2 (float64)
-	IRFMul    // dst = src1 * src2 (float64)
-	IRFDiv    // dst = src1 / src2 (float64)
-	IRFMod    // dst = fmod(src1, src2) (float64)
-	IRFNeg    // dst = -src1 (float64)
+	IRFAdd // dst = src1 + src2 (float64)
+	IRFSub // dst = src1 - src2 (float64)
+	IRFMul // dst = src1 * src2 (float64)
+	IRFDiv // dst = src1 / src2 (float64)
+	IRFMod // dst = fmod(src1, src2) (float64)
+	IRFNeg // dst = -src1 (float64)
 
 	// Float comparison — sets dst to 0 or 1 (integer result)
 	IRFCmpEq // dst = (src1 == src2) float compare
@@ -191,6 +191,7 @@ const (
 	IRComment   // emit a comment in the output (src1 = label with comment text)
 	IRData      // emit raw data (used for string constants in data section)
 	IRGCCollect // trigger garbage collection
+	IRHeapAlloc // allocate GC-tracked storage (Src1 = bytes)
 )
 
 var irOpNames = map[IROp]string{
@@ -215,7 +216,7 @@ var irOpNames = map[IROp]string{
 	IRFCmpEq: "fcmp_eq", IRFCmpNe: "fcmp_ne", IRFCmpLt: "fcmp_lt", IRFCmpLe: "fcmp_le",
 	IRFCmpGt: "fcmp_gt", IRFCmpGe: "fcmp_ge",
 	IRIntToFloat: "i2f", IRFloatToInt: "f2i",
-	IRGCCollect: "gc_collect",
+	IRGCCollect: "gc_collect", IRHeapAlloc: "heap_alloc",
 	IRComment: "comment", IRData: "data",
 }
 
