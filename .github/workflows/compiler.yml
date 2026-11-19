@@ -6,6 +6,12 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Publish this version after every verification job passes (for example v0.4.0); leave empty to test only'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -90,17 +96,47 @@ jobs:
           path: build/selfhost/
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')
     needs: [bootstrap-tests, selfhost]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+    env:
+      NOVUS_RELEASE_VERSION: ${{ inputs.release_version || github.ref_name }}
+      NOVUS_WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: binary-*
           merge-multiple: true
           path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: performance-*
+          path: build/release/performance
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: selfhost-*
+          path: build/release/verification
+      - name: Verify and package release assets
+        run: python scripts/package-release.py --version "$NOVUS_RELEASE_VERSION" --commit "$GITHUB_SHA" --workflow-url "$NOVUS_WORKFLOW_URL"
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/novus-*
+          tag_name: ${{ inputs.release_version || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          name: Novus ${{ inputs.release_version || github.ref_name }}
+          body_path: dist/release-notes.md
+          draft: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/novus-*
+            dist/SHA256SUMS
+      - name: Verify uploaded files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/package-release.py --version "$NOVUS_RELEASE_VERSION" --commit "$GITHUB_SHA" --workflow-url "$NOVUS_WORKFLOW_URL" --verify-upload
+      - name: Publish the verified package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$NOVUS_RELEASE_VERSION" --draft=false --latest

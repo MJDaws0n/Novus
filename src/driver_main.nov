@@ -15,7 +15,7 @@ fn driver_run() -> i32 {
             }
         }
     }
-    runtime_print(("Novus Compiler V0.3.1"));
+    runtime_print(("Novus Compiler V0.4.0"));
     runtime_print(("Made by MJDawson. https://mjdawson.net & https://github.com/MJDaws0n"));
     driver_printDebug("Using debug mode.");
     if ((len(CompilerState.arguments) < 2)) {

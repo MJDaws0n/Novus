@@ -20,6 +20,9 @@ curl -fsSL https://raw.githubusercontent.com/MJDaws0n/novus/main/install.sh | ba
 
 Manual: grab a binary for your platform from the
 [releases page](https://github.com/MJDaws0n/Novus/releases) and put it on your `PATH`.
+Releases also provide the matching libraries as a ZIP, a verification report with
+benchmark samples, and `SHA256SUMS` for checking every download. The library ZIP
+contains a `lib/` directory for Novus projects.
 
 ```sh
 sudo cp novus_<your-platform> /usr/local/bin/novus
