@@ -1,0 +1,28 @@
+module std_windows_unicode;
+
+// Windows APIs use UTF-16; Novus strings and public library APIs use UTF-8.
+// The returned byte buffer includes a UTF-16 terminator and must be passed by
+// address, without applying string-length operations to its embedded zeroes.
+fn windows_wide_string(value: str) -> str {
+    win_call("MultiByteToWideChar", 65001, 8, value, -1, 0, 0);
+    let units: i32 = u64_to_i32(getreg(rax));
+    if (units <= 0) { return "\0\0"; }
+    let buffer: str = make_buffer(units * 2);
+    win_call("MultiByteToWideChar", 65001, 8, value, -1, buffer, units);
+    let copied: i32 = u64_to_i32(getreg(rax));
+    if (copied != units) { return "\0\0"; }
+    return buffer;
+}
+
+fn windows_utf8_string(address: u64, units: i32) -> str {
+    if (units == 0 || address == 0) { return ""; }
+    win_call("WideCharToMultiByte", 65001, 0, address, units, 0, 0, 0, 0);
+    let bytes: i32 = u64_to_i32(getreg(rax));
+    if (bytes <= 0) { return ""; }
+    let buffer: str = make_buffer(bytes);
+    win_call("WideCharToMultiByte", 65001, 0, address, units, buffer, bytes, 0, 0);
+    let copied: i32 = u64_to_i32(getreg(rax));
+    if (copied != bytes) { return ""; }
+    if (units < 0) { copied--; }
+    return copy_bytes(ptr(buffer), copied);
+}

@@ -1,0 +1,722 @@
+{
+  "verified_commit": "977a6ae4777ad5e6816cd5f00264a16f56400d67",
+  "workflow_run": "https://github.com/MJDaws0n/Novus/actions/runs/43502727450",
+  "nox_source_commit": "af635107c6e8d81d1059062fecdbb96e408fc43f",
+  "maximum_large_ratio": 1.25,
+  "targets": [
+    {
+      "recorded_at": "2026-11-13T20:36:17.306803+00:00",
+      "host": "macOS-15.8.2-arm64-arm-64bit",
+      "target": "darwin/arm64",
+      "warmups": 1,
+      "measured_runs": 6,
+      "maximum_large_ratio": 1.25,
+      "includes": "fresh process, parsing, imports, semantic analysis, assembly generation, assembly and linking",
+      "compiler_sha256": {
+        "go": "6612af4e9ee88e3e43214e77aefa734f19148744a37f645b2578858e4d0dc214",
+        "novus": "ac50dab3e55fbee9198b15586729c23fdc55d74ea77bfb6a4ce8902f3fddbd78"
+      },
+      "applications": {
+        "small": {
+          "source": "/Users/runner/work/Novus/Novus/tests/classes/main.nov",
+          "source_sha256": "5c70811db7a4f2905d271f44119014cbcfd6bfe5790623ec91df8ba757406e5f",
+          "seconds": {
+            "go": [
+              0.13735933300000625,
+              0.12272758299999964,
+              0.12445820900001081,
+              0.12437916700000073,
+              0.1287550000000124,
+              0.12746887500000526
+            ],
+            "novus": [
+              0.1360234170000183,
+              0.13132445899998402,
+              0.13362791599999468,
+              0.14304070899999033,
+              0.12917837500000928,
+              0.130668208000003
+            ]
+          },
+          "median_seconds": {
+            "go": 0.12596354200000803,
+            "novus": 0.13247618749998935
+          },
+          "novus_go_ratio": 1.0517026228111377,
+          "passed": true
+        },
+        "large": {
+          "source": "/Users/runner/work/Novus/Novus/build/benchmarks/nox/main.nov",
+          "source_sha256": "72be3d71c46b714bc1f0f9d3dade1b6d3139b2ba6c73b701c66f8f1bb882b219",
+          "seconds": {
+            "go": [
+              1.3160526669999797,
+              1.3336175839999953,
+              1.189200833000001,
+              1.311537291999997,
+              1.2685398749999877,
+              1.2993871660000025
+            ],
+            "novus": [
+              1.2455468339999811,
+              1.1631500839999944,
+              1.187770999999998,
+              1.2496194580000122,
+              1.1882591249999734,
+              1.2010263330000157
+            ]
+          },
+          "median_seconds": {
+            "go": 1.3054622289999998,
+            "novus": 1.1946427289999946
+          },
+          "novus_go_ratio": 0.9151109104972771,
+          "passed": true
+        },
+        "compiler": {
+          "source": "/Users/runner/work/Novus/Novus/main.nov",
+          "source_sha256": "c698bd37323c9dfee0f523f721d78e5646760dd7e30f88c0da159685c4a12179",
+          "seconds": {
+            "go": [
+              15.745148083000004,
+              15.385825207999972,
+              16.25954712500004,
+              18.63358500000004,
+              15.466488833000028,
+              17.221134707999965
+            ],
+            "novus": [
+              7.466851250000019,
+              7.5879047920000176,
+              7.413960583000005,
+              9.022500666000042,
+              8.206059832999983,
+              8.424237292000043
+            ]
+          },
+          "median_seconds": {
+            "go": 16.002347604000022,
+            "novus": 7.8969823125000005
+          },
+          "novus_go_ratio": 0.49348898723622486,
+          "passed": true
+        }
+      },
+      "compiler_source_sha256": "413951380227fc607fafbbb3a5e43368bf94567fb3c8f49459d40ecf1449daa4",
+      "bundled_libraries_sha256": "0bd2ce58ff141aee27b24890b31cbce749d3995acb4e48b0fb641766230d608c",
+      "passed": true
+    },
+    {
+      "recorded_at": "2026-11-13T20:37:05.999372+00:00",
+      "host": "macOS-15.7.9-x86_64-i386-64bit",
+      "target": "darwin/amd64",
+      "warmups": 1,
+      "measured_runs": 6,
+      "maximum_large_ratio": 1.25,
+      "includes": "fresh process, parsing, imports, semantic analysis, assembly generation, assembly and linking",
+      "compiler_sha256": {
+        "go": "633862e42b681d4808447a16ab2b7f52987587c367bf69ed11c8c90aed9fcceb",
+        "novus": "beb85ca9569662709a2a8480bc262c529c327ba225935827867c9ebcac0ad75e"
+      },
+      "applications": {
+        "small": {
+          "source": "/Users/runner/work/Novus/Novus/tests/classes/main.nov",
+          "source_sha256": "5c70811db7a4f2905d271f44119014cbcfd6bfe5790623ec91df8ba757406e5f",
+          "seconds": {
+            "go": [
+              0.21954277900005081,
+              0.26483564199998,
+              0.2523753919999763,
+              0.2936998690000223,
+              0.2924448609999786,
+              0.34951474400003235
+            ],
+            "novus": [
+              0.23749830399998473,
+              0.2415296099999864,
+              0.2647762309999848,
+              0.2855535409999561,
+              0.29312204400002884,
+              0.23454062299998668
+            ]
+          },
+          "median_seconds": {
+            "go": 0.2786402514999793,
+            "novus": 0.2531529204999856
+          },
+          "novus_go_ratio": 0.9085296152914376,
+          "passed": true
+        },
+        "large": {
+          "source": "/Users/runner/work/Novus/Novus/build/benchmarks/nox/main.nov",
+          "source_sha256": "72be3d71c46b714bc1f0f9d3dade1b6d3139b2ba6c73b701c66f8f1bb882b219",
+          "seconds": {
+            "go": [
+              1.4261166940000294,
+              1.3518365730000141,
+              2.747830147000002,
+              1.9568773529999817,
+              1.4220231950000084,
+              1.6915794520000418
+            ],
+            "novus": [
+              0.8758139199999846,
+              1.1882901640000227,
+              1.7117562100000328,
+              1.3187942349999844,
+              0.9756083120000199,
+              1.0685402070000123
+            ]
+          },
+          "median_seconds": {
+            "go": 1.5588480730000356,
+            "novus": 1.1284151855000175
+          },
+          "novus_go_ratio": 0.7238775895128503,
+          "passed": true
+        },
+        "compiler": {
+          "source": "/Users/runner/work/Novus/Novus/main.nov",
+          "source_sha256": "c698bd37323c9dfee0f523f721d78e5646760dd7e30f88c0da159685c4a12179",
+          "seconds": {
+            "go": [
+              28.907702744999995,
+              36.943091812000034,
+              35.267058039999995,
+              28.988795787000015,
+              25.830014211000048,
+              22.566271897999968
+            ],
+            "novus": [
+              7.458419623999987,
+              4.568141247000028,
+              5.412163039000006,
+              4.859783872000094,
+              5.004081276000079,
+              3.4182602209999686
+            ]
+          },
+          "median_seconds": {
+            "go": 28.948249266000005,
+            "novus": 4.931932574000086
+          },
+          "novus_go_ratio": 0.17037066831508488,
+          "passed": true
+        }
+      },
+      "compiler_source_sha256": "413951380227fc607fafbbb3a5e43368bf94567fb3c8f49459d40ecf1449daa4",
+      "bundled_libraries_sha256": "0bd2ce58ff141aee27b24890b31cbce749d3995acb4e48b0fb641766230d608c",
+      "passed": true
+    },
+    {
+      "recorded_at": "2026-11-13T20:34:47.802969+00:00",
+      "host": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39",
+      "target": "linux/amd64",
+      "warmups": 1,
+      "measured_runs": 6,
+      "maximum_large_ratio": 1.25,
+      "includes": "fresh process, parsing, imports, semantic analysis, assembly generation, assembly and linking",
+      "compiler_sha256": {
+        "go": "f40a69a3af7c99f4d3157c91f6ee2eaaf3a9fe209ca8c41fa377b393fed44ce7",
+        "novus": "998cc3b7cc99c76540e8e2d45878169021b91e880c3b4a4da53fb991a112289b"
+      },
+      "applications": {
+        "small": {
+          "source": "/home/runner/work/Novus/Novus/tests/classes/main.nov",
+          "source_sha256": "5c70811db7a4f2905d271f44119014cbcfd6bfe5790623ec91df8ba757406e5f",
+          "seconds": {
+            "go": [
+              0.014743154000001368,
+              0.016310524999994414,
+              0.01464272800001254,
+              0.014654124999992746,
+              0.014604501000007986,
+              0.01544519899999841
+            ],
+            "novus": [
+              0.02066173400001503,
+              0.021015495999989753,
+              0.020560160999991695,
+              0.021389442999975472,
+              0.021100458999995908,
+              0.020748485000012806
+            ]
+          },
+          "median_seconds": {
+            "go": 0.014698639499997057,
+            "novus": 0.02088199050000128
+          },
+          "novus_go_ratio": 1.420675056355077,
+          "passed": true
+        },
+        "large": {
+          "source": "/home/runner/work/Novus/Novus/build/benchmarks/nox/main.nov",
+          "source_sha256": "72be3d71c46b714bc1f0f9d3dade1b6d3139b2ba6c73b701c66f8f1bb882b219",
+          "seconds": {
+            "go": [
+              0.44930183100001386,
+              0.47407362699999567,
+              0.4707368119999842,
+              0.5804822080000065,
+              0.42553786799999216,
+              0.43228945599997814
+            ],
+            "novus": [
+              0.22681604199999583,
+              0.22697500099999957,
+              0.2687252860000058,
+              0.22727100599999517,
+              0.22556735000000572,
+              0.2227762699999971
+            ]
+          },
+          "median_seconds": {
+            "go": 0.460019321499999,
+            "novus": 0.2268955214999977
+          },
+          "novus_go_ratio": 0.493230416409799,
+          "passed": true
+        },
+        "compiler": {
+          "source": "/home/runner/work/Novus/Novus/main.nov",
+          "source_sha256": "c698bd37323c9dfee0f523f721d78e5646760dd7e30f88c0da159685c4a12179",
+          "seconds": {
+            "go": [
+              10.950680858000027,
+              10.934605900999998,
+              10.945722341000021,
+              10.793055016000011,
+              10.857558530000006,
+              11.113479592000004
+            ],
+            "novus": [
+              1.498617557000017,
+              1.4916936150000026,
+              1.4992827699999793,
+              1.538120623999987,
+              1.5330773339999837,
+              1.5057420830000012
+            ]
+          },
+          "median_seconds": {
+            "go": 10.94016412100001,
+            "novus": 1.5025124264999903
+          },
+          "novus_go_ratio": 0.1373391120902718,
+          "passed": true
+        }
+      },
+      "compiler_source_sha256": "413951380227fc607fafbbb3a5e43368bf94567fb3c8f49459d40ecf1449daa4",
+      "bundled_libraries_sha256": "0bd2ce58ff141aee27b24890b31cbce749d3995acb4e48b0fb641766230d608c",
+      "passed": true
+    },
+    {
+      "recorded_at": "2026-11-13T20:34:56.341884+00:00",
+      "host": "Linux-7.0.0-1017-azure-aarch64-with-glibc2.39",
+      "target": "linux/arm64",
+      "warmups": 1,
+      "measured_runs": 6,
+      "maximum_large_ratio": 1.25,
+      "includes": "fresh process, parsing, imports, semantic analysis, assembly generation, assembly and linking",
+      "compiler_sha256": {
+        "go": "055eddd890dbae9c0e3ffe94736c548adbb24a51fe63ada26fd683607df82288",
+        "novus": "fd99c09c9657ad4e5b0135d73bda73ec414987ae3d2c8aca67975d40b083a0df"
+      },
+      "applications": {
+        "small": {
+          "source": "/home/runner/work/Novus/Novus/tests/classes/main.nov",
+          "source_sha256": "5c70811db7a4f2905d271f44119014cbcfd6bfe5790623ec91df8ba757406e5f",
+          "seconds": {
+            "go": [
+              0.020795332999995253,
+              0.022206163000006995,
+              0.022927979000002097,
+              0.02143770600000039,
+              0.021003355999994255,
+              0.02137152000000242
+            ],
+            "novus": [
+              0.040981407000003856,
+              0.04143758899999739,
+              0.041418540999998754,
+              0.041354186999996045,
+              0.04095338199999787,
+              0.04200238399999989
+            ]
+          },
+          "median_seconds": {
+            "go": 0.021404613000001405,
+            "novus": 0.0413863639999974
+          },
+          "novus_go_ratio": 1.933525450798605,
+          "passed": true
+        },
+        "large": {
+          "source": "/home/runner/work/Novus/Novus/build/benchmarks/nox/main.nov",
+          "source_sha256": "72be3d71c46b714bc1f0f9d3dade1b6d3139b2ba6c73b701c66f8f1bb882b219",
+          "seconds": {
+            "go": [
+              0.545150152000005,
+              0.5702797189999984,
+              0.5820312630000046,
+              0.5552232499999974,
+              0.5370814790000082,
+              0.5493592250000034
+            ],
+            "novus": [
+              0.685144190999992,
+              0.6731017649999984,
+              0.6730219699999935,
+              0.6857564750000051,
+              0.6841203580000013,
+              0.6780929839999885
+            ]
+          },
+          "median_seconds": {
+            "go": 0.5522912375000004,
+            "novus": 0.6811066709999949
+          },
+          "novus_go_ratio": 1.2332382351077846,
+          "passed": true
+        },
+        "compiler": {
+          "source": "/home/runner/work/Novus/Novus/main.nov",
+          "source_sha256": "c698bd37323c9dfee0f523f721d78e5646760dd7e30f88c0da159685c4a12179",
+          "seconds": {
+            "go": [
+              9.745467949000016,
+              9.89465994599999,
+              9.910357323999989,
+              9.875774810999985,
+              9.945397106999991,
+              10.035635794000001
+            ],
+            "novus": [
+              2.9901708399999904,
+              3.025182295999997,
+              2.9973765860000015,
+              3.002788356999986,
+              3.0108248129999993,
+              3.0089069870000174
+            ]
+          },
+          "median_seconds": {
+            "go": 9.90250863499999,
+            "novus": 3.0058476720000016
+          },
+          "novus_go_ratio": 0.3035440596715021,
+          "passed": true
+        }
+      },
+      "compiler_source_sha256": "413951380227fc607fafbbb3a5e43368bf94567fb3c8f49459d40ecf1449daa4",
+      "bundled_libraries_sha256": "0bd2ce58ff141aee27b24890b31cbce749d3995acb4e48b0fb641766230d608c",
+      "passed": true
+    },
+    {
+      "recorded_at": "2026-11-13T20:36:23.637220+00:00",
+      "host": "Windows-2025Server-10.0.26100-SP0",
+      "target": "windows/amd64",
+      "warmups": 1,
+      "measured_runs": 6,
+      "maximum_large_ratio": 1.25,
+      "includes": "fresh process, parsing, imports, semantic analysis, assembly generation, assembly and linking",
+      "compiler_sha256": {
+        "go": "700209c9fa108e35427f076b14edddb9872ae0558d60cb486a6fe4613a42225d",
+        "novus": "1c3a15898b826f397d8550f0118d3416a64a6636decfd8b48f9feb3731f756e0"
+      },
+      "applications": {
+        "small": {
+          "source": "D:\\a\\Novus\\Novus\\tests\\classes\\main.nov",
+          "source_sha256": "9b828a4c30a45d38d1c1e606c2c7d6e6fb6e89c59a446f7ccc929178917a92bc",
+          "seconds": {
+            "go": [
+              0.13727530000005572,
+              0.13823619999993753,
+              0.1399765999999545,
+              0.1333175999999412,
+              0.13708819999999378,
+              0.139371800000049
+            ],
+            "novus": [
+              0.2878341000000546,
+              0.2855266000000256,
+              0.2851574000000028,
+              0.28676450000000386,
+              0.28915829999994,
+              0.31391610000002856
+            ]
+          },
+          "median_seconds": {
+            "go": 0.13775574999999662,
+            "novus": 0.28729930000002923
+          },
+          "novus_go_ratio": 2.0855702937992517,
+          "passed": true
+        },
+        "large": {
+          "source": "D:\\a\\Novus\\Novus\\build\\benchmarks\\nox\\main.nov",
+          "source_sha256": "f38446d4de56ab048508993687a2d3b34792cff48a497f7cd93e1a54c7dd3fcc",
+          "seconds": {
+            "go": [
+              1.5162457000000131,
+              1.5707972000000154,
+              1.5758535999999594,
+              1.5704543999999032,
+              1.5749056000000792,
+              1.5787937000000056
+            ],
+            "novus": [
+              1.5376132999999754,
+              1.5672804000000724,
+              1.5788115999999945,
+              1.540755499999932,
+              1.5529472000000624,
+              1.5583563999999797
+            ]
+          },
+          "median_seconds": {
+            "go": 1.5728514000000473,
+            "novus": 1.555651800000021
+          },
+          "novus_go_ratio": 0.9890647012171488,
+          "passed": true
+        },
+        "compiler": {
+          "source": "D:\\a\\Novus\\Novus\\main.nov",
+          "source_sha256": "9130ec9e7906abafc9aca25fd6c27830fdc1af14da7ed32acea7d03844df39e4",
+          "seconds": {
+            "go": [
+              25.658836600000086,
+              28.40949009999997,
+              26.53269839999996,
+              24.947590900000023,
+              24.900718600000005,
+              25.02960900000005
+            ],
+            "novus": [
+              7.872018099999991,
+              8.812321800000063,
+              8.899905100000069,
+              7.829452800000013,
+              7.839972699999976,
+              8.087024400000018
+            ]
+          },
+          "median_seconds": {
+            "go": 25.344222800000068,
+            "novus": 7.979521250000005
+          },
+          "novus_go_ratio": 0.3148457663495597,
+          "passed": true
+        }
+      },
+      "compiler_source_sha256": "702c1d18933d099df3706215d30638d097cf469abd681819d37d07fa00ef2926",
+      "bundled_libraries_sha256": "9ce50e840c1eebb908406dece9a8d29c6a19ccaad28dea04158f7f3e63f6a673",
+      "passed": true
+    },
+    {
+      "recorded_at": "2026-11-13T20:37:25.238834+00:00",
+      "host": "Windows-11-10.0.26200-SP0",
+      "target": "windows/arm64",
+      "warmups": 1,
+      "measured_runs": 6,
+      "maximum_large_ratio": 1.25,
+      "includes": "fresh process, parsing, imports, semantic analysis, assembly generation, assembly and linking",
+      "compiler_sha256": {
+        "go": "93ebe7b1f45ebd7a1c4b717bb43c24a43358ab5fa8d54cd4b6e2b6e17d5c37b0",
+        "novus": "bba8a4f6598cd4fbc4e40cbac161c5b325bdb84caa9d4627891ce98ce71a9a8f"
+      },
+      "applications": {
+        "small": {
+          "source": "C:\\a\\Novus\\Novus\\tests\\classes\\main.nov",
+          "source_sha256": "9b828a4c30a45d38d1c1e606c2c7d6e6fb6e89c59a446f7ccc929178917a92bc",
+          "seconds": {
+            "go": [
+              0.17473050000000967,
+              0.17665020000004006,
+              0.17537479999998595,
+              0.1765159000000267,
+              0.1715659000000187,
+              0.1774640000001
+            ],
+            "novus": [
+              0.30738420000000133,
+              0.3054859999999735,
+              0.3056163999999626,
+              0.30231000000003405,
+              0.30252280000001974,
+              0.3067984000000479
+            ]
+          },
+          "median_seconds": {
+            "go": 0.17594535000000633,
+            "novus": 0.30555119999996805
+          },
+          "novus_go_ratio": 1.736625605621047,
+          "passed": true
+        },
+        "large": {
+          "source": "C:\\a\\Novus\\Novus\\build\\benchmarks\\nox\\main.nov",
+          "source_sha256": "f38446d4de56ab048508993687a2d3b34792cff48a497f7cd93e1a54c7dd3fcc",
+          "seconds": {
+            "go": [
+              1.8290306999999757,
+              1.920501399999921,
+              1.8574958000000379,
+              1.8562937000000375,
+              1.861960100000033,
+              1.8226647000000185
+            ],
+            "novus": [
+              2.0433472999999367,
+              2.0599953999999343,
+              2.061034100000029,
+              2.033377200000018,
+              2.0326605999999856,
+              2.03855539999995
+            ]
+          },
+          "median_seconds": {
+            "go": 1.8568947500000377,
+            "novus": 2.0409513499999434
+          },
+          "novus_go_ratio": 1.0991206421365034,
+          "passed": true
+        },
+        "compiler": {
+          "source": "C:\\a\\Novus\\Novus\\main.nov",
+          "source_sha256": "9130ec9e7906abafc9aca25fd6c27830fdc1af14da7ed32acea7d03844df39e4",
+          "seconds": {
+            "go": [
+              15.869809799999985,
+              15.833452700000066,
+              15.500633199999925,
+              15.778584200000068,
+              15.903253599999971,
+              15.825572399999942
+            ],
+            "novus": [
+              11.500138499999935,
+              11.508395500000006,
+              11.560678300000063,
+              11.395356400000082,
+              11.528737100000058,
+              11.432423800000038
+            ]
+          },
+          "median_seconds": {
+            "go": 15.829512550000004,
+            "novus": 11.50426699999997
+          },
+          "novus_go_ratio": 0.726760660738095,
+          "passed": true
+        }
+      },
+      "compiler_source_sha256": "702c1d18933d099df3706215d30638d097cf469abd681819d37d07fa00ef2926",
+      "bundled_libraries_sha256": "9ce50e840c1eebb908406dece9a8d29c6a19ccaad28dea04158f7f3e63f6a673",
+      "passed": true
+    },
+    {
+      "recorded_at": "2026-11-13T20:35:08.063937+00:00",
+      "host": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39",
+      "target": "linux/386",
+      "warmups": 1,
+      "measured_runs": 6,
+      "maximum_large_ratio": 1.25,
+      "includes": "fresh process, parsing, imports, semantic analysis, assembly generation, assembly and linking",
+      "compiler_sha256": {
+        "go": "bee153b0fa7581a747d9b9086753eba905d35210d278e3ebb5127107217563b4",
+        "novus": "edc29ad6b91324b8fe34afa51bf1cf81a0b2e74e09b02acc7c36f37aad7f0310"
+      },
+      "applications": {
+        "small": {
+          "source": "/home/runner/work/Novus/Novus/tests/classes/main.nov",
+          "source_sha256": "5c70811db7a4f2905d271f44119014cbcfd6bfe5790623ec91df8ba757406e5f",
+          "seconds": {
+            "go": [
+              0.021682454000000462,
+              0.017225784000004296,
+              0.01717422600000873,
+              0.01814406900000165,
+              0.01972628000000043,
+              0.017872296999996706
+            ],
+            "novus": [
+              0.07740217899998925,
+              0.0777068609999958,
+              0.07729639000000077,
+              0.07741998599999533,
+              0.07718112499999563,
+              0.07809334400000978
+            ]
+          },
+          "median_seconds": {
+            "go": 0.018008182999999178,
+            "novus": 0.07741108249999229
+          },
+          "novus_go_ratio": 4.2986614751746925,
+          "passed": true
+        },
+        "large": {
+          "source": "/home/runner/work/Novus/Novus/build/benchmarks/nox/main.nov",
+          "source_sha256": "72be3d71c46b714bc1f0f9d3dade1b6d3139b2ba6c73b701c66f8f1bb882b219",
+          "seconds": {
+            "go": [
+              0.7942459260000021,
+              0.7432683549999979,
+              0.8266808519999955,
+              0.8584118300000085,
+              0.842973157000003,
+              0.738830434999997
+            ],
+            "novus": [
+              0.8806279289999992,
+              0.8784439970000051,
+              0.8827137459999932,
+              0.8843662520000066,
+              0.8838190649999973,
+              0.8857436109999952
+            ]
+          },
+          "median_seconds": {
+            "go": 0.8104633889999988,
+            "novus": 0.8832664054999952
+          },
+          "novus_go_ratio": 1.0898288775139189,
+          "passed": true
+        },
+        "compiler": {
+          "source": "/home/runner/work/Novus/Novus/main.nov",
+          "source_sha256": "c698bd37323c9dfee0f523f721d78e5646760dd7e30f88c0da159685c4a12179",
+          "seconds": {
+            "go": [
+              16.465827321000006,
+              16.798365003999976,
+              16.53677486800001,
+              16.74994105099998,
+              16.889571023000002,
+              17.336807976999978
+            ],
+            "novus": [
+              5.500418526000004,
+              5.509360579000003,
+              5.511189833000003,
+              5.5427480129999935,
+              5.518524420999995,
+              5.552925538000011
+            ]
+          },
+          "median_seconds": {
+            "go": 16.774153027499977,
+            "novus": 5.514857126999999
+          },
+          "novus_go_ratio": 0.32877112292696986,
+          "passed": true
+        }
+      },
+      "compiler_source_sha256": "413951380227fc607fafbbb3a5e43368bf94567fb3c8f49459d40ecf1449daa4",
+      "bundled_libraries_sha256": "0bd2ce58ff141aee27b24890b31cbce749d3995acb4e48b0fb641766230d608c",
+      "passed": true
+    }
+  ]
+}

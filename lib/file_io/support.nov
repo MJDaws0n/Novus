@@ -1,0 +1,181 @@
+module file_support;
+
+import ../std;
+
+class FileInfo {
+    pub let path: str = "";
+    pub let exists: bool = false;
+    pub let directory: bool = false;
+    pub let size: i64 = 0;
+    pub let error: str = "";
+}
+
+class FileReadResult {
+    pub let data: ByteBuffer = new ByteBuffer();
+    pub let error: str = "";
+}
+
+class FileTextResult {
+    pub let data: str = "";
+    pub let error: str = "";
+}
+
+fn read_all_text(path: str) -> FileTextResult {
+    let result: FileTextResult = new FileTextResult();
+    let descriptor: i32 = file_open_read(path);
+    if (descriptor < 0) { result.error = "cannot open file: " + path; return result; }
+    let buffer: str = make_buffer(16384);
+    let content: StringBuilder = new StringBuilder();
+    while (true) {
+        let amount: i32 = file_read(descriptor, ptr(buffer), 16384);
+        if (amount == 0) { break; }
+        if (amount < 0) { result.error = "cannot read file: " + path; break; }
+        content.append_bytes(ptr(buffer), amount);
+    }
+    file_close(descriptor);
+    result.data = content.text();
+    return result;
+}
+
+fn write_all_text(path: str, data: str) -> str {
+    let descriptor: i32 = file_open_write(path);
+    if (descriptor < 0) { return "cannot open file for writing: " + path; }
+    let count: i32 = len(data);
+    let offset: i32 = 0;
+    while (offset < count) {
+        let written: i32 = file_write(descriptor, ptr(data) + i32_to_u64(offset), count - offset);
+        if (written <= 0) { file_close(descriptor); return "cannot write file: " + path; }
+        offset += written;
+    }
+    file_close(descriptor);
+    return "";
+}
+
+class PathResult {
+    pub let path: str = "";
+    pub let error: str = "";
+}
+
+fn file_error_is_not_found(error: str) -> bool {
+    return starts_with(error, "file not found: ");
+}
+
+fn read_all_bytes(path: str) -> FileReadResult {
+    let result: FileReadResult = new FileReadResult();
+    let descriptor: i32 = file_open_read(path);
+    if (descriptor < 0) { result.error = "cannot open file: " + path; return result; }
+    let buffer: str = make_buffer(16384);
+    while (true) {
+        let amount: i32 = file_read(descriptor, ptr(buffer), 16384);
+        if (amount == 0) { break; }
+        if (amount < 0) { result.error = "cannot read file: " + path; break; }
+        for (let i: i32 = 0; i < amount; i++) { result.data.append(byte_at(buffer, i)); }
+    }
+    file_close(descriptor);
+    return result;
+}
+
+fn write_all_bytes(path: str, data: ByteBuffer) -> str {
+    let descriptor: i32 = file_open_write(path);
+    if (descriptor < 0) { return "cannot open file for writing: " + path; }
+    let buffer: str = data.text();
+    let offset: i32 = 0;
+    while (offset < data.length()) {
+        let written: i32 = file_write(descriptor, ptr(buffer) + i32_to_u64(offset), data.length() - offset);
+        if (written <= 0) { file_close(descriptor); return "cannot write file: " + path; }
+        offset += written;
+    }
+    file_close(descriptor);
+    return "";
+}
+
+fn path_clean(path: str) -> str {
+    if (path == "") { return "."; }
+    let normalized: str = path;
+    if (path_separator() == "\\") { normalized = str_replace(path, "\\", "/"); }
+    let prefix: str = "";
+    let rooted: bool = starts_with(normalized, "/");
+    if (path_separator() == "\\" && starts_with(normalized, "//")) {
+        let server_end: i32 = 2;
+        while (server_end < len(normalized) && byte_at(normalized, server_end) != 47) { server_end++; }
+        let share_end: i32 = server_end + 1;
+        while (share_end < len(normalized) && byte_at(normalized, share_end) != 47) { share_end++; }
+        if (share_end > len(normalized)) { share_end = len(normalized); }
+        prefix = str_replace(substr_len(normalized, 0, share_end), "/", "\\");
+        normalized = substr(normalized, share_end);
+        rooted = true;
+    }
+    if (path_separator() == "\\" && len(normalized) >= 2 && byte_at(normalized, 1) == 58) {
+        prefix = substr_len(normalized, 0, 2);
+        normalized = substr(normalized, 2);
+        rooted = starts_with(normalized, "/");
+    }
+    let parts: []str = string_split(normalized, "/");
+    let result: []str = [];
+    for (let i: i32 = 0; i < len(parts); i++) {
+        let part: str = parts[i];
+        if (part == "" || part == ".") { continue; }
+        if (part == "..") {
+            if (len(result) > 0 && result[len(result) - 1] != "..") { array_pop(result); }
+            else if (!rooted) { array_append(result, part); }
+        } else { array_append(result, part); }
+    }
+    if (rooted) { prefix = prefix + path_separator(); }
+    let clean: str = prefix + string_join(result, path_separator());
+    if (clean == "") { return "."; }
+    if (!rooted && len(clean) == 2 && byte_at(clean, 1) == 58) { return clean + "."; }
+    return clean;
+}
+
+fn path_join_all(parts: []str) -> str {
+    let path: str = "";
+    for (let i: i32 = 0; i < len(parts); i++) {
+        if (parts[i] != "") {
+            if (path != "") { path = path + path_separator(); }
+            path = path + parts[i];
+        }
+    }
+    if (path == "") { return ""; }
+    return path_clean(path);
+}
+
+fn path_parent(path: str) -> str {
+    let clean: str = path_clean(path);
+    let index: i32 = str_last_find(clean, path_separator());
+    if (index < 0) { return "."; }
+    if (index == 0) { return path_separator(); }
+    if (path_separator() == "\\" && index == 2 && byte_at(clean, 1) == 58) { return substr_len(clean, 0, 3); }
+    return substr_len(clean, 0, index);
+}
+
+
+fn create_directories(path: str, mode: i32 = 493) -> str {
+    let info: FileInfo = file_info(path);
+    if (info.exists) {
+        if (info.directory) { return ""; }
+        return "path is not a directory: " + path;
+    }
+    let parent: str = path_parent(path);
+    if (parent != path && parent != ".") {
+        let error: str = create_directories(parent, mode);
+        if (error != "") { return error; }
+    }
+    if (sys_mkdir(path, mode) != 0 && !file_info(path).directory) { return "cannot create directory: " + path; }
+    return "";
+}
+
+#if(os != "windows") {
+    fn path_separator() -> str { return "/"; }
+    fn path_absolute(path: str) -> PathResult {
+        let result: PathResult = new PathResult();
+        result.path = path_clean(path);
+        if (starts_with(result.path, "/")) { return result; }
+        let directory: PathResult = working_directory();
+        if (directory.error != "") { return directory; }
+        result.path = path_join_all([directory.path, path]);
+        return result;
+    }
+}
+#if(os == "windows") {
+    fn path_separator() -> str { return "\\"; }
+}

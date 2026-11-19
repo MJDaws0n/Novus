@@ -1,0 +1,99 @@
+module process_windows_command;
+
+import ../../command;
+
+fn quote_windows_argument(value: str) -> str {
+    let output: StringBuilder = new StringBuilder();
+    output.append("\"");
+    let slashes: i32 = 0;
+    let size: i32 = len(value);
+    for (let i: i32 = 0; i < size; i++) {
+        let ch: i32 = byte_at(value, i);
+        if (ch == 92) { slashes++; continue; }
+        let copies: i32 = slashes;
+        if (ch == 34) { copies = slashes * 2 + 1; }
+        for (let j: i32 = 0; j < copies; j++) { output.append_byte(92); }
+        slashes = 0;
+        output.append_byte(ch);
+    }
+    for (let i: i32 = 0; i < slashes * 2; i++) { output.append_byte(92); }
+    output.append("\"");
+    return output.text();
+}
+
+fn process_run(executable: str, arguments: []str, capture_stdout: bool, capture_stderr: bool) -> ProcessResult {
+    let result: ProcessResult = new ProcessResult();
+    let command: StringBuilder = new StringBuilder();
+    for (let i: i32 = 0; i < len(arguments); i++) {
+        if (i > 0) { command.append(" "); }
+        command.append(quote_windows_argument(arguments[i]));
+    }
+    let line: str = command.text();
+    let startup: str = make_buffer(104);
+    memset(ptr(startup), 0, 104);
+    store32(ptr(startup), 104);
+    let process: str = make_buffer(24);
+    memset(ptr(process), 0, 24);
+    let read_handle: u64 = 0;
+    let write_handle: u64 = 0;
+    let capture: bool = capture_stdout || capture_stderr;
+    if (capture) {
+        let security: str = make_buffer(24);
+        memset(ptr(security), 0, 24);
+        store32(ptr(security), 24);
+        store32(ptr(security) + 16, 1);
+        win_call("CreatePipe", &read_handle, &write_handle, security, 0);
+        let ok: u64 = getreg(rax);
+        if (ok == 0) { result.error = "cannot create process pipe"; return result; }
+        win_call("SetHandleInformation", read_handle, 1, 0);
+        store32(ptr(startup) + 60, 256);
+        win_call("GetStdHandle", -10);
+        let input_handle: u64 = getreg(rax);
+        store64(ptr(startup) + 80, input_handle);
+        win_call("GetStdHandle", -11);
+        let output_handle: u64 = getreg(rax);
+        if (capture_stdout) { output_handle = write_handle; }
+        store64(ptr(startup) + 88, output_handle);
+        win_call("GetStdHandle", -12);
+        let error_handle: u64 = getreg(rax);
+        if (capture_stderr) { error_handle = write_handle; }
+        store64(ptr(startup) + 96, error_handle);
+    }
+    win_call("CreateProcessW", windows_wide_string(executable), windows_wide_string(line), 0, 0, capture, 0, 0, 0, startup, process);
+    let created: u64 = getreg(rax);
+    if (capture) { win_call("CloseHandle", write_handle); }
+    if (created == 0) {
+        if (capture) { win_call("CloseHandle", read_handle); }
+        result.error = "cannot start process: " + executable;
+        return result;
+    }
+    let process_handle: u64 = i64_to_u64(load64(ptr(process)));
+    let thread_handle: u64 = i64_to_u64(load64(ptr(process) + 8));
+    if (capture) {
+        let output: StringBuilder = new StringBuilder();
+        let buffer: str = make_buffer(16384);
+        while (true) {
+            let amount: i32 = 0;
+            win_call("ReadFile", read_handle, buffer, 16384, &amount, 0);
+            let ok: u64 = getreg(rax);
+            if (ok == 0) {
+                win_call("GetLastError");
+                let error: u64 = getreg(rax);
+                if (error != 109) { result.error = "cannot read process output"; }
+                break;
+            }
+            if (amount == 0) { break; }
+            output.append(copy_bytes(ptr(buffer), amount));
+        }
+        win_call("CloseHandle", read_handle);
+        result.output = output.text();
+    }
+    win_call("WaitForSingleObject", process_handle, 4294967295);
+    let status: i32 = 0;
+    win_call("GetExitCodeProcess", process_handle, &status);
+    result.status = status;
+    win_call("CloseHandle", thread_handle);
+    win_call("CloseHandle", process_handle);
+    if (status != 0) { result.error = "exit status " + i32_to_str(status); }
+    return result;
+}

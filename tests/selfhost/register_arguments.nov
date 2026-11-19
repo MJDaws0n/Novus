@@ -1,0 +1,84 @@
+module register_arguments;
+
+let global_value: i32 = 91;
+
+fn computed(value: i32) -> i32 { return value * 2 + 1; }
+
+#if(arch == "amd64") {
+    fn check() -> i32 {
+        let local: i32 = 77;
+        mov(r10, 1234);
+        mov(r8, local);
+        let first: u64 = getreg(r10);
+        if (first != 1234) { return 1; }
+        mov(r10, 4321);
+        mov(rdi, 5678);
+        mov(r8, computed(local));
+        let a: u64 = getreg(r10);
+        let b: u64 = getreg(rdi);
+        let c: u64 = getreg(r8);
+        if (a != 4321 || b != 5678 || c != 155) { return 2; }
+        mov(r10, 1234);
+        mov(r8, global_value);
+        let global_saved: u64 = getreg(r10);
+        let global_loaded: u64 = getreg(r8);
+        if (global_saved != 1234 || global_loaded != 91) { return 3; }
+        mov(r10, 1234);
+        lea(r8, local);
+        let lea_saved: u64 = getreg(r10);
+        if (lea_saved != 1234) { return 4; }
+        mov(r10, 1234);
+        setreg(r8, computed(local));
+        let set_saved: u64 = getreg(r10);
+        if (set_saved != 1234) { return 5; }
+        return 0;
+    }
+}
+#if(arch == "arm64") {
+    fn check() -> i32 {
+        let local: i32 = 77;
+        mov(x11, 1234);
+        mov(x4, local);
+        let first: u64 = getreg(x11);
+        if (first != 1234) { return 1; }
+        mov(x11, 4321);
+        mov(x0, 5678);
+        mov(x4, computed(local));
+        let a: u64 = getreg(x11);
+        let b: u64 = getreg(x0);
+        let c: u64 = getreg(x4);
+        if (a != 4321 || b != 5678 || c != 155) { return 2; }
+        mov(x17, 1234);
+        mov(x4, global_value);
+        let global_saved: u64 = getreg(x17);
+        let global_loaded: u64 = getreg(x4);
+        if (global_saved != 1234 || global_loaded != 91) { return 3; }
+        mov(x11, 1234);
+        lea(x4, local);
+        let lea_saved: u64 = getreg(x11);
+        if (lea_saved != 1234) { return 4; }
+        mov(x11, 1234);
+        setreg(x4, computed(local));
+        let set_saved: u64 = getreg(x11);
+        if (set_saved != 1234) { return 5; }
+        return 0;
+    }
+}
+#if(arch == "x86") {
+    fn check() -> i32 {
+        let local: i32 = 77;
+        mov(eax, 1234);
+        mov(ebx, local);
+        let first: u64 = getreg(eax);
+        if (first != 1234) { return 1; }
+        mov(eax, 4321);
+        mov(edx, 5678);
+        mov(ebx, computed(local));
+        let a: u64 = getreg(eax);
+        let b: u64 = getreg(edx);
+        let c: u64 = getreg(ebx);
+        if (a != 4321 || b != 5678 || c != 155) { return 2; }
+        return 0;
+    }
+}
+fn main() -> i32 { return check(); }

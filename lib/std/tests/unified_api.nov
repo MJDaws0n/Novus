@@ -1,0 +1,115 @@
+// Unified-API regression tests. Platform-agnostic; verifies the overloaded
+// short-name API in aliases.nov dispatches correctly.
+
+module std_tests_unified_api;
+
+import ../main;
+
+fn tp(name: str) -> void { print_raw("  [PASS] " + name + "\n"); }
+fn tf(name: str, detail: str) -> void { print_raw("  [FAIL] " + name + ": " + detail + "\n"); }
+
+fn check_str(name: str, got: str, want: str) -> i32 {
+    if (str_equals(got, want)) { tp(name); return 0; }
+    tf(name, "got '" + got + "' want '" + want + "'");
+    return 1;
+}
+
+fn check_i32(name: str, got: i32, want: i32) -> i32 {
+    if (got == want) { tp(name); return 0; }
+    tf(name, "got " + i32_to_str(got) + " want " + i32_to_str(want));
+    return 1;
+}
+
+fn check_true(name: str, v: bool) -> i32 {
+    if (v) { tp(name); return 0; }
+    tf(name, "expected true");
+    return 1;
+}
+
+fn main() -> i32 {
+    let fails: i32 = 0;
+
+    print_raw("\n--- to_str overloads ---\n");
+    fails += check_str("to_str(i32)", to_str(42), "42");
+    let big: i64 = 9999999999;
+    fails += check_str("to_str(i64)", to_str(big), "9999999999");
+    let uu32: u32 = 1234;
+    let uu64: u64 = 9876543210;
+    let ff32: f32 = 3.25;
+    let ff64: f64 = 12.5;
+    fails += check_str("to_str(u32)", to_str(uu32), "1234");
+    fails += check_str("to_str(u64)", to_str(uu64), "9876543210");
+    fails += check_str("to_str(f32)", to_str(ff32), "3.25");
+    fails += check_str("to_str(f64)", to_str(ff64), "12.5");
+    fails += check_str("to_str(bool true)", to_str(true), "true");
+    fails += check_str("to_str(bool false)", to_str(false), "false");
+    fails += check_str("to_str(str)", to_str("hi"), "hi");
+
+    print_raw("\n--- numeric conversions ---\n");
+    fails += check_i32("to_i32(str)", to_i32("123"), 123);
+    fails += check_i32("to_i32(i32)", to_i32(7), 7);
+    fails += check_i32("to_i32(u32)", to_i32(uu32), 1234);
+    fails += check_i32("to_i32(f64)", to_i32(ff64), 12);
+    fails += check_str("to_i64(u32)", to_str(to_i64(uu32)), "1234");
+    fails += check_str("to_u32(str)", to_str(to_u32("77")), "77");
+    fails += check_str("to_u32(f64)", to_str(to_u32(ff64)), "12");
+    fails += check_str("to_u64(str)", to_str(to_u64("8888")), "8888");
+    fails += check_str("to_f32(str)", to_str(to_f32("7.25")), "7.25");
+    fails += check_str("to_f32(i32)", to_str(to_f32(9)), "9");
+    fails += check_str("to_f64(str)", to_str(to_f64("45.5")), "45.5");
+    fails += check_str("to_f64(i64)", to_str(to_f64(big)), "9999999999");
+    fails += check_true("to_bool(\"true\")", to_bool("true"));
+    fails += check_true("!to_bool(\"false\")", !to_bool("false"));
+
+    print_raw("\n--- len overloads ---\n");
+    fails += check_i32("len(str)", len("hello"), 5);
+    let ai: []i32 = [10, 20, 30];
+    fails += check_i32("len([]i32)", len(ai), 3);
+    let au32: []u32 = [1, 2, 3, 4];
+    let ab: []bool = [true, false, true];
+    let af32: []f32 = [1.5, 2.5];
+    let af64: []f64 = [1.0, 2.0, 3.0];
+    fails += check_i32("len([]u32)", len(au32), 4);
+    fails += check_i32("len([]bool)", len(ab), 3);
+    fails += check_i32("len([]f32)", len(af32), 2);
+    fails += check_i32("len([]f64)", len(af64), 3);
+    let ss: []str = ["a", "b", "c", "d"];
+    fails += check_i32("len([]str)", len(ss), 4);
+
+    print_raw("\n--- contains overloads ---\n");
+    fails += check_true("contains(str)", contains("hello world", "world"));
+    fails += check_true("!contains(str)", !contains("hello", "xyz"));
+    fails += check_true("contains([]i32)", contains(ai, 20));
+    fails += check_true("!contains([]i32)", !contains(ai, 99));
+    fails += check_true("contains([]u32)", contains(au32, 3));
+    fails += check_true("contains([]bool)", contains(ab, false));
+    fails += check_true("contains([]f32)", contains(af32, 2.5));
+    fails += check_true("contains([]f64)", contains(af64, 2.0));
+    fails += check_true("contains([]str)", contains(ss, "c"));
+
+    print_raw("\n--- string helpers (unprefixed) ---\n");
+    fails += check_str("upper", upper("Hello"), "HELLO");
+    fails += check_str("lower", lower("Hello"), "hello");
+    fails += check_str("trim", trim("  hi  "), "hi");
+    fails += check_str("reverse", reverse("abc"), "cba");
+    fails += check_str("repeat", repeat("ab", 3), "ababab");
+    fails += check_str("replace", replace("foo bar foo", "foo", "baz"), "baz bar baz");
+    fails += check_true("equals", equals("a", "a"));
+    fails += check_i32("find", find("hello", "ll"), 2);
+
+    print_raw("\n--- compound ops (compiler) ---\n");
+    let x: i32 = 10;
+    x += 5; x -= 2; x *= 2;
+    fails += check_i32("x +=5 -=2 *=2", x, 26);
+    x++;
+    fails += check_i32("x++", x, 27);
+    x--;
+    fails += check_i32("x--", x, 26);
+
+    if (fails == 0) {
+        print_raw("\nAll unified-API tests PASSED\n");
+        return 0;
+    }
+    print_raw("\n" + i32_to_str(fails) + " test(s) FAILED\n");
+    return 1;
+}

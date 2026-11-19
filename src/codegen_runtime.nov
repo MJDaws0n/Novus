@@ -1,0 +1,18 @@
+module codegen_runtime;
+
+import model;
+import runtime;
+
+fn codegen_hasRuntimeEnvpGlobal(mod: CodegenIRModule) -> bool {
+    {
+        let items_458: []CodegenIRGlobal = mod.Globals;
+        let count_460: i32 = len(items_458);
+        for (let index_459: i32 = 0; index_459 < count_460; index_459++) {
+            let global: CodegenIRGlobal = copy_CodegenIRGlobal(items_458[index_459]);
+            if ((global.Name == "_g___novus_envp")) {
+                return true;
+            }
+        }
+    }
+    return false;
+}

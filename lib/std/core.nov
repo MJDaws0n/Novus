@@ -1,0 +1,7 @@
+// Backwards-compat shim: prior to the platforms/ restructure, std exposed
+// `core.nov` and `strings.nov` at the package root. They now live under
+// `core/`. This file re-imports them so consumers using the old paths still
+// resolve correctly.
+module std_core_shim;
+
+import core/core;

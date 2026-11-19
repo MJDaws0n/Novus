@@ -1,0 +1,3 @@
+module std_strings_shim;
+
+import core/strings;

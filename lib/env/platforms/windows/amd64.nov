@@ -1,0 +1,142 @@
+// ---------------------------------------------------------------------------
+// env/windows_amd64 - environment utilities for Windows x86-64
+// Uses GetCurrentDirectoryA, GetCurrentProcessId, GetEnvironmentVariableA,
+// GetComputerNameA, GetUserNameA.
+// ---------------------------------------------------------------------------
+
+module env_windows_amd64;
+
+
+// ---------------------------------------------------------------------------
+// Get current working directory
+// ---------------------------------------------------------------------------
+
+fn getcwd() -> str {
+    let buf: str = make_buffer(1024);
+    win_call("GetCurrentDirectoryA", 1024, buf);
+    let nlen: i32 = u64_to_i32(getreg(rax));
+    if (nlen <= 0) { return ""; }
+    return copy_bytes(ptr(buf), nlen);
+}
+
+// ---------------------------------------------------------------------------
+// Get process ID
+// ---------------------------------------------------------------------------
+
+fn getpid() -> i32 {
+    win_call("GetCurrentProcessId");
+    return u64_to_i32(getreg(rax));
+}
+
+// ---------------------------------------------------------------------------
+// Get parent process ID (not directly available on Windows, use NtQueryInformationProcess stub)
+// ---------------------------------------------------------------------------
+
+fn getppid() -> i32 {
+    // Not trivially available on Windows without NtQueryInformationProcess
+    return -1;
+}
+
+// ---------------------------------------------------------------------------
+// Get user ID (Windows doesn't have numeric UIDs)
+// ---------------------------------------------------------------------------
+
+fn getuid() -> i32 {
+    return -1;
+}
+
+// ---------------------------------------------------------------------------
+// Get effective user ID (Windows doesn't have numeric UIDs)
+// ---------------------------------------------------------------------------
+
+fn geteuid() -> i32 {
+    return -1;
+}
+
+// ---------------------------------------------------------------------------
+// Get environment variable value
+// ---------------------------------------------------------------------------
+
+fn getenv(name: str) -> str {
+    let buf: str = make_buffer(4096);
+    win_call("GetEnvironmentVariableA", name, buf, 4096);
+    let nlen: i32 = u64_to_i32(getreg(rax));
+    if (nlen <= 0) { return ""; }
+    return copy_bytes(ptr(buf), nlen);
+}
+
+// ---------------------------------------------------------------------------
+// Get hostname (computer name)
+// ---------------------------------------------------------------------------
+
+fn gethostname() -> str {
+    let buf: str = make_buffer(256);
+    let size: i32 = 256;
+    let sa: u64 = &size;
+    win_call("GetComputerNameA", buf, sa);
+    let ok: u64 = getreg(rax);
+    if (ok == 0) { return ""; }
+    return copy_bytes(ptr(buf), size);
+}
+
+// ---------------------------------------------------------------------------
+// Get home directory
+// ---------------------------------------------------------------------------
+
+fn get_home_dir() -> str {
+    let result: str = getenv("USERPROFILE");
+    if (len(result) == 0) {
+        result = getenv("HOMEDRIVE") + getenv("HOMEPATH");
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Get username
+// ---------------------------------------------------------------------------
+
+fn get_username() -> str {
+    let buf: str = make_buffer(256);
+    let size: i32 = 256;
+    let sa: u64 = &size;
+    win_call("GetUserNameA", buf, sa);
+    let ok: u64 = getreg(rax);
+    if (ok == 0) { return getenv("USERNAME"); }
+    return copy_bytes(ptr(buf), size - 1);
+}
+
+// ---------------------------------------------------------------------------
+// Get OS name
+// ---------------------------------------------------------------------------
+
+fn get_os_name() -> str {
+    return "Windows";
+}
+
+// ---------------------------------------------------------------------------
+// Get OS version (via GetVersion)
+// ---------------------------------------------------------------------------
+
+fn get_os_version() -> str {
+    win_call("GetVersion");
+    let ver: u64 = getreg(rax);
+    let major: i32 = u64_to_i32(ver & 255);
+    let minor: i32 = u64_to_i32((ver / 256) & 255);
+    return int_to_str(major) + "." + int_to_str(minor);
+}
+
+// ---------------------------------------------------------------------------
+// Get machine architecture
+// ---------------------------------------------------------------------------
+
+fn get_arch() -> str {
+    // SYSTEM_INFO is 48 bytes; wProcessorArchitecture at offset 0
+    let si: str = make_buffer(48);
+    win_call("GetNativeSystemInfo", si);
+    let arch: i32 = (si[0] & 255) + ((si[1] & 255) * 256);
+    // 9 = AMD64, 12 = ARM64, 0 = x86
+    if (arch == 9) { return "x86_64"; }
+    if (arch == 12) { return "aarch64"; }
+    if (arch == 0) { return "x86"; }
+    return "unknown";
+}

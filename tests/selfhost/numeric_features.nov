@@ -1,0 +1,18 @@
+module numeric_features;
+import ../../lib/std;
+
+fn main() -> i32 {
+    let a: f64 = 7.5;
+    let b: f64 = 2.0;
+    if (a + b != 9.5 || a - b != 5.5 || a * b != 15.0 || a / b != 3.75) { return 1; }
+    if (a % b != 1.5 || -a != -7.5 || !(a > b) || a <= b) { return 2; }
+    if (f64_to_i64(a) != 7 || i64_to_f64(-9) != -9.0) { return 3; }
+    if (f64_bits(1.0) != 4607182418800017408) { return 4; }
+    if (f64_from_bits(4607182418800017408) != 1.0) { return 5; }
+    let parsed: ParsedFloat = parse_float("-1.25e2");
+    if (parsed.error != "" || parsed.value != -125.0) { return 6; }
+    if (parse_integer("-9223372036854775808", 10, 64).value != -9223372036854775808) { return 7; }
+    if (parse_unsigned("18446744073709551615", 10, 64).value != 18446744073709551615) { return 8; }
+    if (parse_unsigned("18446744073709551616", 10, 64).error == "") { return 9; }
+    return 0;
+}

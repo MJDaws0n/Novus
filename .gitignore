@@ -1,6 +1,8 @@
 # Build artifacts
 build/
 dist/
+bootstrap/
+__pycache__/
 
 # Compiled novus CLI (release binaries are published via GitHub releases)
 novus

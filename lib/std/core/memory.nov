@@ -1,0 +1,81 @@
+module std_memory;
+
+fn make_buffer(size: i32) -> str {
+    if (size <= 0) { return ""; }
+    let result: str = alloc_string(size);
+    memset(ptr(result), 32, size);
+    return result;
+}
+
+// Copy disjoint byte ranges using native words, with a byte tail. Neither
+// range needs word alignment. Callers retain ownership of the source object.
+#if(arch == "x86") {
+    fn memory_copy(destination: u64, source: u64, count: i32) -> void {
+        while (count >= 4) {
+            store_word(destination, load32(source));
+            destination += 4; source += 4; count -= 4;
+        }
+        while (count > 0) {
+            store_byte(destination, load8(source));
+            destination++; source++; count--;
+        }
+    }
+}
+
+#if(arch != "x86") {
+    fn memory_copy(destination: u64, source: u64, count: i32) -> void {
+        while (count >= 8) {
+            store_word(destination, load64(source));
+            destination += 8; source += 8; count -= 8;
+        }
+        while (count > 0) {
+            store_byte(destination, load8(source));
+            destination++; source++; count--;
+        }
+    }
+}
+
+fn copy_bytes_raw(src: u64, length: i32) -> str {
+    if (length <= 0) { return ""; }
+    let result: str = alloc_string(length);
+    memory_copy(ptr(result), src, length);
+    return result;
+}
+
+fn copy_bytes(src: u64, length: i32) -> str { return copy_bytes_raw(src, length); }
+fn cstr_to_str(addr: u64) -> str {
+    if (addr == 0) { return ""; }
+    return copy_bytes(addr, u64_to_i32(cstr_len(addr)));
+}
+fn byte_at(s: str, index: i32) -> i32 { return load8(ptr(s) + i32_to_u64(index)); }
+#if(arch == "x86") {
+    fn argv_get(argv: u64, index: i32) -> str {
+        let address: u64 = i32_to_u64(load32(argv + i32_to_u64(index) * 4)) & 4294967295;
+        return cstr_to_str(address);
+    }
+}
+#if(arch != "x86") {
+    fn argv_get(argv: u64, index: i32) -> str {
+        return cstr_to_str(i64_to_u64(load64(argv + i32_to_u64(index) * 8)));
+    }
+}
+fn store8(addr: u64, value: i32) -> void { store_byte(addr, value & 255); }
+fn store32(addr: u64, value: i32) -> void {
+    for (let i: i32 = 0; i < 4; i++) { store_byte(addr + i32_to_u64(i), (value >> (i * 8)) & 255); }
+}
+fn store64(addr: u64, value: u64) -> void {
+    for (let i: i32 = 0; i < 8; i++) {
+        store_byte(addr + i32_to_u64(i), u64_to_i32((value >> i32_to_u64(i * 8)) & 255));
+    }
+}
+fn memset(addr: u64, value: i32, count: i32) -> void {
+    value = value & 255;
+    while (count > 0) { store_byte(addr, value); addr++; count--; }
+}
+fn byte_char(value: i32) -> str {
+    let result: str = make_buffer(1);
+    store_byte(ptr(result), value & 255);
+    return result;
+}
+
+fn string_set_byte(value: str, index: i32, byte: i32) -> void { store_byte(ptr(value) + i32_to_u64(index), byte & 255); }

@@ -1,0 +1,26 @@
+module download_archive;
+import ../../lib/std;
+import ../../lib/file_io;
+import ../../lib/download;
+import ../../lib/archive;
+
+fn main(argc: i32, argv: u64) -> i32 {
+    if (argc != 3) { return 1; }
+    let url: str = argv_get(argv, 1);
+    let directory: str = argv_get(argv, 2);
+    let zip: str = path_join_all([directory, "archive café 東京 😀.zip"]);
+    let output: str = path_join_all([directory, "extracted café 東京 😀 files"]);
+    let error: str = download_file(url + "/fixture.zip", zip);
+    if (error != "") { print(error); return 2; }
+    if (download_file(url + "/fixture.zip", zip) != "") { return 8; }
+    error = extract_zip(zip, output);
+    if (error != "") { print(error); return 3; }
+    let contents: FileReadResult = read_all_bytes(path_join_all([output, "nested", "message.txt"]));
+    if (contents.error != "" || contents.data.text() != "download and archive passed\n") { return 4; }
+    let missing: str = path_join_all([directory, "missing.zip"]);
+    if (download_file(url + "/missing.zip", missing) == "") { return 5; }
+    if (file_info(missing).exists || file_info(missing + ".download").exists) { return 6; }
+    if (extract_zip(missing, output) == "") { return 7; }
+    print("download and archive passed");
+    return 0;
+}

@@ -1,0 +1,285 @@
+// ---------------------------------------------------------------------------
+// file_io/windows_x86 - File I/O for Windows x86 (32-bit)
+// Uses CreateFileA/ReadFile/WriteFile/CloseHandle Windows API calls.
+// ---------------------------------------------------------------------------
+
+module file_io_windows_x86;
+
+
+// ---------------------------------------------------------------------------
+// File handle operations
+// ---------------------------------------------------------------------------
+
+fn file_open(path: str, flags: i32, mode: i32) -> i32 {
+    let access: u64 = 0;
+    let create_disp: i32 = 3;
+
+    if (flags == 0) {
+        access = 2147483648;
+        create_disp = 3;
+    } else {
+        if (flags == 1537) {
+            access = 1073741824;
+            create_disp = 2;
+        } else {
+            if (flags == 521) {
+                access = 1073741824;
+                create_disp = 4;
+            } else {
+                access = 3221225472;
+                create_disp = 4;
+            }
+        }
+    }
+
+    win_call("CreateFileA", path, access, 3, 0, create_disp, 128, 0);
+    let h: u64 = getreg(eax);
+    let invalid: u64 = 4294967295;
+    if (h == invalid) { return -1; }
+    return u64_to_i32(h);
+}
+
+fn file_open_read(path: str) -> i32 {
+    return file_open(path, 0, 0);
+}
+
+fn file_open_write(path: str) -> i32 {
+    return file_open(path, 1537, 420);
+}
+
+fn file_close(fd: i32) -> void {
+    let h: u64 = i32_to_u64(fd);
+    win_call("CloseHandle", h);
+}
+
+fn file_read(fd: i32, buf_addr: u64, count: i32) -> i32 {
+    let h: u64 = i32_to_u64(fd);
+    let bytes_read: i32 = 0;
+    let br_addr: u64 = &bytes_read;
+    win_call("ReadFile", h, buf_addr, count, br_addr, 0);
+    return bytes_read;
+}
+
+fn file_write(fd: i32, buf_addr: u64, count: i32) -> i32 {
+    let h: u64 = i32_to_u64(fd);
+    let bytes_written: i32 = 0;
+    let bw_addr: u64 = &bytes_written;
+    win_call("WriteFile", h, buf_addr, count, bw_addr, 0);
+    return bytes_written;
+}
+
+fn file_write_str(fd: i32, s: str) -> i32 {
+    return file_write(fd, ptr(s), len(s));
+}
+
+fn file_seek(fd: i32, offset: u64, whence: i32) -> i64 {
+    let h: u64 = i32_to_u64(fd);
+    let off_low: i32 = u64_to_i32(offset);
+    win_call("SetFilePointer", h, off_low, 0, whence);
+    let pos: u64 = getreg(eax);
+    return u64_to_i64(pos);
+}
+
+fn file_size(fd: i32) -> u64 {
+    let h: u64 = i32_to_u64(fd);
+    win_call("GetFileSize", h, 0);
+    return getreg(eax);
+}
+
+// ---------------------------------------------------------------------------
+// Pipe helpers
+// ---------------------------------------------------------------------------
+
+fn pipe_create(res: []i32) -> void {
+    let read_h: i32 = 0;
+    let write_h: i32 = 0;
+    let ra: u64 = &read_h;
+    let wa: u64 = &write_h;
+    win_call("CreatePipe", ra, wa, 0, 0);
+    res[0] = read_h;
+    res[1] = write_h;
+}
+
+fn dup2(oldfd: i32, newfd: i32) -> void {
+    let h: u64 = i32_to_u64(oldfd);
+    if (newfd == 1) { win_call("SetStdHandle", -11, h); }
+    if (newfd == 2) { win_call("SetStdHandle", -12, h); }
+    if (newfd == 0) { win_call("SetStdHandle", -10, h); }
+}
+
+// ---------------------------------------------------------------------------
+// Path manipulation
+// ---------------------------------------------------------------------------
+
+fn path_ext(path: str) -> str {
+    let plen: i32 = len(path);
+    let dot: i32 = -1;
+    let i: i32 = 0;
+    while (i < plen) {
+        if (path[i] == '.') { dot = i; }
+        i = i + 1;
+    }
+    if (dot < 0) { return ""; }
+    return substr(path, dot);
+}
+
+fn path_stem(path: str) -> str {
+    let plen: i32 = len(path);
+    let dot: i32 = -1;
+    let i: i32 = 0;
+    while (i < plen) {
+        if (path[i] == '.') { dot = i; }
+        i = i + 1;
+    }
+    if (dot < 0) { return path; }
+    return substr_len(path, 0, dot);
+}
+
+fn path_insert_suffix(path: str, suffix: str) -> str {
+    return path_stem(path) + suffix + path_ext(path);
+}
+
+fn path_dir(path: str) -> str {
+    let last_sep: i32 = -1;
+    let i: i32 = 0;
+    let slen: i32 = len(path);
+    while (i < slen) {
+        if (path[i] == '/' || path[i] == '\\') { last_sep = i; }
+        i = i + 1;
+    }
+    if (last_sep < 0) { return "."; }
+    if (last_sep == 0) { return "/"; }
+    return substr_len(path, 0, last_sep);
+}
+
+fn path_basename(path: str) -> str {
+    let plen: i32 = len(path);
+    let last_sep: i32 = -1;
+    let i: i32 = 0;
+    while (i < plen) {
+        if (path[i] == '/' || path[i] == '\\') { last_sep = i; }
+        i = i + 1;
+    }
+    if (last_sep < 0) { return path; }
+    return substr(path, last_sep + 1);
+}
+
+// ---------------------------------------------------------------------------
+// Directory & file helpers
+// ---------------------------------------------------------------------------
+
+fn sys_mkdir(path: str, mode: i32) -> i32 {
+    win_call("CreateDirectoryA", path, 0);
+    let ok: u64 = getreg(eax);
+    if (ok == 0) { return -1; }
+    return 0;
+}
+
+fn sys_chmod(path: str, mode: i32) -> i32 {
+    win_call("SetFileAttributesA", path, 128);
+    return 0;
+}
+
+fn file_exists(path: str) -> bool {
+    win_call("GetFileAttributesA", path);
+    let attr: u64 = getreg(eax);
+    if (attr == 4294967295) { return false; }
+    return true;
+}
+
+fn file_delete(path: str) -> i32 {
+    win_call("DeleteFileA", path);
+    let ok: u64 = getreg(eax);
+    if (ok == 0) { return -1; }
+    return 0;
+}
+
+fn read_file(path: str) -> str {
+    let fd: i32 = file_open_read(path);
+    if (fd < 0) { return ""; }
+    let sz: u64 = file_size(fd);
+    let isz: i32 = u64_to_i32(sz);
+    if (isz <= 0) { file_close(fd); return ""; }
+    let buf: str = make_buffer(isz + 1);
+    let nr: i32 = file_read(fd, ptr(buf), isz);
+    file_close(fd);
+    if (nr <= 0) { return ""; }
+    return copy_bytes(ptr(buf), nr);
+}
+
+fn write_file(path: str, content: str) -> i32 {
+    let fd: i32 = file_open_write(path);
+    if (fd < 0) { return -1; }
+    file_write_str(fd, content);
+    file_close(fd);
+    return 0;
+}
+
+fn file_append(path: str, content: str) -> i32 {
+    let fd: i32 = file_open(path, 521, 420);
+    if (fd < 0) { return -1; }
+    let h: u64 = i32_to_u64(fd);
+    win_call("SetFilePointer", h, 0, 0, 2);
+    file_write_str(fd, content);
+    file_close(fd);
+    return 0;
+}
+
+fn file_chdir(path: str) -> i32 {
+    win_call("SetCurrentDirectoryA", path);
+    let ok: u64 = getreg(eax);
+    if (ok == 0) { return -1; }
+    return 0;
+}
+
+fn file_rename(old_path: str, new_path: str) -> i32 {
+    win_call("MoveFileA", old_path, new_path);
+    let ok: u64 = getreg(eax);
+    if (ok == 0) { return -1; }
+    return 0;
+}
+
+fn dir_exists(path: str) -> bool {
+    win_call("GetFileAttributesA", path);
+    let attr: u64 = getreg(eax);
+    if (attr == 4294967295) { return false; }
+    let is_dir: u64 = attr & 16;
+    if (is_dir != 0) { return true; }
+    return false;
+}
+
+fn mkdirp(path: str) -> i32 {
+    let plen: i32 = len(path);
+    let i: i32 = 1;
+    while (i < plen) {
+        if (path[i] == '/' || path[i] == '\\') {
+            let sub: str = substr_len(path, 0, i);
+            sys_mkdir(sub, 0);
+        }
+        i = i + 1;
+    }
+    return sys_mkdir(path, 0);
+}
+
+fn file_copy(src_path: str, dst_path: str) -> i32 {
+    win_call("CopyFileA", src_path, dst_path, 0);
+    let ok: u64 = getreg(eax);
+    if (ok == 0) { return -1; }
+    return 0;
+}
+
+fn path_ext_no_dot(path: str) -> str {
+    let ext: str = path_ext(path);
+    if (len(ext) > 0) {
+        if (ext[0] == '.') { return substr(ext, 1); }
+    }
+    return ext;
+}
+
+fn path_join(a: str, b: str) -> str {
+    let al: i32 = len(a);
+    if (al == 0) { return b; }
+    if (len(b) == 0) { return a; }
+    if (a[al - 1] == '/' || a[al - 1] == '\\') { return a + b; }
+    return a + "\\" + b;
+}

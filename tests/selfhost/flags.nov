@@ -1,0 +1,42 @@
+module flags;
+
+#if(arch == "amd64") {
+    fn check_flags() -> i32 {
+        let low: u64 = 0;
+        let high: u64 = 1;
+        let compared: bool = low < high;
+        mov(rax, 1234);
+        let carried: bool = getflag(carry);
+        let equal: bool = getflag(zero_flag);
+        let returned: u64 = getreg(rax);
+        if (!compared || !carried || equal || returned != 1234) { return 1; }
+        return 0;
+    }
+}
+#if(arch == "x86") {
+    fn check_flags() -> i32 {
+        let low: u32 = 0;
+        let high: u32 = 1;
+        let compared: bool = low < high;
+        mov(eax, 1234);
+        let carried: bool = getflag(carry);
+        let equal: bool = getflag(zero_flag);
+        if (!compared || !carried || equal) { return 1; }
+        return 0;
+    }
+}
+#if(arch == "arm64") {
+    fn check_flags() -> i32 {
+        let low: u64 = 0;
+        let high: u64 = 1;
+        let compared: bool = low < high;
+        mov(x0, 1234);
+        let carried: bool = getflag(carry);
+        let equal: bool = getflag(zero_flag);
+        let returned: u64 = getreg(x0);
+        // ARM's carry after subtraction means no borrow, unlike x86.
+        if (!compared || carried || equal || returned != 1234) { return 1; }
+        return 0;
+    }
+}
+fn main() -> i32 { return check_flags(); }

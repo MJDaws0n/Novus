@@ -1,0 +1,13 @@
+// Auto-generated platform dispatcher.
+module file_io_main;
+import support;
+
+#if(os == "darwin") {
+    import platforms/darwin/common;
+}
+#if(os == "linux") {
+    import platforms/linux/common;
+}
+#if(os == "windows") {
+    import platforms/windows/common;
+}

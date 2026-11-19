@@ -1,0 +1,213 @@
+// ---------------------------------------------------------------------------
+// process/windows_x86 - Process utilities for Windows x86 (32-bit)
+// Uses CreateProcessA, cmd.exe for shell commands.
+// ---------------------------------------------------------------------------
+
+module process_windows_x86;
+
+
+// ---------------------------------------------------------------------------
+// Wait for a process by PID
+// ---------------------------------------------------------------------------
+
+fn wait_pid(pid: i32) -> i32 {
+    win_call("OpenProcess", 1048576, 0, pid);
+    let h: u64 = getreg(eax);
+    if (h == 0) { return -1; }
+    win_call("WaitForSingleObject", h, 4294967295);
+    let ec: i32 = 0;
+    let ec_addr: u64 = &ec;
+    win_call("GetExitCodeProcess", h, ec_addr);
+    win_call("CloseHandle", h);
+    return ec;
+}
+
+// ---------------------------------------------------------------------------
+// Subprocess with captured output
+// ---------------------------------------------------------------------------
+
+fn capture_output(exe: str, argv: []u64, max_len: i32) -> str {
+    let cmd: str = "";
+    let argc: i32 = array_len_u64(argv);
+    let i: i32 = 0;
+    while (i < argc) {
+        let arg_addr: u64 = i64_to_u64(load64(array_data_ptr_u64(argv) + i32_to_u64(i) * 8));
+        if (arg_addr == 0) { break; }
+        let arg: str = cstr_to_str(arg_addr);
+        if (i > 0) { cmd = cmd + " "; }
+        cmd = cmd + arg;
+        i = i + 1;
+    }
+
+    let read_h: i32 = 0;
+    let write_h: i32 = 0;
+    let ra: u64 = &read_h;
+    let wa: u64 = &write_h;
+    win_call("CreatePipe", ra, wa, 0, 0);
+
+    let wh: u64 = i32_to_u64(write_h);
+    win_call("SetStdHandle", -11, wh);
+
+    // STARTUPINFOA: 68 bytes on x86
+    let si: str = "";
+    let k: i32 = 0;
+    while (k < 68) { si = si + "\0"; k = k + 1; }
+    si[0] = 68;
+
+    // PROCESS_INFORMATION: 16 bytes on x86
+    let pi: str = "";
+    k = 0;
+    while (k < 16) { pi = pi + "\0"; k = k + 1; }
+
+    win_call("CreateProcessA", 0, cmd, 0, 0, 1, 0, 0, 0, si, pi);
+    let ok: u64 = getreg(eax);
+    win_call("CloseHandle", wh);
+
+    if (ok == 0) {
+        win_call("CloseHandle", i32_to_u64(read_h));
+        return "";
+    }
+
+    let h_proc: u64 = i32_to_u64(load32(ptr(pi)));
+    win_call("WaitForSingleObject", h_proc, 4294967295);
+
+    let buf: str = make_buffer(max_len);
+    let bytes_read: i32 = 0;
+    let br_addr: u64 = &bytes_read;
+    win_call("ReadFile", i32_to_u64(read_h), ptr(buf), max_len, br_addr, 0);
+    win_call("CloseHandle", i32_to_u64(read_h));
+    win_call("CloseHandle", h_proc);
+    let h_thread: u64 = i32_to_u64(load32(ptr(pi) + 4));
+    win_call("CloseHandle", h_thread);
+
+    if (bytes_read <= 0) { return ""; }
+
+    let result: str = "";
+    k = 0;
+    let stop: bool = false;
+    while (k < bytes_read && !stop) {
+        if (buf[k] == '\n' || buf[k] == '\r') {
+            stop = true;
+        } else {
+            result = result + buf[k];
+            k = k + 1;
+        }
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Run a command synchronously
+// ---------------------------------------------------------------------------
+
+fn run_cmd(exe: str, argv: []u64) -> i32 {
+    let cmd: str = "";
+    let argc: i32 = array_len_u64(argv);
+    let i: i32 = 0;
+    while (i < argc) {
+        let arg_addr: u64 = i64_to_u64(load64(array_data_ptr_u64(argv) + i32_to_u64(i) * 8));
+        if (arg_addr == 0) { break; }
+        let arg: str = cstr_to_str(arg_addr);
+        if (i > 0) { cmd = cmd + " "; }
+        cmd = cmd + arg;
+        i = i + 1;
+    }
+    return spawn_process_wait(cmd);
+}
+
+// ---------------------------------------------------------------------------
+// Capture full output (preserves newlines)
+// ---------------------------------------------------------------------------
+
+fn capture_output_full(exe: str, argv: []u64, max_len: i32) -> str {
+    let cmd: str = "";
+    let argc: i32 = array_len_u64(argv);
+    let i: i32 = 0;
+    while (i < argc) {
+        let arg_addr: u64 = i64_to_u64(load64(array_data_ptr_u64(argv) + i32_to_u64(i) * 8));
+        if (arg_addr == 0) { break; }
+        let arg: str = cstr_to_str(arg_addr);
+        if (i > 0) { cmd = cmd + " "; }
+        cmd = cmd + arg;
+        i = i + 1;
+    }
+
+    let read_h: i32 = 0;
+    let write_h: i32 = 0;
+    let ra: u64 = &read_h;
+    let wa: u64 = &write_h;
+    win_call("CreatePipe", ra, wa, 0, 0);
+
+    let wh: u64 = i32_to_u64(write_h);
+    win_call("SetStdHandle", -11, wh);
+    win_call("SetStdHandle", -12, wh);
+
+    let si: str = "";
+    let k: i32 = 0;
+    while (k < 68) { si = si + "\0"; k = k + 1; }
+    si[0] = 68;
+
+    let pi: str = "";
+    k = 0;
+    while (k < 16) { pi = pi + "\0"; k = k + 1; }
+
+    win_call("CreateProcessA", 0, cmd, 0, 0, 1, 0, 0, 0, si, pi);
+    let ok: u64 = getreg(eax);
+    win_call("CloseHandle", wh);
+
+    if (ok == 0) {
+        win_call("CloseHandle", i32_to_u64(read_h));
+        return "";
+    }
+
+    let h_proc: u64 = i32_to_u64(load32(ptr(pi)));
+    win_call("WaitForSingleObject", h_proc, 4294967295);
+
+    let buf: str = make_buffer(max_len);
+    let bytes_read: i32 = 0;
+    let br_addr: u64 = &bytes_read;
+    win_call("ReadFile", i32_to_u64(read_h), ptr(buf), max_len, br_addr, 0);
+    win_call("CloseHandle", i32_to_u64(read_h));
+    win_call("CloseHandle", h_proc);
+    let h_thread: u64 = i32_to_u64(load32(ptr(pi) + 4));
+    win_call("CloseHandle", h_thread);
+
+    if (bytes_read <= 0) { return ""; }
+    return copy_bytes(ptr(buf), bytes_read);
+}
+
+// ---------------------------------------------------------------------------
+// Shell command execution via cmd.exe
+// ---------------------------------------------------------------------------
+
+fn shell_exec(cmd: str) -> i32 {
+    let full_cmd: str = "cmd.exe /c " + cmd;
+    return spawn_process_wait(full_cmd);
+}
+
+fn shell_output(cmd: str, max_len: i32) -> str {
+    let sh: str = "cmd.exe";
+    let flag: str = "/c";
+    let av: []u64 = [ptr(sh), ptr(flag), ptr(cmd), 0];
+    return capture_output(sh, av, max_len);
+}
+
+// ---------------------------------------------------------------------------
+// File picker via PowerShell
+// ---------------------------------------------------------------------------
+
+fn pick_file_dialog(file_type: str) -> str {
+    let ps_cmd: str = "powershell -Command \"Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.OpenFileDialog; $f.Filter = '" + file_type + " files (*." + file_type + ")|*." + file_type + "'; if($f.ShowDialog() -eq 'OK'){$f.FileName}\"";
+    let sh: str = "cmd.exe";
+    let flag: str = "/c";
+    let av: []u64 = [ptr(sh), ptr(flag), ptr(ps_cmd), 0];
+    return capture_output(sh, av, 4096);
+}
+
+fn pick_folder_dialog() -> str {
+    let ps_cmd: str = "powershell -Command \"Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.FolderBrowserDialog; if($f.ShowDialog() -eq 'OK'){$f.SelectedPath}\"";
+    let sh: str = "cmd.exe";
+    let flag: str = "/c";
+    let av: []u64 = [ptr(sh), ptr(flag), ptr(ps_cmd), 0];
+    return capture_output(sh, av, 4096);
+}

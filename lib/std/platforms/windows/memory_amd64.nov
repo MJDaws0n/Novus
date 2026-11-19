@@ -1,0 +1,2 @@
+module memory_amd64;
+import ../../core/memory;

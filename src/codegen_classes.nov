@@ -1,0 +1,104 @@
+module codegen_classes;
+
+import model;
+import runtime;
+
+fn codegen_Lowerer_lowerArgs(l: CodegenLowerer, operands: []CodegenOperand, args: []AstNode, types: []str) -> []CodegenOperand {
+    {
+        let items_119: []AstNode = args;
+        let count_121: i32 = len(items_119);
+        for (let index_120: i32 = 0; index_120 < count_121; index_120++) {
+            let i: i32 = index_120;
+            let arg: AstNode = items_119[index_120];
+            let typ: str = "";
+            if ((i < len(types))) {
+                typ = types[i];
+            }
+            operands = append_Codegenoperand(operands, codegen_Lowerer_lowerExprForType(l, arg, typ));
+        }
+    }
+    return operands;
+}
+
+fn codegen_Lowerer_lowerNewExpr(l: CodegenLowerer, e: AstNode) -> CodegenOperand {
+    let args: []CodegenOperand = codegen_Lowerer_lowerArgs(l, [], e.Args, slice_Str(MapStrArraystr_get(l.funcParamTypes, e.Constructor), 1, len(MapStrArraystr_get(l.funcParamTypes, e.Constructor))));
+    let instance: CodegenOperand = codegen_VReg(codegen_Lowerer_freshVReg(l));
+    let size: i64 = runtime_to_i64((runtime_max(2, e.Slots) * 8));
+    codegen_Lowerer_emit(l, make_CodegenIRInstr_2(74, instance, codegen_Imm(size)));
+    {
+        let slot: i32 = 0;
+        for (; (slot < (runtime_to_i32(size) / 8)); slot++) {
+            let address: CodegenOperand = codegen_Lowerer_slotAddress(l, instance, slot);
+            codegen_Lowerer_emit(l, make_CodegenIRInstr_3(3, codegen_Imm(0), address));
+        }
+    }
+    codegen_Lowerer_emit(l, make_CodegenIRInstr_4(31, codegen_LabelOp(e.Constructor), extend_Codegenoperand([instance], args)));
+    return instance;
+}
+
+fn codegen_Lowerer_slotAddress(l: CodegenLowerer, base: CodegenOperand, slot: i32) -> CodegenOperand {
+    if ((slot == 0)) {
+        return base;
+    }
+    let addr: CodegenOperand = codegen_VReg(codegen_Lowerer_freshVReg(l));
+    codegen_Lowerer_emit(l, make_CodegenIRInstr_5(6, addr, base, codegen_Imm(runtime_to_i64((slot * 8)))));
+    return addr;
+}
+
+fn codegen_Lowerer_fieldAddress(l: CodegenLowerer, member: AstNode) -> CodegenOperand {
+    if ((member.ResolvedField.Global != "")) {
+        return codegen_None();
+    }
+    return codegen_Lowerer_slotAddress(l, codegen_Lowerer_lowerExpr(l, member.Object), member.ResolvedField.Slot);
+}
+
+fn codegen_Lowerer_storeField(l: CodegenLowerer, field: AstResolvedField, address: CodegenOperand, value: CodegenOperand) -> void {
+    value = codegen_Lowerer_coerceValueToType(l, field.Type, value);
+    if ((field.Global != "")) {
+        codegen_Lowerer_emit(l, make_CodegenIRInstr_2(56, codegen_LabelOp(MapStrStr_get(l.globals, field.Global)), value));
+    } else {
+        codegen_Lowerer_emit(l, make_CodegenIRInstr_3(3, value, address));
+    }
+}
+
+fn codegen_Lowerer_loadField(l: CodegenLowerer, field: AstResolvedField, address: CodegenOperand) -> CodegenOperand {
+    let dst: CodegenOperand = codegen_VReg(codegen_Lowerer_freshVReg(l));
+    if ((field.Global != "")) {
+        codegen_Lowerer_emit(l, make_CodegenIRInstr_2(55, dst, codegen_LabelOp(MapStrStr_get(l.globals, field.Global))));
+    } else {
+        codegen_Lowerer_emit(l, make_CodegenIRInstr_2(47, dst, address));
+    }
+    codegen_Lowerer_markOperandType(l, dst, field.Type);
+    return dst;
+}
+
+fn codegen_Lowerer_markOperandType(l: CodegenLowerer, operand: CodegenOperand, typ: str) -> void {
+    {
+        let choice_122: str = typ;
+        if ((choice_122 == "str")) {
+            MapI32Bool_put(l.vregIsStr, operand.Reg, true);
+        } else if ((choice_122 == "f32") || (choice_122 == "f64")) {
+            MapI32Bool_put(l.vregIsFloat, operand.Reg, true);
+        } else if ((choice_122 == "u8") || (choice_122 == "u16") || (choice_122 == "u32") || (choice_122 == "u64")) {
+            MapI32Bool_put(l.vregIsUnsigned, operand.Reg, true);
+        }
+    }
+}
+
+fn codegen_Lowerer_indexElementType(l: CodegenLowerer, index: AstNode) -> str {
+    if ((index.ArrayType != "")) {
+        return index.ArrayType;
+    }
+    let objectType: str = codegen_Lowerer_exprType(l, index.Object);
+    if (runtime_strings_HasPrefix(objectType, "[]")) {
+        return runtime_strings_TrimPrefix(objectType, "[]");
+    }
+    return "";
+}
+
+fn codegen_Lowerer_arrayElement(l: CodegenLowerer, array: CodegenOperand, index: CodegenOperand, elemType: str) -> CodegenOperand {
+    let dst: CodegenOperand = codegen_VReg(codegen_Lowerer_freshVReg(l));
+    codegen_Lowerer_emit(l, make_CodegenIRInstr_5(49, dst, array, index));
+    codegen_Lowerer_markOperandType(l, dst, elemType);
+    return dst;
+}

@@ -1,0 +1,36 @@
+// ---------------------------------------------------------------------------
+// std - Novus standard library
+//
+// Layout:
+//   core/                cross-platform helpers (strings, conversions, ...)
+//   platforms/darwin     macOS implementation
+//   platforms/linux      Linux implementation
+//   platforms/windows    Windows implementation
+//   tests/               per-platform regression tests
+//
+// The correct platform implementation is selected automatically.
+// ---------------------------------------------------------------------------
+
+module std;
+
+import core/core;
+import core/strings;
+import core/builder;
+import core/numbers;
+import core/environment;
+
+#if(os == "darwin") {
+    import platforms/darwin/common;
+}
+#if(os == "linux") {
+    import platforms/linux/common;
+}
+#if(os == "windows") {
+    import platforms/windows/common;
+}
+
+import core/aliases;
+
+// Private runtime hook populated from the POSIX process entry environment.
+// execve_raw uses it so child processes inherit the caller's environment.
+let __novus_envp: u64 = 0;

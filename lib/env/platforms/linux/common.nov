@@ -1,0 +1,12 @@
+module env_linux;
+
+#if(arch == "amd64") {
+    import amd64;
+}
+#if(arch == "arm64") {
+    import arm64;
+}
+
+#if(arch == "x86") {
+    import x86;
+}

@@ -1,0 +1,15 @@
+module codegen_wintools;
+
+import model;
+import runtime;
+
+// novusToolsDir returns the path to the Novus tools directory (~/.novus/tools/).
+fn codegen_novusToolsDir() -> str {
+    let result_509: ResultStrStr = runtime_os_UserHomeDir();
+    let home: str = result_509.value0;
+    let err: str = result_509.value1;
+    if ((err != "")) {
+        home = ".";
+    }
+    return runtime_path_filepath_Join([home, ".novus", "tools"]);
+}

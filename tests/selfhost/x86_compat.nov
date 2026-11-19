@@ -1,0 +1,32 @@
+module x86_compat;
+
+class Item { pub let value: i32 = 0; }
+class Roots { pub static let items: []Item = []; }
+
+fn populate() -> void {
+    for (let i: i32 = 0; i < 80; i++) {
+        let item: Item = new Item();
+        item.value = i * 7;
+        array_append(Roots.items, item);
+    }
+}
+fn discard() -> void {
+    for (let i: i32 = 0; i < 3000; i++) {
+        let item: Item = new Item();
+        item.value = i;
+    }
+}
+fn main() -> i32 {
+    populate();
+    discard();
+    gc_collect();
+    for (let i: i32 = 0; i < len(Roots.items); i++) {
+        if (Roots.items[i].value != i * 7) { return 1; }
+    }
+    let high: u32 = 4294967295;
+    let one: u32 = 1;
+    if (!(high > one) || high / 10 != 429496729) { return 2; }
+    let empty: Item = null;
+    if (empty != null && empty.value > 0) { return 3; }
+    return 0;
+}
